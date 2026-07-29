@@ -20,6 +20,10 @@ export interface DocMeta {
 export interface DocProvenance {
   sourceTitle: string;
   sourcePath?: string;
+  /** Id of the document this one was derived from, when it was decoded out of a
+   * selection in an already-open document. Absent for pasted/file payloads,
+   * which have no parent record to go back to. */
+  sourceDocId?: string;
   format: string;
   wrapper?: string;
   inputBytes: number;
@@ -93,6 +97,7 @@ function sameProvenance(a: DocProvenance | undefined, b: DocProvenance | undefin
   if (!a || !b) return a === b;
   return a.sourceTitle === b.sourceTitle &&
     a.sourcePath === b.sourcePath &&
+    a.sourceDocId === b.sourceDocId &&
     a.format === b.format &&
     a.wrapper === b.wrapper &&
     a.inputBytes === b.inputBytes &&

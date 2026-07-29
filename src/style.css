@@ -481,7 +481,9 @@ input:focus {
 }
 #doc-title:hover { color: var(--accent); }
 #doc-stats { color: var(--text-faint); font-size: 11.5px; white-space: nowrap; }
-#reload-btn { padding: 3px 9px; font-size: 11.5px; }
+#reload-btn, #original-btn { padding: 3px 9px; font-size: 11.5px; }
+/* .tb-doc is a shrinkable flex row — the label must not break across two lines. */
+#original-btn { white-space: nowrap; }
 #compare-btn {
   white-space: nowrap;
   color: var(--accent);

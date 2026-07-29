@@ -145,6 +145,7 @@ const transportIncludeBaseline = $<HTMLInputElement>('#transport-include-baselin
 const reloadBtn = $<HTMLButtonElement>('#reload-btn');
 const repairBadge = $<HTMLButtonElement>('#repair-badge');
 const payloadBadge = $<HTMLButtonElement>('#payload-badge');
+const originalBtn = $<HTMLButtonElement>('#original-btn');
 const filterBtn = $<HTMLButtonElement>('#filter-btn');
 const crumb = $('#crumb');
 const diffView = $('#diff-view');
@@ -749,14 +750,19 @@ function payloadTransformLabel(kind: string): string {
   return kind;
 }
 
+// `sourceDocId` is only meaningful for a payload decoded out of a document that
+// is itself in the store — that parent is what "◂ original" reopens. Payloads
+// arriving by paste or file have no such record and pass nothing.
 function provenanceFromPayload(
   metadata: PayloadDecodeMetadata,
   sourceTitle: string,
   sourcePath?: string,
+  sourceDocId?: string,
 ): store.DocProvenance {
   return {
     sourceTitle,
     ...(sourcePath ? { sourcePath } : {}),
+    ...(sourceDocId ? { sourceDocId } : {}),
     format: metadata.format,
     ...(metadata.wrapper !== 'none' ? { wrapper: metadata.wrapper } : {}),
     inputBytes: metadata.inputByteLength,
@@ -839,6 +845,7 @@ function markCurrentContentEdited(): void {
   if (!currentProvenance) return;
   currentProvenance = null;
   payloadBadge.hidden = true;
+  originalBtn.hidden = true;
 }
 
 async function copyText(text: string): Promise<void> {
@@ -893,7 +900,16 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
     showToast(decoded.error.message);
     return;
   }
-  const provenance = provenanceFromPayload(decoded.metadata, parentTitle, path);
+  // Read the parent's id here rather than at entry: the guards above proved the
+  // document has not switched, and a freshly pasted parent may only have been
+  // assigned an id once its first save landed. Still null when that save is
+  // in flight — the derived doc then simply has no way back, as before.
+  const provenance = provenanceFromPayload(
+    decoded.metadata,
+    parentTitle,
+    path,
+    currentDocId ?? undefined,
+  );
   const shortPath = path.length > 90 ? `…${path.slice(-89)}` : path;
   const parentBase = parentTitle.replace(/\.json$/i, '');
   await openText(
@@ -1127,6 +1143,31 @@ async function renderRecents(): Promise<void> {
   }
 }
 
+// The single path that reopens a stored document — shared by a Recents click and
+// the "◂ original" button so both run the same guards and the same per-open
+// resets. 'missing' means the record is gone (pruned or deleted); callers word
+// that for themselves. 'superseded' means a newer open won the race, which is
+// never worth a message.
+async function openStoredDoc(id: string): Promise<'opened' | 'missing' | 'superseded'> {
+  const requestToken = beginOpenRequest();
+  const text = await store.getText(id);
+  if (requestToken !== openRequestToken) return 'superseded';
+  if (text === undefined) return 'missing';
+  const meta = (await store.listDocs()).find((m) => m.id === id);
+  if (requestToken !== openRequestToken) return 'superseded';
+  await openText(
+    text,
+    meta?.title ?? 'document',
+    id,
+    (meta?.handle as FsFileHandle | undefined) ?? null,
+    meta?.provenance ?? null,
+    false,
+    false,
+    requestToken,
+  );
+  return 'opened';
+}
+
 recentsEl.addEventListener('click', async (e) => {
   const t = e.target as HTMLElement;
   const item = t.closest('.recent') as HTMLElement | null;
@@ -1155,25 +1196,7 @@ recentsEl.addEventListener('click', async (e) => {
     await renderRecents();
     return;
   }
-  const requestToken = beginOpenRequest();
-  const text = await store.getText(id);
-  if (requestToken !== openRequestToken) return;
-  if (text === undefined) {
-    showToast('document body missing');
-    return;
-  }
-  const meta = (await store.listDocs()).find((m) => m.id === id);
-  if (requestToken !== openRequestToken) return;
-  await openText(
-    text,
-    meta?.title ?? 'document',
-    id,
-    (meta?.handle as FsFileHandle | undefined) ?? null,
-    meta?.provenance ?? null,
-    false,
-    false,
-    requestToken,
-  );
+  if (await openStoredDoc(id) === 'missing') showToast('document body missing');
 });
 
 // A visible, document-level entry point for semantic comparison. The picker is
@@ -1384,6 +1407,8 @@ async function openText(
   // code view's raw-source toggle so the user can see exactly what they pasted.
   repairBadge.hidden = !res.repaired;
   payloadBadge.hidden = !provenance;
+  // Only a payload decoded out of another stored document can be traced back.
+  originalBtn.hidden = !provenance?.sourceDocId;
   if (provenance) {
     payloadBadge.textContent = `decoded · ${provenance.format}`;
     payloadBadge.title = `${provenance.sourceTitle}${provenance.sourcePath ? ` · ${provenance.sourcePath}` : ''}\n${provenanceTrace(provenance)}`;
@@ -1855,6 +1880,17 @@ payloadBadge.addEventListener('click', () => {
     `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''}\n${provenanceTrace(currentProvenance)}`,
     'ok',
   );
+});
+
+// A document derived from a selection remembers which record it came from, so
+// the way back is one click rather than a hunt through Recents. The parent is
+// unpinned like any other recent and can have been pruned since.
+originalBtn.addEventListener('click', async () => {
+  const sourceDocId = currentProvenance?.sourceDocId;
+  if (!sourceDocId) return;
+  if (await openStoredDoc(sourceDocId) === 'missing') {
+    showToast('original document is no longer in recents');
+  }
 });
 
 $('#back-btn').addEventListener('click', goLanding);
