@@ -153,6 +153,9 @@ export class CodeEditor {
           highlightActiveLine(),
           highlightSelectionMatches(),
           jsonLang.json(),
+          // Long base64/embedded-payload strings must fold onto the next line
+          // instead of pushing the whole document behind a horizontal scrollbar.
+          EditorView.lineWrapping,
           hlComp.of(makeHl(opts.theme)),
           themeComp.of(makeTheme(opts.theme)),
           keymap.of([

@@ -266,6 +266,40 @@ function showToastAction(msg: string, actionLabel: string, onAction: () => void)
   toastTimer = window.setTimeout(() => (toast.hidden = true), 6000);
 }
 
+// The native picker is preferred because its handles power reload, but it is
+// absent on Firefox/Safari and throws in sandboxed or permission-blocked frames.
+// Only a real cancellation (AbortError) may do nothing; every other failure
+// falls back to the hidden <input type="file"> so the click is never a no-op.
+// Returns null when there is nothing further to open (cancelled or fell back).
+async function pickPayloadFiles(
+  multiple: boolean,
+  fallback: HTMLInputElement,
+): Promise<FsFileHandle[] | null> {
+  const picker = (window as unknown as { showOpenFilePicker?: (o: object) => Promise<FsFileHandle[]> })
+    .showOpenFilePicker;
+  if (!picker) {
+    fallback.click();
+    return null;
+  }
+  try {
+    return await picker.call(window, {
+      multiple,
+      types: [{
+        description: 'JSON or Zstd payload',
+        accept: {
+          'application/json': ['.json', '.jsonl', '.txt'],
+          'application/zstd': ['.zst', '.zstd'],
+        },
+      }],
+    });
+  } catch (error) {
+    if ((error as { name?: string } | null)?.name === 'AbortError') return null;
+    fallback.click();
+    showToast('native file picker unavailable — using the classic chooser');
+    return null;
+  }
+}
+
 // ---------- CSV download ----------
 
 function sanitizeFilePart(s: string, max: number): string {
@@ -1219,29 +1253,9 @@ async function compareBaselineFile(file: File): Promise<void> {
 }
 
 baselineFileBtn.addEventListener('click', async () => {
-  const picker = (window as unknown as { showOpenFilePicker?: (o: object) => Promise<FsFileHandle[]> })
-    .showOpenFilePicker;
-  if (!picker) {
-    baselineFileInput.click();
-    return;
-  }
-  try {
-    const handles = await picker.call(window, {
-      multiple: false,
-      types: [{
-        description: 'JSON or Zstd payload',
-        accept: {
-          'application/json': ['.json', '.jsonl', '.txt'],
-          'application/zstd': ['.zst', '.zstd'],
-        },
-      }],
-    });
-    const handle = handles[0];
-    if (handle) await compareBaselineFile(await handle.getFile());
-  } catch {
-    // Native picker cancellation is not an error and must leave the dialog and
-    // any active comparison untouched.
-  }
+  const handles = await pickPayloadFiles(false, baselineFileInput);
+  const handle = handles?.[0];
+  if (handle) await compareBaselineFile(await handle.getFile());
 });
 
 baselineFileInput.addEventListener('change', async () => {
@@ -1378,6 +1392,7 @@ async function openText(
   parseError.hidden = true;
   searchPanel.hidden = true;
   searchBox.value = '';
+  resetAskPanel();
   filterOn = false;
   filterScrollSnapshot = null;
   filterBtn.classList.remove('on');
@@ -1494,27 +1509,8 @@ async function importFiles(
 }
 
 $('#open-btn').addEventListener('click', async () => {
-  const picker = (window as unknown as { showOpenFilePicker?: (o: object) => Promise<FsFileHandle[]> })
-    .showOpenFilePicker;
-  if (!picker) {
-    fileInput.click();
-    return;
-  }
-  let handles: FsFileHandle[];
-  try {
-    handles = await picker.call(window, {
-      multiple: true,
-      types: [{
-        description: 'JSON or Zstd payload',
-        accept: {
-          'application/json': ['.json', '.jsonl', '.txt'],
-          'application/zstd': ['.zst', '.zstd'],
-        },
-      }],
-    });
-  } catch {
-    return; // picker cancelled
-  }
+  const handles = await pickPayloadFiles(true, fileInput);
+  if (!handles) return;
   const requestToken = beginOpenRequest();
   await importFiles(
     await Promise.all(handles.map(async (h) => ({ file: await h.getFile(), handle: h }))),
@@ -2075,7 +2071,9 @@ modeSwitch.addEventListener('click', (e) => {
 }
 
 $('#code-apply').addEventListener('click', () => void applyCode());
-$('#code-format').addEventListener('click', () => void formatCode());
+const codeFormatBtn = $<HTMLButtonElement>('#code-format');
+const CODE_FORMAT_TITLE = codeFormatBtn.title;
+codeFormatBtn.addEventListener('click', () => void formatCode());
 $('#code-copy').addEventListener('click', () => {
   if (codeEditor) void copyText(codeEditor.getDoc()).then(() => showToast('code copied'));
 });
@@ -2084,6 +2082,12 @@ function setSourceMode(on: boolean): void {
   codeSourceMode = on;
   codeRawBtn.classList.toggle('on', codeSourceMode);
   codeRawBtn.textContent = codeSourceMode ? 'canonical' : 'source';
+  // Formatting the raw source would rewrite the exact original bytes the mode
+  // exists to show, so it is only offered on the canonical view.
+  codeFormatBtn.disabled = codeSourceMode;
+  codeFormatBtn.title = codeSourceMode
+    ? 'format works on the canonical view — switch back first'
+    : CODE_FORMAT_TITLE;
 }
 codeRawBtn.addEventListener('click', () => {
   setSourceMode(!codeSourceMode);
@@ -2761,6 +2765,12 @@ const askSaved = $('#ask-saved');
 const askKeyRow = $('#ask-key-row');
 const askKeyInput = $<HTMLInputElement>('#ask-key-input');
 
+// The .api-key file is served by the dev-server middleware only (see
+// vite.config.ts), so a static deploy must not advertise it.
+const ASK_KEY_PLACEHOLDER =
+  'sk-or-… / sk-ant-…' + (import.meta.env.DEV ? ' — or put it in a .api-key file instead' : '');
+askKeyInput.placeholder = ASK_KEY_PLACEHOLDER;
+
 // Live-preview state. `previewToken` guards against out-of-order engine
 // responses (a newer keystroke's result must never be clobbered by an older,
 // slower one). `askOrigin` records whether the current query came from an
@@ -2768,6 +2778,23 @@ const askKeyInput = $<HTMLInputElement>('#ask-key-input');
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let previewToken = 0;
 let askOrigin: { kind: 'english'; question: string } | { kind: 'direct' } | null = null;
+
+// A newly opened document invalidates everything the panel is showing about the
+// previous one. The question text and the saved chips survive — they are the
+// user's own input and are meant to be re-run across documents.
+function resetAskPanel(): void {
+  if (previewTimer) clearTimeout(previewTimer);
+  previewToken++; // an in-flight preview must not repopulate the cleared result
+  askOrigin = null;
+  askQueryLine.hidden = true;
+  askQueryEdit.value = '';
+  askResult.replaceChildren();
+  askResult.classList.remove('preview');
+  askResult.hidden = true;
+  askDisclosure.hidden = true;
+  askDisclosure.open = false;
+  setAskStatus(null);
+}
 
 $('#ask-btn').addEventListener('click', () => {
   askPanel.hidden = !askPanel.hidden;
@@ -2784,7 +2811,7 @@ $('#ask-key').addEventListener('click', async () => {
     askKeyInput.value = '';
     askKeyInput.placeholder = key
       ? `key loaded (…${key.slice(-4)}) — paste here only to override`
-      : 'sk-or-… / sk-ant-… — or put it in a .api-key file instead';
+      : ASK_KEY_PLACEHOLDER;
     askKeyInput.focus();
   }
 });
@@ -3045,7 +3072,11 @@ async function runAsk(presetQuery?: string): Promise<void> {
     if (!key) {
       askKeyRow.hidden = false;
       askKeyInput.focus();
-      setAskStatus('no API key found — drop it in a .api-key file next to package.json (or point WB_KEY_FILE at your .env), or paste one here');
+      setAskStatus(
+        import.meta.env.DEV
+          ? 'no API key found — drop it in a .api-key file next to package.json (or point WB_KEY_FILE at your .env), or paste one here'
+          : 'no API key configured — paste an OpenRouter or Anthropic key here (stored only in this browser)',
+      );
       return;
     }
     setAskStatus('translating… (only the question and field names are sent)');
@@ -3083,7 +3114,10 @@ async function runAsk(presetQuery?: string): Promise<void> {
 
 $('#ask-run').addEventListener('click', () => void runAsk());
 askBox.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') void runAsk();
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    void runAsk();
+  }
 });
 
 // Editable query input: debounced engine-only preview on edit, Enter/Run commits.
@@ -3241,7 +3275,9 @@ $('#sample-btn').addEventListener('click', () => {
     settings: { maxStops: 25, allowSplit: false, vehicleType: 'BIKE' },
     embeddedPayload: '{"note":"strings that look like JSON get a {…} un-stringify badge"}',
   };
-  void openText(JSON.stringify(sample, null, 2), 'sample.json', null);
+  openText(JSON.stringify(sample, null, 2), 'sample.json', null).catch((error) => {
+    showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
 });
 
 // ---------- init ----------

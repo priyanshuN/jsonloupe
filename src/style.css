@@ -1336,7 +1336,10 @@ input:focus {
   background: var(--bg-elevated);
 }
 .code-bar .spacer { flex: 1; }
-#code-status { font: 12px var(--mono); color: var(--text-dim); }
+/* At narrow split widths the status text is what gives way — the primary
+   action always keeps its label on one line. */
+#code-apply { white-space: nowrap; flex-shrink: 0; }
+#code-status { font: 12px var(--mono); color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
 #code-status.dirty { color: var(--c-number); }
 #code-status.error { color: var(--danger); }
 #code-status.saved { color: var(--ok); }
