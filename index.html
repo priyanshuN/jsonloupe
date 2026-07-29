@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <title>jsonloupe — a loupe for large JSON</title>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="side-head">
+        <span class="brand"><span class="brand-mark">{ }</span>jsonloupe</span>
+        <button id="new-btn" title="New document">+ new</button>
+      </div>
+      <div class="side-label">Recents</div>
+      <div id="recents"></div>
+      <div class="side-foot">
+        <button id="theme-btn" class="theme-toggle" title="Toggle light / dark theme">
+          <span class="ic" id="theme-ic">☾</span><span id="theme-label">Dark</span>
+        </button>
+      </div>
+    </aside>
+    <main id="content">
+      <section id="landing">
+        <div class="landing-card">
+          <div class="landing-head">
+            <h1>Paste JSON</h1>
+            <span class="sub">it parses automatically · or drop JSON / Zstd anywhere</span>
+          </div>
+          <textarea id="paste-box" spellcheck="false"
+            placeholder="Paste JSON, Base64/URL-safe Zstd, PostgreSQL \x… bytea, or a quoted SQL cell — payloads decode automatically."></textarea>
+          <div class="landing-actions">
+            <button id="parse-btn" class="primary">Parse</button>
+            <button id="open-btn">Open file…</button>
+            <button id="sample-btn" title="Load a small sample document">Sample</button>
+            <span class="spacer"></span>
+            <button id="codec-btn" title="Decode raw Zstd, bytea, SQL cells, and Base64 payloads; or encode JSON">payload tools</button>
+            <input type="file" id="file-input"
+              accept=".json,.txt,.jsonl,.zst,.zstd,application/json,application/zstd" multiple hidden>
+          </div>
+          <p class="landing-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to parse · documents stay on your machine; Ask is opt-in.</p>
+        </div>
+        <div id="parse-error" class="error" hidden></div>
+      </section>
+      <section id="codec" hidden>
+        <div class="codec-head">
+          <h1>Payload tools</h1>
+          <span class="codec-sub">JSON, raw Zstd, PostgreSQL bytea, SQL cells, and standard or URL-safe Base64</span>
+          <button id="codec-close">back</button>
+        </div>
+        <div class="codec-grid">
+          <div class="codec-card">
+            <h2>encode · JSON → Zstd → Base64</h2>
+            <textarea id="codec-in-c" spellcheck="false" placeholder="raw JSON / text"></textarea>
+            <div class="codec-actions">
+              <button id="codec-run-c" class="primary">compress</button>
+              <button id="codec-use-current" title="Compress the currently open document (never rendered here — stays fast for huge docs)">use open doc</button>
+              <button id="codec-copy-c">copy result</button>
+            </div>
+            <textarea id="codec-out-c" readonly spellcheck="false" placeholder="base64(zstd(…))"></textarea>
+          </div>
+          <div class="codec-card">
+            <h2>decode · payload → JSON</h2>
+            <textarea id="codec-in-d" spellcheck="false"
+              placeholder="Base64, URL-safe Base64, PostgreSQL \x… bytea, or a quoted SQL/clipboard cell"></textarea>
+            <div class="codec-actions">
+              <button id="codec-run-d" class="primary">decode</button>
+              <button id="codec-file-d">choose file…</button>
+              <button id="codec-copy-d">copy result</button>
+              <button id="codec-open-d" title="Parse the decompressed text as a document">open as document</button>
+              <input type="file" id="codec-file-input"
+                accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
+            </div>
+            <div id="codec-trace" hidden></div>
+            <textarea id="codec-out-d" readonly spellcheck="false"></textarea>
+          </div>
+        </div>
+      </section>
+      <section id="viewer" hidden>
+        <div id="toolbar">
+          <button id="back-btn" title="Back to paste">◂</button>
+          <div class="tb-doc">
+            <span id="doc-title" title="Click to rename"></span>
+            <span id="doc-stats"></span>
+            <button id="repair-badge" title="Input was malformed and auto-repaired — click to see the original bytes you pasted" hidden>⚠ input repaired</button>
+            <button id="payload-badge" title="This document was decoded locally from a transport payload" hidden>decoded payload</button>
+            <button id="reload-btn" title="Re-read this file from disk" hidden>⟳ reload</button>
+          </div>
+          <button id="compare-btn" title="Choose a baseline and open semantic side-by-side comparison">⇆ Compare</button>
+          <button id="transport-btn" title="Inspect exact JSON, Zstd, Base64, envelope, and transport-budget sizes">transport</button>
+          <div class="mode-switch" id="mode-switch">
+            <button data-mode="tree" class="on">Tree</button>
+            <button data-mode="code">Code</button>
+            <button data-mode="split" title="Tree and code side by side">Split</button>
+          </div>
+          <input id="search-box" placeholder="search keys &amp; values — /re/ ok ( / )" spellcheck="false">
+          <button id="filter-btn" title="Prune the tree to branches matching the search text">filter</button>
+          <button id="ask-btn" title="Ask a question about this document in English">ask</button>
+          <div class="tb-group">
+            <button id="collapse-btn" title="Collapse all">collapse</button>
+            <button id="fmt-btn" title="Copy pretty-printed JSON">copy</button>
+            <button id="min-btn" title="Copy minified JSON">min</button>
+            <button id="dl-btn" title="Download original">↓</button>
+            <button id="zstd-btn" title="Compress this document to base64 zstd">zstd</button>
+          </div>
+        </div>
+        <div id="ask-panel" hidden>
+          <div class="ask-row">
+            <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
+            <button id="ask-run" class="primary">ask</button>
+            <button id="ask-key" title="Set the Anthropic API key (stored in this browser only)">key</button>
+          </div>
+          <div class="ask-row" id="ask-key-row" hidden>
+            <input id="ask-key-input" type="password" placeholder="sk-ant-… — stored in localStorage, sent only to api.anthropic.com" spellcheck="false">
+            <button id="ask-key-save">save key</button>
+          </div>
+          <div id="ask-query-line" hidden>
+            <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
+            <button id="ask-query-run" title="Run this query as a saved query">run</button>
+            <button id="ask-query-copy" title="Copy this query">copy</button>
+          </div>
+          <details id="ask-disclosure" hidden>
+            <summary>sent to model</summary>
+            <div id="ask-disclosure-body"></div>
+          </details>
+          <div id="ask-status" hidden></div>
+          <div id="ask-result" hidden></div>
+          <div id="ask-saved"></div>
+        </div>
+        <div id="search-panel" hidden></div>
+        <div id="pane-area">
+        <div id="tree-viewport">
+          <div id="tree-spacer"></div>
+          <div id="tree-layer"></div>
+        </div>
+        <div id="split-divider" hidden></div>
+        <div id="code-view" hidden>
+          <div class="code-bar">
+            <button id="code-apply" class="primary" title="Re-parse the edited JSON (Ctrl/Cmd+S)">Apply changes</button>
+            <button id="code-format" title="Re-format / pretty-print">format</button>
+            <button id="code-copy" title="Copy the editor contents">copy</button>
+            <button id="code-raw" title="Show the exact original bytes (key order, whitespace, precision) vs the canonical form">source</button>
+            <span class="spacer"></span>
+            <span id="code-status"></span>
+          </div>
+          <div id="code-host"></div>
+        </div>
+        <div id="diff-view" hidden>
+          <div class="diff-head">
+            <span id="diff-title"></span>
+            <input id="diff-key" placeholder="match arrays by: id, seq  (identity keys, comma-sep)" spellcheck="false">
+            <input id="diff-ignore" placeholder="ignore: updatedAt, $.meta  (keys or $ prefixes)" spellcheck="false">
+            <button id="diff-rerun">re-run</button>
+            <button id="diff-semantic" class="primary" title="Open an aligned, schema-free side-by-side comparison">side by side</button>
+            <button id="diff-close">back to tree</button>
+          </div>
+          <div id="diff-body"></div>
+        </div>
+        <section id="semantic-view" hidden>
+          <div class="sem-head">
+            <div class="sem-heading">
+              <strong>Semantic compare</strong>
+              <span id="sem-title"></span>
+            </div>
+            <span class="spacer"></span>
+            <button id="sem-summary">structural summary</button>
+            <button id="sem-close">back to tree</button>
+          </div>
+          <div class="sem-toolbar">
+            <div id="sem-filters" class="sem-filters" role="toolbar" aria-label="Comparison filters">
+              <button data-filter="all" class="on">All <span id="sem-count-all">0</span></button>
+              <button data-filter="changed">Changed <span id="sem-count-changed">0</span></button>
+              <button data-filter="added-removed">Added/removed <span id="sem-count-added">0</span></button>
+              <button data-filter="moved">Reordered <span id="sem-count-moved">0</span></button>
+              <button data-filter="ambiguous">Needs review <span id="sem-count-ambiguous">0</span></button>
+            </div>
+            <span class="sem-order-note">aligned order · originals unchanged</span>
+            <button id="sem-collapse">collapse</button>
+            <details id="sem-plan">
+              <summary><span id="sem-plan-summary">Alignment plan</span></summary>
+              <div id="sem-plan-body"></div>
+            </details>
+          </div>
+          <div id="sem-warning" hidden></div>
+          <div id="sem-grid-wrap">
+            <div id="sem-grid-inner">
+              <div class="sem-columns" aria-hidden="true">
+                <div id="sem-left-title">Baseline</div>
+                <div>Difference</div>
+                <div id="sem-right-title">Current</div>
+              </div>
+              <div id="sem-viewport" role="tree" aria-label="Aligned semantic comparison" tabindex="0">
+                <div id="sem-spacer"></div>
+                <div id="sem-layer"></div>
+              </div>
+            </div>
+          </div>
+          <div id="sem-crumb"></div>
+        </section>
+        <div id="table-view" hidden>
+          <div class="table-bar">
+            <span id="table-title"></span>
+            <span id="table-count"></span>
+            <button id="table-csv" title="Download the whole table as CSV (RFC 4180, current sort order)">⤓ CSV</button>
+            <button id="table-close">back to tree</button>
+          </div>
+          <div id="table-outer">
+            <div id="table-header"></div>
+            <div id="table-viewport">
+              <div id="table-spacer"></div>
+              <div id="table-layer"></div>
+            </div>
+          </div>
+        </div>
+        </div>
+        <div id="crumb"></div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" hidden></div>
+  <div id="drop-overlay" hidden><span>Drop JSON / Zstd payload</span></div>
+  <dialog id="baseline-picker" aria-labelledby="baseline-picker-title">
+    <form method="dialog" class="baseline-dialog">
+      <div class="baseline-head">
+        <div>
+          <h2 id="baseline-picker-title">Choose comparison baseline</h2>
+          <p>The open document stays current. The selected document appears on the left.</p>
+        </div>
+        <button class="baseline-x" value="cancel" title="Close" aria-label="Close">×</button>
+      </div>
+      <div id="baseline-recents" class="baseline-list"></div>
+      <div class="baseline-actions">
+        <button id="baseline-file-btn" type="button">Choose a file…</button>
+        <span class="spacer"></span>
+        <button value="cancel">cancel</button>
+      </div>
+    </form>
+    <input type="file" id="baseline-file-input"
+      accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
+  </dialog>
+  <dialog id="transport-dialog" aria-labelledby="transport-dialog-title">
+    <form method="dialog" class="transport-dialog">
+      <div class="transport-head">
+        <div>
+          <h2 id="transport-dialog-title">Transport size inspector</h2>
+          <p>Exact UTF-8 → Zstd → Base64 → envelope sizes. Recompression runs in the worker; captured Zstd bytes are shown separately when available.</p>
+        </div>
+        <button class="transport-x" value="cancel" title="Close" aria-label="Close">×</button>
+      </div>
+      <div class="transport-settings">
+        <label>
+          <span>Recompression level</span>
+          <input id="transport-level" type="number" min="1" max="22" value="3">
+        </label>
+        <label>
+          <span>Envelope</span>
+          <select id="transport-envelope">
+            <option value="none">Base64 only</option>
+            <option value="json-field">JSON string field</option>
+            <option value="template">Custom template</option>
+          </select>
+        </label>
+        <label id="transport-field-wrap" hidden>
+          <span>Payload field</span>
+          <input id="transport-field" value="payload" spellcheck="false">
+        </label>
+        <label id="transport-template-wrap" class="transport-template" hidden>
+          <span>Template · include <code>{{payload}}</code> exactly once</span>
+          <input id="transport-template" value="{&quot;payload&quot;:&quot;{{payload}}&quot;}" spellcheck="false">
+        </label>
+      </div>
+      <div class="transport-budget-settings">
+        <div class="transport-budget-heading">
+          <strong>Editable budget examples</strong>
+          <span>choose the exact stage each limit measures</span>
+        </div>
+        <label>
+          <span>Kafka</span>
+          <input id="transport-kafka-limit" type="number" min="1" step="1" value="800">
+          <span>KiB at</span>
+          <select id="transport-kafka-stage">
+            <option value="envelope">envelope</option>
+            <option value="base64">Base64</option>
+            <option value="zstd">Zstd</option>
+            <option value="json">JSON</option>
+          </select>
+        </label>
+        <label>
+          <span>Lambda</span>
+          <input id="transport-lambda-limit" type="number" min="1" step="1" value="5120">
+          <span>KiB at</span>
+          <select id="transport-lambda-stage">
+            <option value="envelope">envelope</option>
+            <option value="base64">Base64</option>
+            <option value="zstd">Zstd</option>
+            <option value="json">JSON</option>
+          </select>
+        </label>
+        <label id="transport-baseline-wrap" class="transport-baseline-toggle" hidden>
+          <input id="transport-include-baseline" type="checkbox">
+          <span>also inspect selected comparison baseline</span>
+        </label>
+      </div>
+      <div id="transport-error" class="transport-error" hidden></div>
+      <div id="transport-results" class="transport-results" aria-live="polite"></div>
+      <div class="transport-actions">
+        <span>Thresholds are local presets, not universal platform limits.</span>
+        <span class="spacer"></span>
+        <button id="transport-run" type="button" class="primary">recalculate</button>
+        <button value="cancel">close</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "name": "jsonloupe",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A loupe for large JSON — lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
+  "license": "MIT",
+  "author": "Priyanshu Nandan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/priyanshuN/jsonloupe.git"
+  },
+  "keywords": [
+    "json",
+    "viewer",
+    "diff",
+    "jsonpath",
+    "lossless",
+    "int64",
+    "zstd",
+    "local-first"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5199",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5199",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@bokuweb/zstd-wasm": "^0.0.27",
+    "@codemirror/commands": "^6.6.0",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/language": "^6.10.2",
+    "@codemirror/search": "^6.5.6",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.28.0",
+    "@lezer/highlight": "^1.2.0",
+    "codemirror": "^6.0.1",
+    "jsonrepair": "^3.15.0",
+    "lossless-json": "^4.3.0"
+  }
+}
