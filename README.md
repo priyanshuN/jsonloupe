@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/favicon.svg" width="110" alt="jsonloupe — a loupe over JSON braces">
+</p>
+
 # jsonloupe
 
 [![CI](https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml/badge.svg)](https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml)
