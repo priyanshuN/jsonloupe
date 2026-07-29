@@ -217,15 +217,10 @@ input:focus {
   letter-spacing: 0.1px;
 }
 .brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 27px;
   height: 27px;
   border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), var(--c-boolean));
-  color: #fff;
-  font: 700 12px var(--mono);
   box-shadow: var(--shadow-sm);
 }
 #new-btn { padding: 5px 11px; }
