@@ -223,6 +223,8 @@ input:focus {
   border-radius: 9px;
   box-shadow: var(--shadow-sm);
 }
+.brand-loupe { color: #88c0d0; }
+:root[data-theme='light'] .brand-loupe { color: #3f7d90; }
 #new-btn { padding: 5px 11px; }
 
 .side-label {
