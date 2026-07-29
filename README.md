@@ -1,5 +1,11 @@
 # jsonloupe
 
+[![CI](https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml/badge.svg)](https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](tsconfig.json)
+[![Local-first](https://img.shields.io/badge/local--first-no%20backend%2C%20no%20telemetry-2ea44f.svg)](SECURITY.md)
+[![Lossless](https://img.shields.io/badge/numbers-int64%20exact-8a2be2.svg)](README.md#why-another-json-viewer)
+
 **A loupe for large JSON — lossless, local, fast.**
 
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
