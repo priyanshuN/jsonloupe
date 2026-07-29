@@ -1,16 +1,17 @@
 <p align="center">
-  <img src="public/favicon.svg" width="110" alt="jsonloupe — a loupe over JSON braces">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.svg">
+    <img src=".github/assets/banner-light.svg" width="620" alt="jsonloupe — a loupe for large JSON: lossless, local, fast">
+  </picture>
 </p>
 
-# jsonloupe
-
-[![CI](https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml/badge.svg)](https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](tsconfig.json)
-[![Local-first](https://img.shields.io/badge/local--first-no%20backend%2C%20no%20telemetry-2ea44f.svg)](SECURITY.md)
-[![Lossless](https://img.shields.io/badge/numbers-int64%20exact-8a2be2.svg)](README.md#why-another-json-viewer)
-
-**A loupe for large JSON — lossless, local, fast.**
+<p align="center">
+  <a href="https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml"><img src="https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="tsconfig.json"><img src="https://img.shields.io/badge/TypeScript-strict-3178c6.svg" alt="TypeScript strict"></a>
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/local--first-no%20backend%2C%20no%20telemetry-2ea44f.svg" alt="Local-first"></a>
+  <a href="#why-another-json-viewer"><img src="https://img.shields.io/badge/numbers-int64%20exact-8a2be2.svg" alt="Lossless int64"></a>
+</p>
 
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
 querying JSON documents that are too big or too precise for ordinary viewers.
