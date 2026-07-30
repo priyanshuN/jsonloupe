@@ -21,6 +21,7 @@
   --text-dim: #9aa5b6;
   --text-faint: #6b7484;
 
+  --brand: #88c0d0;
   --accent: #86c8dc;
   --accent-hover: #9ad6e8;
   --accent-contrast: #10181e;
@@ -69,6 +70,7 @@
   --text-dim: #5c6675;
   --text-faint: #949dac;
 
+  --brand: #3f7d90;
   --accent: #2f7bd6;
   --accent-hover: #2569bd;
   --accent-contrast: #ffffff;
@@ -223,8 +225,7 @@ input:focus {
   border-radius: 9px;
   box-shadow: var(--shadow-sm);
 }
-.brand-loupe { color: #88c0d0; }
-:root[data-theme='light'] .brand-loupe { color: #3f7d90; }
+.brand-loupe { color: var(--brand); }
 #new-btn { padding: 5px 11px; }
 
 .side-label {
@@ -243,12 +244,18 @@ input:focus {
   border-radius: var(--r);
   cursor: pointer;
   border: 1px solid transparent;
+  /* The open document shows a 3px brand rail; every row reserves that width so
+     selection never nudges the list sideways. */
+  border-left: 3px solid transparent;
   margin-bottom: 2px;
 }
 .recent:hover { background: var(--bg-hover); }
+/* Opening no longer moves a row to the top, so the selected state carries the
+   whole signal: brand rail + tint, in both themes via --brand. */
 .recent.active {
-  background: var(--bg-sel);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
   border-color: var(--accent-line);
+  border-left-color: var(--brand);
 }
 .r-title {
   font-family: var(--mono);

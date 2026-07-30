@@ -12,6 +12,11 @@ export interface DocMeta {
   // FileSystemFileHandle when the doc came from disk (structured-cloneable,
   // survives restarts) — enables reload-from-disk.
   handle?: unknown;
+  /** When this document was last opened, as opposed to last changed. Kept apart
+   * from `updatedAt` so reopening never reorders the sidebar; only pruning reads
+   * it. Schema-less like `provenance`, so older records stay valid (absent =
+   * never opened since this field existed). */
+  openedAt?: number;
   /** Local-only provenance for a decoded or derived document. Extra IndexedDB
    * fields are schema-less, so older records remain valid without a DB bump. */
   provenance?: DocProvenance;
@@ -215,7 +220,9 @@ export async function saveDoc(
   ));
   const dup = candidates.find((_, index) => bodies[index]?.text === text);
   if (dup) {
-    dup.updatedAt = now;
+    // Re-pasting identical content or re-opening the same file is a visit, not
+    // an edit: the body is unchanged, so `updatedAt` must not move.
+    dup.openedAt = now;
     if (hasHandle(handle)) {
       dup.handle = handle;
       dup.title = title;
@@ -235,6 +242,7 @@ export async function saveDoc(
     size: text.length,
     createdAt: now,
     updatedAt: now,
+    openedAt: now,
     pinned: false,
     hash,
     ...(hasHandle(handle) ? { handle } : {}),
@@ -257,9 +265,12 @@ export async function updateDoc(
   const metaStore = t.objectStore('meta');
   const meta = await req(metaStore.get(id) as IDBRequest<DocMeta | undefined>);
   if (meta) {
+    const now = Date.now();
     meta.size = text.length;
     meta.hash = sampleHash(text);
-    meta.updatedAt = Date.now();
+    // A real content change: this is the one write that reorders the sidebar.
+    meta.updatedAt = now;
+    meta.openedAt = now; // an edit is also a visit, which keeps prune honest
     if (provenance !== undefined) {
       if (provenance === null) delete meta.provenance;
       else meta.provenance = provenance;
@@ -271,9 +282,12 @@ export async function updateDoc(
   return meta;
 }
 
+// Opening a document from Recents (or via "◂ original") records the visit only.
+// `updatedAt` is deliberately left alone: the sidebar sorts on it, and a list
+// that reshuffles under the pointer destroys the user's spatial memory of it.
 export async function touchDoc(id: string): Promise<void> {
   await mutateMeta(id, (meta) => {
-    meta.updatedAt = Date.now();
+    meta.openedAt = Date.now();
   });
 }
 
@@ -296,8 +310,17 @@ export async function removeDoc(id: string): Promise<void> {
   await done(t);
 }
 
+// Recency of USE, which is what pruning must respect: a document opened every
+// day but never edited has to outrank one edited long ago and forgotten. Records
+// predating `openedAt` fall back to their edit time through the max.
+export function useRecency(meta: Pick<DocMeta, 'updatedAt' | 'openedAt'>): number {
+  return Math.max(meta.updatedAt, meta.openedAt ?? 0);
+}
+
 async function prune(): Promise<void> {
-  const unpinned = (await listDocs()).filter((m) => !m.pinned);
+  const unpinned = (await listDocs())
+    .filter((m) => !m.pinned)
+    .sort((a, b) => useRecency(b) - useRecency(a));
   for (const m of unpinned.slice(KEEP_UNPINNED)) await removeDoc(m.id);
 }
 
