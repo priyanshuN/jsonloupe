@@ -336,13 +336,18 @@ input:focus {
 #content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---------- public landing page ----------
-   The landing is the marketing surface, not app chrome: it is full-bleed and
-   carries its own header, so the sidebar steps aside until a document is open.
-   On the first successful parse main.ts hides #landing and #viewer takes over —
-   nothing here restyles the workbench. */
+   #landing has two modes, driven by one class:
+     marketing (no class) — the full public page a cold visitor sees: full-bleed,
+       its own header, sidebar stepped aside.
+     .landing--app        — the in-app paste view a returning user gets from
+       "+ new" / "◂ back": the same paste panel centred in the content column,
+       sidebar still there, every marketing band hidden.
+   The paste panel is identical in both — same markup, same IDs, same wiring.
+   On a successful parse main.ts hides #landing and #viewer takes over; nothing
+   here restyles the workbench. */
 
-#app:has(#landing:not([hidden])) { grid-template-columns: 1fr; }
-#app:has(#landing:not([hidden])) #sidebar { display: none; }
+#app:has(#landing:not([hidden]):not(.landing--app)) { grid-template-columns: 1fr; }
+#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar { display: none; }
 
 #landing {
   flex: 1;
@@ -350,6 +355,21 @@ input:focus {
   overflow-y: auto;
   font-family: var(--display);
 }
+
+/* app mode: strip the marketing surface down to the paste card */
+#landing.landing--app > .lp-header,
+#landing.landing--app > .lp-band,
+#landing.landing--app > .lp-split,
+#landing.landing--app > .lp-footer,
+#landing.landing--app .lp-hero-copy { display: none; }
+#landing.landing--app .lp-hero {
+  grid-template-columns: min(680px, 100%);
+  justify-content: center;
+  padding: 40px 24px;
+  background: none; /* the radial wash is hero furniture, not app chrome */
+  border-bottom: none;
+}
+#landing.landing--app .lp-paste { box-shadow: var(--shadow); }
 
 .lp-spacer { flex: 1; }
 

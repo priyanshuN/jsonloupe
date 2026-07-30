@@ -1425,6 +1425,9 @@ async function openText(
   tree.resetSelection();
   crumb.textContent = '';
   showPane('tree');
+  // A document is open, so this visitor is now a user: any later return to the
+  // landing ("+ new", "◂ back") gets the compact paste view, not the pitch.
+  landing.classList.add('landing--app');
   landing.hidden = true;
   codecPane.hidden = true;
   viewer.hidden = false;
@@ -1681,6 +1684,9 @@ window.addEventListener('drop', async (e) => {
 
 // ---------- toolbar ----------
 
+// Returns to whichever landing mode is current: the compact paste view for
+// someone already inside the app ("+ new" / "◂ back"), or the marketing page for
+// a cold visitor backing out of payload tools, who has not opened anything yet.
 function goLanding(): void {
   beginOpenRequest();
   viewer.hidden = true;
@@ -3321,8 +3327,29 @@ $('#sample-btn').addEventListener('click', () => {
 
 // ---------- init ----------
 
-void renderRecents();
-pasteBox.focus();
+// The marketing landing is for people who have never used this. Anyone with a
+// stored document boots straight back into the workbench, on whatever they were
+// last using — `#about` is the escape hatch that forces the pitch back up.
+async function boot(): Promise<void> {
+  await renderRecents(); // sidebar is populated the same either way
+  if (location.hash === '#about') {
+    pasteBox.focus();
+    return;
+  }
+  const docs = await store.listDocs();
+  if (!docs.length) {
+    pasteBox.focus(); // cold visitor: marketing landing, cursor in the box
+    return;
+  }
+  // Recency of use, not of edit — the same ordering prune trusts.
+  const lastUsed = docs.reduce((a, b) => (store.useRecency(b) > store.useRecency(a) ? b : a));
+  // Set before the open so that if the record's body is gone we land on the
+  // compact paste view rather than the pitch (or a blank screen).
+  landing.classList.add('landing--app');
+  if (await openStoredDoc(lastUsed.id) !== 'opened') pasteBox.focus();
+}
+
+void boot();
 
 // Dev-only debug hook.
 if (import.meta.env.DEV) {
