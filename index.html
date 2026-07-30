@@ -9,6 +9,23 @@
   <meta property="og:title" content="jsonloupe — a loupe for large JSON" />
   <meta property="og:description" content="Local-first JSON viewer, differ and query tool. Lossless int64, five-million-element arrays, Zstd payload decoding — all in your browser tab." />
   <meta property="og:type" content="website" />
+  <!-- Pre-paint gate: theme and the returning-user flag must apply before first
+       paint, or the page flashes the wrong theme / the marketing landing before
+       main.ts loads and boots. The `returning` class only bridges the gap until
+       boot() decides — boot removes it on every path. -->
+  <style>html.returning #landing { display: none; }</style>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('wb-theme');
+        if (t !== 'light' && t !== 'dark')
+          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+        if (localStorage.getItem('wb-returning') === '1' && location.hash !== '#about')
+          document.documentElement.classList.add('returning');
+      } catch (e) { /* private mode: no flash protection, nothing broken */ }
+    })();
+  </script>
 </head>
 <body>
   <div id="app">

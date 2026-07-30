@@ -1426,8 +1426,10 @@ async function openText(
   crumb.textContent = '';
   showPane('tree');
   // A document is open, so this visitor is now a user: any later return to the
-  // landing ("+ new", "◂ back") gets the compact paste view, not the pitch.
+  // landing ("+ new", "◂ back") gets the compact paste view, not the pitch, and
+  // the next visit boots straight into the app (pre-paint gate in index.html).
   landing.classList.add('landing--app');
+  try { localStorage.setItem('wb-returning', '1'); } catch { /* private mode */ }
   landing.hidden = true;
   codecPane.hidden = true;
   viewer.hidden = false;
@@ -3331,22 +3333,33 @@ $('#sample-btn').addEventListener('click', () => {
 // stored document boots straight back into the workbench, on whatever they were
 // last using — `#about` is the escape hatch that forces the pitch back up.
 async function boot(): Promise<void> {
+  // The head's pre-paint gate hid the landing when localStorage said this is a
+  // returning user; it must come off on every path once the real state is known.
+  const ungate = (): void => document.documentElement.classList.remove('returning');
   await renderRecents(); // sidebar is populated the same either way
   if (location.hash === '#about') {
+    ungate();
     pasteBox.focus();
     return;
   }
   const docs = await store.listDocs();
   if (!docs.length) {
-    pasteBox.focus(); // cold visitor: marketing landing, cursor in the box
+    // Cold visitor: marketing landing. Also heal a stale flag (all docs pruned
+    // or deleted since the last visit) so the gate doesn't hide it next load.
+    try { localStorage.removeItem('wb-returning'); } catch { /* private mode */ }
+    ungate();
+    pasteBox.focus();
     return;
   }
+  // Docs exist but the flag may predate this feature — prime it for next load.
+  try { localStorage.setItem('wb-returning', '1'); } catch { /* private mode */ }
   // Recency of use, not of edit — the same ordering prune trusts.
   const lastUsed = docs.reduce((a, b) => (store.useRecency(b) > store.useRecency(a) ? b : a));
   // Set before the open so that if the record's body is gone we land on the
   // compact paste view rather than the pitch (or a blank screen).
   landing.classList.add('landing--app');
   if (await openStoredDoc(lastUsed.id) !== 'opened') pasteBox.focus();
+  ungate();
 }
 
 void boot();
