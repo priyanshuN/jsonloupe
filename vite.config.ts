@@ -62,4 +62,19 @@ function keyServer(): Plugin {
   };
 }
 
-export default defineConfig({ plugins: [keyServer()] });
+export default defineConfig({
+  // A project GitHub Pages site is served from /<repo>/, so the built asset URLs
+  // (JS, the worker, the zstd wasm, the favicon) must carry that prefix. Local
+  // dev and any root-domain host keep '/'.
+  base: process.env.GITHUB_ACTIONS ? '/jsonloupe/' : '/',
+  plugins: [keyServer()],
+  build: {
+    // Two static entries: the app/landing and the standalone spec page.
+    rollupOptions: {
+      input: {
+        main: join(root, 'index.html'),
+        spec: join(root, 'spec.html'),
+      },
+    },
+  },
+});

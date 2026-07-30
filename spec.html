@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <title>jsonloupe — what it actually does</title>
+  <meta name="description" content="Six guarantees jsonloupe makes about large, precise JSON: lossless numbers, a virtualized tree, payload decoding, semantic compare, editing with undo, and exact transport sizing." />
+  <meta property="og:title" content="jsonloupe — what it actually does" />
+  <meta property="og:description" content="Six guarantees, in the order they matter when a payload lands on you." />
+  <meta property="og:type" content="website" />
+</head>
+<body class="spec-page">
+  <header class="sp-header">
+    <a class="sp-brand" href="./" title="jsonloupe">
+      <img src="/favicon.svg" alt="" width="24" height="24" />
+      <span>json<span class="brand-loupe">loupe</span></span>
+    </a>
+    <span class="sp-slash">/</span>
+    <span class="sp-here">spec</span>
+    <span class="sp-spacer"></span>
+    <a class="sp-back" href="./">← back</a>
+  </header>
+
+  <main class="sp-main">
+    <div class="sp-intro">
+      <h1>What it actually does</h1>
+      <p>Six guarantees, in the order they matter when a payload lands on you. Internals are documented in SPEC.md.</p>
+    </div>
+
+    <div class="sp-row">
+      <span class="sp-num">01</span>
+      <h2>Lossless by construction</h2>
+      <p>Int64 order and entity IDs, and precise decimals, round-trip exactly — no float coercion anywhere in the pipeline.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">02</span>
+      <h2>Virtualized, chunked tree</h2>
+      <p>Range rows keep a five-million-element array navigable; expansion state is restored after filtering.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">03</span>
+      <h2>Payload decoding</h2>
+      <p>Zstd, Base64 (standard or URL-safe), and PostgreSQL bytea are sniffed and decoded locally, with a visible transformation trace.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">04</span>
+      <h2>Semantic compare</h2>
+      <p>Identity-based array alignment by id, composite key, or auto-detection, with an editable alignment plan and per-row match labels.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">05</span>
+      <h2>Edit, undo, apply</h2>
+      <p>Inline-edit primitives in the tree, or edit in a CodeMirror code view and apply with ⌘S. Full undo/redo across edits.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">06</span>
+      <h2>Transport size inspector</h2>
+      <p>Exact UTF-8 → Zstd → Base64 → envelope byte counts against editable budgets, so you know before the broker rejects it.</p>
+    </div>
+  </main>
+
+  <footer class="lp-footer">
+    <span>jsonloupe — MIT</span>
+    <span class="lp-spacer"></span>
+    <a href="./">app</a>
+    <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+    <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+  </footer>
+</body>
+</html>

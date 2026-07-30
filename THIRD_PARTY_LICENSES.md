@@ -530,3 +530,19 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
+
+---
+
+## Bundled fonts
+
+Not an npm dependency — the font file is committed under `public/fonts/` and
+served by this site directly, so no third-party font host is ever contacted.
+
+### Space Grotesk (variable, latin subset) — SIL Open Font License 1.1
+
+Copyright 2020 The Space Grotesk Project Authors
+(https://github.com/floriankarsten/space-grotesk)
+
+Shipped as `public/fonts/space-grotesk-latin.woff2`. The full OFL 1.1 text is
+reproduced verbatim alongside it in `public/fonts/OFL.txt`, as the license
+requires when the font is redistributed.

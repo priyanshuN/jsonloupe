@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>jsonloupe — a loupe for large JSON</title>
+  <meta name="description" content="A loupe for JSON that is too big — and too precise — for your viewer. Five-million-element arrays open instantly, int64 IDs and exact decimals survive every round-trip, and nothing leaves your browser tab." />
+  <meta property="og:title" content="jsonloupe — a loupe for large JSON" />
+  <meta property="og:description" content="Local-first JSON viewer, differ and query tool. Lossless int64, five-million-element arrays, Zstd payload decoding — all in your browser tab." />
+  <meta property="og:type" content="website" />
 </head>
 <body>
   <div id="app">
@@ -23,25 +27,131 @@
     </aside>
     <main id="content">
       <section id="landing">
-        <div class="landing-card">
-          <div class="landing-head">
-            <h1>Paste JSON</h1>
-            <span class="sub">it parses automatically · or drop JSON / Zstd anywhere</span>
+        <header class="lp-header">
+          <a class="lp-brand" href="./" title="jsonloupe">
+            <img src="/favicon.svg" alt="" width="28" height="28" />
+            <span>json<span class="brand-loupe">loupe</span></span>
+          </a>
+          <nav class="lp-nav">
+            <a href="#features">Features</a>
+            <a href="#query">Query language</a>
+            <a href="#privacy">Privacy</a>
+            <a href="./spec.html">Spec</a>
+            <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">GitHub</a>
+          </nav>
+          <span class="lp-spacer"></span>
+          <span class="lp-meta">MIT · no account</span>
+          <button id="cta-open" class="lp-cta" type="button">Open the app →</button>
+        </header>
+
+        <div class="lp-hero">
+          <div class="lp-hero-copy">
+            <span class="lp-pill">local-first <span class="lp-pill-sep">·</span> no backend, no telemetry</span>
+            <h1>A loupe for JSON that is too big — and too precise — for your viewer.</h1>
+            <p class="lp-lede">Five-million-element arrays open instantly. Int64 IDs and exact decimals survive paste → edit → copy without a single rounded digit. Diff, query, decode Zstd payloads, export CSV — all inside your browser tab.</p>
+            <p class="lp-trust">0 bytes uploaded · no account · MIT</p>
           </div>
-          <textarea id="paste-box" spellcheck="false"
-            placeholder="Paste JSON, Base64/URL-safe Zstd, PostgreSQL \x… bytea, or a quoted SQL cell — payloads decode automatically."></textarea>
-          <div class="landing-actions">
-            <button id="parse-btn" class="primary">Parse</button>
-            <button id="open-btn">Open file…</button>
-            <button id="sample-btn" title="Load a small sample document">Sample</button>
-            <span class="spacer"></span>
-            <button id="codec-btn" title="Decode raw Zstd, bytea, SQL cells, and Base64 payloads; or encode JSON">payload tools</button>
-            <input type="file" id="file-input"
-              accept=".json,.txt,.jsonl,.zst,.zstd,application/json,application/zstd" multiple hidden>
+          <div class="lp-paste">
+            <div class="lp-paste-head">
+              <span class="lp-paste-title">Paste JSON</span>
+              <span class="lp-paste-status">paste and it opens · nothing leaves this tab</span>
+            </div>
+            <div class="lp-paste-body">
+              <textarea id="paste-box" spellcheck="false"
+                placeholder="Paste JSON here — it opens the moment it lands. Base64/URL-safe Zstd, PostgreSQL \x… bytea and quoted SQL cells decode automatically in the app."></textarea>
+              <div class="lp-paste-actions">
+                <button id="parse-btn" class="primary">Parse</button>
+                <button id="sample-btn" title="Load a small sample document">Try a sample</button>
+                <button id="open-btn">Open file…</button>
+                <span class="lp-spacer"></span>
+                <span class="lp-note">⌃↵ to open</span>
+                <input type="file" id="file-input"
+                  accept=".json,.txt,.jsonl,.zst,.zstd,application/json,application/zstd" multiple hidden>
+              </div>
+              <div id="parse-error" class="error" hidden></div>
+            </div>
           </div>
-          <p class="landing-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to parse · documents stay on your machine; Ask is opt-in.</p>
         </div>
-        <div id="parse-error" class="error" hidden></div>
+
+        <!-- demo-loop band lands here once the asset exists -->
+
+        <section class="lp-band" id="features">
+          <h2 class="lp-h2">Built for the payloads that break other viewers</h2>
+          <div class="lp-grid">
+            <article class="lp-cell">
+              <span class="lp-tag lp-tag-number">lossless numbers</span>
+              <h3>Int64 and exact decimals</h3>
+              <p>IDs beyond 2^53 survive paste → view → edit → copy → download with every digit intact. Nothing is coerced to a float, ever.</p>
+            </article>
+            <article class="lp-cell">
+              <span class="lp-tag lp-tag-accent">scale</span>
+              <h3>Five million elements, instantly</h3>
+              <p>Virtualized tree with chunked expansion — <code>[0 … 9999]</code> range rows — and parsing, diffing, search and compression all off the UI thread.</p>
+            </article>
+            <article class="lp-cell">
+              <span class="lp-tag lp-tag-ok">payloads</span>
+              <h3>Compressed input is first-class</h3>
+              <p>Raw <code>.zst</code>, Base64-Zstd, or PostgreSQL <code>\x…</code> bytea is detected, decoded in the worker, and opened with a transformation trace.</p>
+            </article>
+            <article class="lp-cell">
+              <span class="lp-tag lp-tag-boolean">diff</span>
+              <h3>Semantic side-by-side compare</h3>
+              <p>Arrays align by identity, so reordering does not drown you in false changes. Ignore noisy fields by key or path prefix.</p>
+            </article>
+            <article class="lp-cell">
+              <span class="lp-tag lp-tag-key">navigation</span>
+              <h3>Paths, lenses, and “same value”</h3>
+              <p>Copy any node as JSONPath, JSON Pointer, or JS accessor. Epoch → local date, lat/lng, uuid flags, and byte weight on collapsed nodes.</p>
+            </article>
+            <article class="lp-cell">
+              <span class="lp-tag lp-tag-warn">export</span>
+              <h3>Tables and RFC 4180 CSV</h3>
+              <p>Any array becomes a sortable table; export the table or a query result as exact-digit CSV in the current sort order.</p>
+            </article>
+          </div>
+        </section>
+
+        <div class="lp-split" id="query">
+          <section class="lp-split-cell">
+            <h2 class="lp-h2 lp-h2-sm">A query language, not a search box</h2>
+            <p class="lp-body">Filter, pluck, group and count across the whole document — evaluated in the worker, never on the main thread.</p>
+            <pre class="lp-code">$.tasks[?(@.status == <span class="lp-str">'FAILED'</span>)]
+  | group(@.failureReason)
+  | count()</pre>
+          </section>
+          <section class="lp-split-cell">
+            <h2 class="lp-h2 lp-h2-sm">Diff that understands identity</h2>
+            <p class="lp-body">Align arrays by <code class="lp-code-id">id</code>, a composite key, or automatic detection — then read what actually changed instead of a wall of index shifts.</p>
+            <div class="lp-chips">
+              <span class="lp-chip lp-chip-changed">~ changed 37</span>
+              <span class="lp-chip lp-chip-added">+ added 12</span>
+              <span class="lp-chip lp-chip-removed">− removed 4</span>
+              <span class="lp-chip lp-chip-reordered">⇅ reordered 5</span>
+            </div>
+          </section>
+        </div>
+
+        <section class="lp-band lp-privacy" id="privacy">
+          <div>
+            <h2 class="lp-h2 lp-h2-sm">Your documents never leave your machine</h2>
+            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>Ask</strong> — the optional English-to-query feature — stays off until you add your own API key, and even then it sends only the document's shape: field names and types, never values, shown to you in full before anything is sent.</p>
+          </div>
+          <div class="lp-facts">
+            <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">3 · all opt-in Ask</span></div>
+            <div class="lp-fact"><span>telemetry</span><span class="lp-fact-ok">none</span></div>
+            <div class="lp-fact"><span>license</span><span class="lp-fact-accent">MIT</span></div>
+            <div class="lp-fact"><span>typescript</span><span class="lp-fact-accent">strict</span></div>
+          </div>
+        </section>
+
+        <footer class="lp-footer">
+          <span>jsonloupe — MIT</span>
+          <span class="lp-spacer"></span>
+          <button id="codec-btn" class="lp-foot-link" type="button" title="Decode raw Zstd, bytea, SQL cells, and Base64 payloads; or encode JSON">payload tools</button>
+          <a href="./spec.html">spec</a>
+          <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+          <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+        </footer>
       </section>
       <section id="codec" hidden>
         <div class="codec-head">

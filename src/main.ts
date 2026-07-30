@@ -1441,6 +1441,9 @@ async function parseFromBox(): Promise<void> {
 }
 
 $('#parse-btn').addEventListener('click', () => void parseFromBox());
+// The landing's "Open the app →" CTA: the app is already on this page, so the
+// honest action is to put the cursor in the box rather than navigate anywhere.
+$('#cta-open').addEventListener('click', () => pasteBox.focus());
 pasteBox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void parseFromBox();
 });

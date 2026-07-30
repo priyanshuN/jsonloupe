@@ -50,6 +50,8 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
   --gutter-bg: #1c212a;
+  /* Landing hero wash — the only gradient on the public page. */
+  --hero-wash: rgba(134, 200, 220, 0.1);
 }
 
 :root[data-theme='light'] {
@@ -99,6 +101,8 @@
   --shadow-sm: 0 1px 2px rgba(23, 40, 70, 0.08);
   --shadow: 0 12px 32px rgba(23, 40, 70, 0.12);
   --gutter-bg: #f4f6fa;
+  /* Same wash, lower alpha: on a light ground the dark-theme value reads as haze. */
+  --hero-wash: rgba(47, 123, 214, 0.07);
 }
 
 :root {
@@ -108,7 +112,25 @@
   --r-xl: 16px;
   --mono: ui-monospace, 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Display face for the public pages only — the workbench keeps --sans. */
+  --display: 'Space Grotesk', var(--sans);
   --row-h: 28px;
+}
+
+/* Self-hosted so the public pages issue zero third-party requests — the page
+   claims "0 bytes uploaded" and SECURITY.md inventories every fetch, and a
+   Google Fonts link would quietly contradict both. One variable woff2 (latin
+   subset) covers the 400/500/700 the design uses. SIL OFL 1.1, see
+   public/fonts/OFL.txt and THIRD_PARTY_LICENSES.md. */
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/space-grotesk-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
 }
 
 * { box-sizing: border-box; }
@@ -313,64 +335,366 @@ input:focus {
 
 #content { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-/* ---------- landing ---------- */
+/* ---------- public landing page ----------
+   The landing is the marketing surface, not app chrome: it is full-bleed and
+   carries its own header, so the sidebar steps aside until a document is open.
+   On the first successful parse main.ts hides #landing and #viewer takes over —
+   nothing here restyles the workbench. */
+
+#app:has(#landing:not([hidden])) { grid-template-columns: 1fr; }
+#app:has(#landing:not([hidden])) #sidebar { display: none; }
 
 #landing {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 24px;
-  gap: 16px;
   min-height: 0;
   overflow-y: auto;
+  font-family: var(--display);
 }
-.landing-card {
-  width: min(880px, 100%);
+
+.lp-spacer { flex: 1; }
+
+/* header */
+.lp-header {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  gap: 28px;
+  padding: 18px 40px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.lp-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font: 700 16px var(--display);
+  letter-spacing: -0.2px;
+  color: var(--text);
+  text-decoration: none;
+}
+.lp-brand img { border-radius: 9px; display: block; }
+.lp-nav { display: flex; gap: 22px; }
+.lp-nav a {
+  font: 500 13.5px var(--display);
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.12s ease;
+}
+.lp-nav a:hover { color: var(--text); }
+.lp-meta { font: 500 11.5px var(--mono); color: var(--text-faint); white-space: nowrap; }
+.lp-cta {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  border-radius: var(--r);
+  padding: 9px 18px;
+  font: 700 13.5px var(--display);
+  white-space: nowrap;
+  box-shadow: none;
+}
+.lp-cta:hover { background: var(--accent-hover); color: var(--accent-contrast); }
+
+/* hero */
+.lp-hero {
+  display: grid;
+  grid-template-columns: 1fr 560px;
+  gap: 52px;
+  padding: 60px 40px 44px;
+  border-bottom: 1px solid var(--border);
+  background: radial-gradient(1100px 420px at 8% -10%, var(--hero-wash), transparent 70%);
+}
+.lp-hero-copy { align-self: center; }
+.lp-pill {
+  display: inline-block;
+  margin-bottom: 26px;
+  padding: 5px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 500 11.5px var(--mono);
+}
+.lp-pill-sep { color: var(--text-faint); }
+.lp-hero h1 {
+  margin: 0;
+  font: 700 58px/1.04 var(--display);
+  letter-spacing: -2.2px;
+  text-wrap: balance;
+}
+.lp-lede {
+  margin: 22px 0 0;
+  max-width: 52ch;
+  color: var(--text-dim);
+  font-size: 17px;
+  text-wrap: pretty;
+}
+.lp-trust { margin: 26px 0 0; color: var(--text-faint); font: 12.5px var(--mono); }
+
+/* hero paste panel — wraps the existing #paste-box / #parse-btn / #sample-btn /
+   #open-btn controls; the markup around them changed, the wiring did not. */
+.lp-paste {
+  align-self: start;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--r-xl);
-  padding: 26px;
-  box-shadow: var(--shadow);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
 }
-.landing-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.landing-head h1 { margin: 0; font-size: 21px; font-weight: 680; letter-spacing: -0.3px; }
-.landing-head .sub { color: var(--text-dim); font-size: 13px; }
+:root[data-theme='light'] .lp-paste { box-shadow: var(--shadow); }
+.lp-paste-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.lp-paste-title {
+  font: 600 14.5px var(--display);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.lp-paste-status {
+  font: 11.5px var(--mono);
+  color: var(--text-faint);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lp-paste-body { padding: 16px 18px 18px; }
 
 #paste-box {
   width: 100%;
-  min-height: 320px;
-  resize: vertical;
+  height: 212px;
+  resize: none;
   background: var(--bg-inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 16px 18px;
-  font: 13px/1.6 var(--mono);
+  padding: 14px 16px;
+  font: 12.5px/1.6 var(--mono);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 #paste-box:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* Invalid input tints the box itself; the message renders below, so the button
+   row never reflows. */
+.lp-paste-body:has(#parse-error:not([hidden])) #paste-box { border-color: var(--danger); }
 
-.landing-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.landing-actions .spacer { flex: 1; }
-.landing-hint { margin: 0; color: var(--text-faint); font-size: 12px; }
-.landing-hint kbd {
-  font: 11px var(--mono);
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
-  border-radius: 5px;
-  padding: 1px 5px;
+.lp-paste-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.lp-paste-actions button { padding: 8px 15px; border-radius: 7px; }
+.lp-note {
+  font: 11.5px var(--mono);
+  color: var(--text-faint);
+  max-width: 230px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+/* bands */
+.lp-band { padding: 52px 40px; border-bottom: 1px solid var(--border); }
+.lp-h2 {
+  margin: 0 0 30px;
+  font: 700 30px var(--display);
+  letter-spacing: -1px;
+  text-wrap: balance;
+}
+.lp-h2-sm { margin-bottom: 14px; font-size: 26px; letter-spacing: -0.8px; }
+.lp-body { margin: 0 0 20px; color: var(--text-dim); font-size: 14.5px; text-wrap: pretty; }
+.lp-body-wide { max-width: 64ch; margin-bottom: 0; }
+.lp-body strong { color: var(--text); font-weight: 600; }
+
+/* feature grid — the 1px gap over a --border background is the rule itself */
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.lp-cell {
+  background: var(--bg-elevated);
+  padding: 26px 24px 28px;
+  min-height: 186px;
+  transition: background 0.12s ease;
+}
+.lp-cell:hover { background: color-mix(in srgb, var(--bg-hover) 45%, var(--bg-elevated)); }
+.lp-tag {
+  font: 500 11px var(--mono);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.lp-tag-number { color: var(--c-number); }
+.lp-tag-accent { color: var(--accent); }
+.lp-tag-ok { color: var(--ok); }
+.lp-tag-boolean { color: var(--c-boolean); }
+.lp-tag-key { color: var(--c-key); }
+.lp-tag-warn { color: var(--warn); }
+.lp-cell h3 { margin: 10px 0 8px; font: 600 18px var(--display); }
+.lp-cell p { margin: 0; color: var(--text-dim); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.lp-cell code { font: 12.5px var(--mono); color: var(--text); }
+
+/* query / diff split */
+.lp-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.lp-split-cell { background: var(--bg); padding: 48px 40px; }
+.lp-code {
+  margin: 0;
+  padding: 16px 18px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  font: 12.5px/1.8 var(--mono);
+  overflow-x: auto;
+}
+.lp-str { color: var(--c-string); }
+.lp-code-id { font: 13px var(--mono); color: var(--c-number); }
+.lp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.lp-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font: 11.5px var(--mono);
+}
+.lp-chip-changed { color: var(--c-number); background: color-mix(in srgb, var(--c-number) 8%, transparent); }
+.lp-chip-added { color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.lp-chip-removed { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.lp-chip-reordered { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+
+/* privacy */
+.lp-privacy {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 48px;
+  align-items: center;
+}
+.lp-facts { display: flex; flex-direction: column; gap: 8px; }
+.lp-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  font: 12px var(--mono);
   color: var(--text-dim);
+}
+.lp-fact-ok { color: var(--ok); }
+.lp-fact-accent { color: var(--accent); }
+
+/* footer — shared with the spec page */
+.lp-footer {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 22px 40px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-faint);
+  font: 12px var(--mono);
+}
+.lp-footer a, .lp-foot-link {
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.12s ease;
+}
+.lp-footer a:hover, .lp-foot-link:hover { color: var(--text); }
+/* the payload-tools entry is a real button (#codec-btn) wearing a link's clothes */
+.lp-foot-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: 12px var(--mono);
+  box-shadow: none;
+  cursor: pointer;
+}
+
+/* Desktop-first: below ~1100px the hero stacks so a phone visitor can still
+   read the copy and paste. No further mobile work is in scope. */
+@media (max-width: 1100px) {
+  .lp-hero { grid-template-columns: 1fr; gap: 34px; padding: 44px 24px 36px; }
+  .lp-hero h1 { font-size: 42px; letter-spacing: -1.4px; }
+  .lp-header { gap: 18px; padding: 16px 24px; flex-wrap: wrap; }
+  .lp-band, .lp-split-cell { padding: 40px 24px; }
+  .lp-grid { grid-template-columns: 1fr; }
+  .lp-split { grid-template-columns: 1fr; }
+  .lp-privacy { grid-template-columns: 1fr; gap: 28px; }
+  .lp-footer { padding: 20px 24px; flex-wrap: wrap; }
+}
+
+/* ---------- spec page (spec.html) ---------- */
+
+.spec-page { font-family: var(--display); }
+.sp-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 40px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+.sp-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 700 15px var(--display);
+  letter-spacing: -0.2px;
+  color: var(--text);
+  text-decoration: none;
+}
+.sp-brand img { border-radius: 8px; display: block; }
+.sp-slash { color: var(--border-strong); }
+.sp-here { font: 500 13px var(--mono); color: var(--text-dim); }
+.sp-spacer { flex: 1; }
+.sp-back {
+  font: 500 13px var(--display);
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.12s ease;
+}
+.sp-back:hover { color: var(--text); }
+
+.sp-main { width: min(820px, 100%); margin: 0 auto; padding: 0 34px 56px; }
+.sp-intro { padding: 44px 0 20px; }
+.sp-intro h1 {
+  margin: 0;
+  font: 700 38px var(--display);
+  letter-spacing: -1.5px;
+  text-wrap: balance;
+}
+.sp-intro p { margin: 16px 0 0; max-width: 62ch; color: var(--text-dim); font-size: 15px; text-wrap: pretty; }
+.sp-row {
+  display: grid;
+  grid-template-columns: 46px 240px 1fr;
+  gap: 24px;
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+  align-items: baseline;
+}
+.sp-num { font: 500 11.5px var(--mono); color: var(--text-faint); }
+.sp-row h2 { margin: 0; font: 600 17px var(--display); letter-spacing: -0.3px; }
+.sp-row p { margin: 0; color: var(--text-dim); font-size: 14px; line-height: 1.65; text-wrap: pretty; }
+
+@media (max-width: 760px) {
+  .sp-header { padding: 16px 24px; }
+  .sp-main { padding: 0 24px 40px; }
+  .sp-intro h1 { font-size: 30px; letter-spacing: -1px; }
+  .sp-row { grid-template-columns: 40px 1fr; gap: 10px 16px; }
+  .sp-row p { grid-column: 2; }
 }
 
 .error {
-  width: min(880px, 100%);
+  width: 100%;
+  margin-top: 12px;
   background: var(--danger-soft);
   border: 1px solid var(--danger);
   color: var(--danger);
