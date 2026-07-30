@@ -874,6 +874,66 @@ describe('CSV export (U2)', () => {
     expect(csv('query').ok).toBe(false); // no query run
     expect(csv('bogus').ok).toBe(false);
   });
+
+  it('export neutralizes spreadsheet formula prefixes in cells (CWE-1236)', () => {
+    const data = [
+      { v: '=HYPERLINK("http://x","y")' },
+      { v: '+cmd|/c calc' },
+      { v: '@SUM(A1)' },
+      { v: '\t=1' },
+      { v: '\r=1' },
+      { v: '  =1' }, // leading spaces do not hide the lead character
+    ];
+    parse(JSON.stringify(data));
+    tableInit(rows()[0].id);
+    const lines = csv('table').text!.split('\r\n');
+    // apostrophe first, then the existing RFC 4180 quoting of the modified field
+    expect(lines[1]).toBe(`"'=HYPERLINK(""http://x"",""y"")"`);
+    expect(lines[2]).toBe("'+cmd|/c calc");
+    expect(lines[3]).toBe("'@SUM(A1)");
+    expect(lines[4]).toBe("'\t=1");
+    expect(lines[5]).toBe(`"'\r=1"`); // CR still forces quoting
+    expect(lines[6]).toBe("'  =1");
+  });
+
+  it('export leaves plain numeric literals byte-identical (lossless round-trip)', () => {
+    parse(
+      '[{"v":-123},{"v":"+42"},{"v":1234567890123456789},' +
+      '{"v":-1.2345678901234567890e9},{"v":"-1.5e9"},{"v":-1.5e9},{"v":"-1-1"}]',
+    );
+    tableInit(rows()[0].id);
+    const lines = csv('table').text!.split('\r\n');
+    expect(lines[1]).toBe('-123'); // negative number: not a formula, no prefix
+    expect(lines[2]).toBe('+42'); // leading + on a bare numeric string is exempt too
+    expect(lines[3]).toBe('1234567890123456789'); // all 19 digits, still unfloated
+    expect(lines[4]).toBe('-1.2345678901234567890e9'); // boxed LosslessNumber: exponent literal intact
+    expect(lines[5]).toBe('-1.5e9'); // numeric string: exponent form untouched
+    // -1.5e9 fits a double exactly, so the parser keeps it native by design
+    // (see numberParser) — the value is exact either way, and still unprefixed.
+    expect(lines[6]).toBe('-1500000000');
+    expect(lines[7]).toBe("'-1-1"); // numeric-looking but not a literal → neutralized
+  });
+
+  it('export neutralizes a formula in a column header and in a group key', () => {
+    parse('[{"=evil":1}]');
+    tableInit(rows()[0].id);
+    expect(csv('table').text).toBe("'=evil\r\n1\r\n");
+
+    parse('{"tasks":[{"s":"=evil"},{"s":"=evil"},{"s":"ok"}]}');
+    expect(query('$.tasks[*] | group(@.s)').kind).toBe('groups');
+    expect(csv('query').text).toBe("s,count\r\n'=evil,2\r\nok,1\r\n");
+  });
+
+  it('export only inspects the leading character — ordinary text is unchanged', () => {
+    parse('[{"v":"a=b"},{"v":"total, =1"},{"v":"plain"},{"v":""},{"v":"{\\"k\\":1}"}]');
+    tableInit(rows()[0].id);
+    const lines = csv('table').text!.split('\r\n');
+    expect(lines[1]).toBe('a=b');
+    expect(lines[2]).toBe('"total, =1"'); // comma → quoted, but no apostrophe
+    expect(lines[3]).toBe('plain');
+    expect(lines[4]).toBe('');
+    expect(lines[5]).toBe(`"{""k"":1}"`); // JSON payloads start with { and stay inert
+  });
 });
 
 describe('fixture sanity', () => {

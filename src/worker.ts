@@ -1876,10 +1876,22 @@ function csvCell(v: unknown): string {
   return String(v);
 }
 
-// RFC 4180 field quoting: wrap in double-quotes when the field contains a comma,
-// a double-quote, or a line break; inner double-quotes are doubled.
+// A field whose first non-blank character is one of = + - @ TAB CR is executed as
+// a formula when the CSV is opened in Excel / Sheets / LibreOffice (CWE-1236), so
+// it is prefixed with an apostrophe — the standard neutralizer, which those apps
+// strip on display. Plain numeric literals are exempt: `-123`, `+42`, `-1.5e9`
+// and exact int64 digit strings are not formulas, and the lossless-number
+// guarantee requires their CSV form to stay byte-identical.
+const CSV_FORMULA_LEAD = /^[ \t]*[=+\-@\t\r]/;
+const CSV_PLAIN_NUMBER = /^[ \t]*[-+]?\d+(\.\d+)?([eE][-+]?\d+)?[ \t]*$/;
+
+// Neutralization first, then RFC 4180 field quoting: wrap in double-quotes when
+// the field contains a comma, a double-quote, or a line break; inner
+// double-quotes are doubled. Every export path (table cells, query rows, group
+// keys, and all headers) goes through here, so this is the one control point.
 function csvField(s: string): string {
-  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  const safe = CSV_FORMULA_LEAD.test(s) && !CSV_PLAIN_NUMBER.test(s) ? `'${s}` : s;
+  return /[",\r\n]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe;
 }
 
 // Serialize header + rows with CRLF row endings, watching the running size so we

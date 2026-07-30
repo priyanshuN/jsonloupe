@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isLoopbackRequest } from './src/devKeyGuard';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 
@@ -42,7 +43,15 @@ function keyServer(): Plugin {
   return {
     name: 'wb-key-server',
     configureServer(server) {
-      server.middlewares.use('/__api-key', (_req, res) => {
+      server.middlewares.use('/__api-key', (req, res) => {
+        // Loopback proof first: this middleware runs ahead of Vite's allowed-hosts
+        // check, so a rebound hostile Host must be turned away before the key
+        // file is so much as opened.
+        if (!isLoopbackRequest(req.headers.host, req.headers.origin)) {
+          res.statusCode = 403;
+          res.end();
+          return;
+        }
         const key = readKey();
         res.statusCode = key ? 200 : 404;
         res.setHeader('content-type', 'text/plain');
