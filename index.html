@@ -14,6 +14,9 @@
        main.ts loads and boots. The `returning` class only bridges the gap until
        boot() decides — boot removes it on every path. -->
   <style>html.returning #landing { display: none; }</style>
+  <!-- Stylesheet as a link (not a JS import) so dev paints styled on first
+       frame, same as the production build — no unstyled flash on refresh. -->
+  <link rel="stylesheet" href="/src/style.css" />
   <script>
     (function () {
       try {

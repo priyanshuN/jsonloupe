@@ -1,4 +1,5 @@
-import './style.css';
+// style.css is loaded via <link> in index.html (not imported here) so the dev
+// server paints styled on first frame, matching the production build.
 import { VirtualTree } from './tree';
 import type {
   Row,
