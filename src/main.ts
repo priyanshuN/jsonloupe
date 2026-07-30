@@ -1447,9 +1447,19 @@ async function parseFromBox(): Promise<void> {
 }
 
 $('#parse-btn').addEventListener('click', () => void parseFromBox());
-// The landing's "Open the app →" CTA: the app is already on this page, so the
-// honest action is to put the cursor in the box rather than navigate anywhere.
-$('#cta-open').addEventListener('click', () => pasteBox.focus());
+// The landing's "Open the app →" CTA. A visitor with stored documents gets the
+// actual workbench on their last-used doc (they're on the pitch via #about or
+// mid-scroll); only a truly cold visitor — nothing to open yet — gets the
+// cursor placed in the paste box, which for them is the app.
+$('#cta-open').addEventListener('click', () => void (async () => {
+  const docs = await store.listDocs();
+  if (docs.length) {
+    const lastUsed = docs.reduce((a, b) => (store.useRecency(b) > store.useRecency(a) ? b : a));
+    landing.classList.add('landing--app');
+    if (await openStoredDoc(lastUsed.id) === 'opened') return;
+  }
+  pasteBox.focus();
+})());
 pasteBox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void parseFromBox();
 });
