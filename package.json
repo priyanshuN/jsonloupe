@@ -1,6 +1,6 @@
 {
   "name": "jsonloupe",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A loupe for large JSON \u2014 lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
   "license": "MIT",
   "author": "Priyanshu Nandan",

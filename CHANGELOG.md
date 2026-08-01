@@ -2,7 +2,7 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.0.3 — 2026-08-01
 
 - **jsonloupe.dev.** The hosted app moved to its own domain (the old
   priyanshun.github.io/jsonloupe URL redirects). Vulnerability reports now go
