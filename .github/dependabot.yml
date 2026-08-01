@@ -1,0 +1,21 @@
+version: 2
+
+# Both ecosystems, because a compromised action is as good as a compromised
+# dependency: the workflows deploy the public site, so what runs in them
+# matters as much as what ships in the bundle.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the dev toolchain instead of five: nothing here reaches a
+      # user's machine, so they only need to pass CI, not individual review.
+      dev-tooling:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
