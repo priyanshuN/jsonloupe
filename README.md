@@ -15,7 +15,9 @@
 </p>
 
 <p align="center">
-  <img src=".github/assets/demo.gif" width="820" alt="Demo: pasting JSON with int64 IDs — every digit survives — then opening a 5-million-element, 37 MB array that parses in ~650 ms" />
+  <a href="https://raw.githubusercontent.com/priyanshuN/jsonloupe/main/.github/assets/demo.gif">
+    <img src=".github/assets/demo.gif" width="820" alt="Demo: pasting JSON with int64 IDs — every digit survives — then opening a 5-million-element, 37 MB array that parses in ~650 ms. Click to view full size." />
+  </a>
 </p>
 
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
