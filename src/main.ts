@@ -2903,7 +2903,9 @@ $('#ask-key').addEventListener('click', async () => {
   }
 });
 
-$('#ask-key-save').addEventListener('click', () => {
+// Submit, not click: the row is a <form>, so Enter in the key field saves too.
+askKeyRow.addEventListener('submit', (e) => {
+  e.preventDefault();
   setApiKey(askKeyInput.value.trim());
   askKeyRow.hidden = true;
   showToast(askKeyInput.value.trim() ? 'key saved (this browser only)' : 'key cleared');

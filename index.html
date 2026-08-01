@@ -244,13 +244,13 @@
             <button id="ask-run" class="primary">ask</button>
             <button id="ask-key" title="Set the Anthropic API key (stored in this browser only)">key</button>
           </div>
-          <div class="ask-row" id="ask-key-row" hidden>
-            <!-- autocomplete=off: this is an API key, not a login — keep password
-                 managers from offering to save/autofill it (also silences
-                 Chrome's "password field not in a form" console warning). -->
+          <!-- A real form: satisfies Chrome's password-field containment warning
+               and makes Enter save. autocomplete=off because this is an API key,
+               not a login — password managers must not offer to save/autofill. -->
+          <form class="ask-row" id="ask-key-row" hidden>
             <input id="ask-key-input" type="password" placeholder="sk-or-… / sk-ant-…" spellcheck="false" autocomplete="off">
-            <button id="ask-key-save">save key</button>
-          </div>
+            <button id="ask-key-save" type="submit">save key</button>
+          </form>
           <div id="ask-query-line" hidden>
             <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
             <button id="ask-query-run" title="Run this query as a saved query">run</button>
