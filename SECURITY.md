@@ -63,6 +63,21 @@ formula into your spreadsheet. Plain numeric literals (`-123`, `+42`, exact
 int64 digit strings) are exempt, keeping the lossless-number round-trip
 byte-identical.
 
+## What the badges do and do not say
+
+**No badge on this page certifies that jsonloupe is free of security risk.**
+Nothing does, for any project. What each one actually means:
+
+- **OpenSSF Scorecard** grades *practices* — branch protection, pinned
+  dependencies, whether CI runs tests, whether a workflow could be made to run
+  untrusted code. A high score means mistakes are likelier to be caught. A
+  project can score well and still ship a vulnerability.
+- **CodeQL** finds *known patterns* of bug. A clean result means those patterns
+  were not found, not that none exist.
+
+The claims that matter here — no backend, three auditable `fetch` calls, no
+`eval`, no `innerHTML` — are stated above with the grep commands to check them.
+
 ## Reporting a vulnerability
 
 Open a GitHub issue for non-sensitive reports. For anything exploitable, email

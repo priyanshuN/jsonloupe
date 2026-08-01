@@ -1,0 +1,44 @@
+name: codeql
+
+# Static analysis for the classes of bug that matter in this codebase: the
+# worker protocol boundary, anything that touches document bytes, and the
+# constrained query grammar that model output is parsed into. Findings land in
+# the repository's Security tab, which is public — so it is a claim a stranger
+# can check rather than one the README makes about itself.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, because the analysis improves even when the code does not.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+# Read-only by default; the analyze job escalates to exactly the one write it
+# needs.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    # Uploading results needs code scanning, which a private repository only
+    # has with Advanced Security — so this stays dormant if the repo ever goes
+    # private again, instead of going red every push.
+    if: github.event.repository.private != true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        with:
+          languages: javascript-typescript
+          # security-extended adds lower-severity rules; on a codebase this
+          # size the extra noise is affordable.
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4

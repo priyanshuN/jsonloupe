@@ -1,0 +1,47 @@
+name: scorecard
+
+# OpenSSF Scorecard grades the repository's security practices — branch
+# protection, pinned dependencies, whether CI runs tests, whether a workflow
+# can be made to run attacker-controlled code — and publishes the result so it
+# can be read without trusting this repo's own description of itself.
+#
+# It scores practice, not code. A high score does not mean the code is safe; it
+# means the project is set up so that mistakes are likelier to be caught. The
+# actual security posture (local-first, three-fetch inventory, no eval) is
+# stated and verifiable in SECURITY.md.
+
+on:
+  branch_protection_rule:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    # Publishing the result and uploading the SARIF both need a public
+    # repository, so this stays dormant if that ever stops being true.
+    if: github.event.repository.private != true
+    permissions:
+      security-events: write # upload the SARIF to the Security tab
+      id-token: write # sign the result so the badge can be verified
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishes to the public API that serves the badge.
+          publish_results: true
+
+      - uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        with:
+          sarif_file: results.sarif
