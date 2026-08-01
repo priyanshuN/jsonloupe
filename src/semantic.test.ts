@@ -60,6 +60,19 @@ describe('schema-free semantic comparison', () => {
     expect(right.users.map((user) => user.id)).toEqual([2, 10]);
   });
 
+  it('escapes backslashes in identity labels so display paths stay unambiguous', () => {
+    const left = { items: [{ id: 'a\\b]c', v: 1 }, { id: 'x', v: 3 }] };
+    const right = { items: [{ id: 'a\\b]c', v: 2 }, { id: 'x', v: 3 }] };
+
+    const result = compareSemantic(left, right);
+    const itemsNode = result.root.children.find((node) => node.matchLabel === 'items')!;
+    // The label JSON-quotes the value, so the data's one backslash is already
+    // two in the label; safeLabel then escapes those before ']' so a literal
+    // '\' in the data can never read as the escaping itself.
+    const row = itemsNode.children.find((node) => node.matchLabel === 'id="a\\\\b]c"')!;
+    expect(row.instancePath).toContain('[id="a\\\\\\\\b\\]c"]');
+  });
+
   it('discovers a two-field composite when individual fields are not unique', () => {
     const left = {
       items: [

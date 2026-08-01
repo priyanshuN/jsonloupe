@@ -1097,7 +1097,9 @@ function arrayChildLocation(
   rightIndex: number | null,
   label: string,
 ): BuildLocation {
-  const safeLabel = label.replace(/\]/g, '\\]');
+  // Escape the escape character first, or a label containing a literal
+  // backslash before ']' is indistinguishable from the escaping itself.
+  const safeLabel = label.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
   return {
     normalizedPath: `${parent.normalizedPath}[*]`,
     displayPath: `${parent.displayPath}[${safeLabel}]`,

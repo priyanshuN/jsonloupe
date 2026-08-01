@@ -2117,6 +2117,13 @@ export async function handleAsync(
 
 // Worker glue — guarded so the module imports cleanly under Node/vitest, where
 // `self` is undefined.
+//
+// No origin check on onmessage, deliberately: this is a DEDICATED worker, and
+// a dedicated worker can only ever receive messages from the single page that
+// constructed it — there is no foreign sender to reject, and MessageEvents
+// here carry no meaningful origin. (CodeQL's js/missing-origin-check targets
+// window/shared/service-worker handlers, where a hostile sender is possible;
+// its hit on this line is dismissed as a false positive with this reasoning.)
 if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessage === 'function') {
   (self as unknown as Worker).onmessage = (e: MessageEvent) => {
     const msg = e.data as { reqId: number; type: string } & Record<string, unknown>;
