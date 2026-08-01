@@ -6,14 +6,13 @@ name: publish
 # whole pitch is "audit it, nothing leaves your machine", a signed origin is
 # part of the product.
 #
-# FIRST PUBLISH ONLY: authentication is the NPM_TOKEN repository secret below,
-# because npm's trusted publishing cannot create a package that does not exist
-# yet (npm/cli#8544). Once 1.0.0 is live: attach a trusted publisher on
-# npmjs.com (repo priyanshuN/jsonloupe, workflow publish.yml, environment name
-# BLANK — any value there rejects every publish), then DELETE the env block on
-# the publish step and revoke the token. Removing NODE_AUTH_TOKEN is the
-# mechanism, not cleanup: a stored token takes precedence over OIDC, so its
-# absence is what keeps this on the trusted-publishing path.
+# There is no npm credential in this repository. The registry trusts this
+# workflow, by filename, in this repository (npm "trusted publishing", set up
+# 2026-08-01 after the token-authenticated first publish of 1.0.0), and
+# authenticates it with a short-lived OIDC token minted per run by the
+# id-token permission below. Do not add a NODE_AUTH_TOKEN back: a stored token
+# takes precedence over OIDC, so adding one silently disables trusted
+# publishing while the npm page still claims it is on.
 
 on:
   release:
@@ -67,9 +66,6 @@ jobs:
       - name: Publish with provenance
         if: github.event_name == 'release' || inputs.publish
         run: npm publish --provenance --access public
-        env:
-          # DELETE this env block after attaching the trusted publisher.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Rehearsal only — nothing was published
         if: github.event_name == 'workflow_dispatch' && !inputs.publish
