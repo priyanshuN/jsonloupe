@@ -73,11 +73,13 @@
   --text-faint: #949dac;
 
   --brand: #3f7d90;
-  --accent: #2f7bd6;
-  --accent-hover: #2569bd;
+  /* Accent = the brand's loupe teal (nudged darker so white button text keeps
+     AA contrast), matching the dark theme where accent and brand already agree. */
+  --accent: #37718a;
+  --accent-hover: #2d5f75;
   --accent-contrast: #ffffff;
-  --accent-soft: rgba(47, 123, 214, 0.1);
-  --accent-line: rgba(47, 123, 214, 0.55);
+  --accent-soft: rgba(63, 125, 144, 0.12);
+  --accent-line: rgba(55, 113, 138, 0.55);
 
   --danger: #cf3450;
   --danger-soft: rgba(207, 52, 80, 0.09);
@@ -858,15 +860,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-color: var(--accent);
   background: var(--bg-hover);
 }
-#transport-btn {
-  white-space: nowrap;
-  color: var(--c-number);
-  border-color: color-mix(in srgb, var(--c-number) 48%, var(--border));
-}
-#transport-btn:hover {
-  color: var(--c-number);
-  border-color: var(--c-number);
-}
+/* transport is a utility, not a state — it dresses like every other neutral
+   toolbar button. Syntax-token colors (--c-*) stay in the data plane; chrome
+   is neutral or accent, with warn/ok/danger reserved for actual state. */
+#transport-btn { white-space: nowrap; }
 
 /* segmented mode switcher */
 .mode-switch {
@@ -1674,11 +1671,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .crumb-chip:hover { color: var(--text); border-color: var(--accent-line); }
 .crumb-chip.same { margin-left: auto; color: var(--accent); border-color: var(--accent-line); }
 .crumb-chip.same:hover { background: var(--accent-soft); }
+/* Same accent treatment as the tree's {…} unpack chip and the decoded badge —
+   one color for the whole "this is a payload" concept. */
 .crumb-chip.payload {
-  color: var(--c-number);
-  border-color: color-mix(in srgb, var(--c-number) 45%, var(--border));
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
-.crumb-chip.payload:hover { background: var(--warn-soft); }
+.crumb-chip.payload:hover { background: var(--accent-soft); }
 
 .hit-header {
   padding: 6px 16px 4px;
