@@ -14,6 +14,10 @@
   <a href="#why-another-json-viewer"><img src="https://img.shields.io/badge/numbers-int64%20exact-8a2be2.svg" alt="Lossless int64"></a>
 </p>
 
+<p align="center">
+  <img src=".github/assets/demo.gif" width="820" alt="Demo: pasting JSON with int64 IDs — every digit survives — then opening a 5-million-element, 37 MB array that parses in ~650 ms" />
+</p>
+
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
 querying JSON documents that are too big or too precise for ordinary viewers.
 Everything runs in your browser: documents are parsed in a web worker, stored in
