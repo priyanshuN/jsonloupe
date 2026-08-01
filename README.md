@@ -25,6 +25,19 @@ querying JSON documents that are too big or too precise for ordinary viewers.
 Everything runs in your browser: documents are parsed in a web worker, stored in
 IndexedDB, and never uploaded anywhere. No backend, no account, no telemetry.
 
+## Run it
+
+Use the hosted app at **[priyanshun.github.io/jsonloupe](https://priyanshun.github.io/jsonloupe/)** — or run the identical bundle from your own machine, fully offline:
+
+```bash
+npx jsonloupe
+```
+
+That starts a loopback-only static server (`127.0.0.1:5199`) serving the prebuilt
+app from the package — no runtime dependencies, no network calls, ~60 lines of
+auditable server in [bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and
+`--no-open` do what they say.
+
 ## Why another JSON viewer?
 
 - **Lossless numbers.** Int64 IDs beyond 2^53 (snowflake/order/entity IDs) and

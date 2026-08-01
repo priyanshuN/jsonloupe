@@ -1,6 +1,5 @@
 {
   "name": "jsonloupe",
-  "private": true,
   "version": "1.0.0",
   "description": "A loupe for large JSON — lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
   "license": "MIT",
@@ -20,18 +19,30 @@
     "local-first"
   ],
   "type": "module",
+  "bin": {
+    "jsonloupe": "bin/jsonloupe.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "SECURITY.md",
+    "THIRD_PARTY_LICENSES.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "vite --port 5199",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 5199",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm test && npm run build"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "vite": "^6.0.0",
-    "vitest": "^4.1.10"
-  },
-  "dependencies": {
+    "vitest": "^4.1.10",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@codemirror/commands": "^6.6.0",
     "@codemirror/lang-json": "^6.0.1",
