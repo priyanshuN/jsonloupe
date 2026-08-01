@@ -34,6 +34,19 @@ import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayl
 import { currentTheme, toggleTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
 
+// A redeploy replaces every hashed asset on Pages, so a tab loaded before it
+// 404s on its first lazy import (e.g. the CodeMirror chunks). Vite surfaces
+// that as vite:preloadError — reload once to pick up the new bundle; the
+// once-guard keeps a genuinely broken deploy from reload-looping the tab.
+window.addEventListener('vite:preloadError', (e) => {
+  e.preventDefault();
+  try {
+    if (sessionStorage.getItem('wb-chunk-reload') === '1') return;
+    sessionStorage.setItem('wb-chunk-reload', '1');
+  } catch { /* private mode: still reload, just without the loop guard */ }
+  location.reload();
+});
+
 // ---------- worker rpc ----------
 
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -1967,6 +1980,8 @@ function setCodeStatus(kind: '' | 'dirty' | 'error' | 'saved', msg: string): voi
   codeDirty = kind === 'dirty' || kind === 'error';
   codeStatus.className = kind;
   codeStatus.textContent = msg;
+  // The bar ellipsizes the status at narrow split widths; hover shows it all.
+  codeStatus.title = msg;
 }
 
 function showCodeTooBig(): void {
@@ -1984,7 +1999,21 @@ function showCodeTooBig(): void {
 async function ensureEditor(): Promise<void> {
   if (codeEditor) return;
   codeHost.replaceChildren();
-  const { CodeEditor } = await import('./code');
+  let mod: typeof import('./code');
+  try {
+    mod = await import('./code');
+  } catch {
+    // A deploy replaced the hashed chunks this tab's bundle points at (Pages
+    // keeps no old assets). vite:preloadError reloads once; this is the
+    // fallback when that already ran or the failure is something else.
+    const div = document.createElement('div');
+    div.className = 'code-toobig';
+    div.textContent = 'jsonloupe was updated since this tab loaded.\nReload the page to open the code view.';
+    codeHost.replaceChildren(div);
+    setCodeStatus('error', 'reload needed');
+    return;
+  }
+  const { CodeEditor } = mod;
   codeEditor = await CodeEditor.create({
     host: codeHost,
     theme: currentTheme(),

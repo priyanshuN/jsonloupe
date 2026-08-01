@@ -1701,9 +1701,18 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .code-bar .spacer { flex: 1; }
 /* At narrow split widths the status text is what gives way — the primary
-   action always keeps its label on one line. */
+   action always keeps its label on one line. The status truncates with an
+   ellipsis rather than wrapping (per-character wrap turns it into a 1ch-wide
+   column that blows up the bar's height); the full text lives in its title. */
 #code-apply { white-space: nowrap; flex-shrink: 0; }
-#code-status { font: 12px var(--mono); color: var(--text-dim); min-width: 0; overflow-wrap: anywhere; }
+#code-status {
+  font: 12px var(--mono);
+  color: var(--text-dim);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 #code-status.dirty { color: var(--c-number); }
 #code-status.error { color: var(--danger); }
 #code-status.saved { color: var(--ok); }
