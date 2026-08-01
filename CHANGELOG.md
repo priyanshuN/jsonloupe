@@ -2,6 +2,24 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## 1.0.2 — 2026-08-01
+
+- **One color system.** The light theme's accent is now the brand's loupe teal
+  (buttons previously used an unrelated blue). The transport button and the
+  breadcrumb payload chip no longer borrow the JSON-number syntax color:
+  chrome is neutral or accent, and amber/red/green are reserved for actual
+  state (repaired document, errors, budget verdicts).
+- **Open tabs survive redeploys.** A deploy replaces the hashed asset chunks,
+  so a tab loaded before it could get a silently blank Code/Split pane on its
+  first lazy load of the editor. The app now reloads once on a failed chunk
+  load and, failing that, says "reload to continue" in the pane.
+- **Narrow split polish.** The code-view status text truncates with an
+  ellipsis (full text on hover) instead of wrapping one character per line and
+  distorting the toolbar.
+- **API-key field is a real form.** Enter now saves the key; Chrome's
+  password-containment console warning is gone; `autocomplete=off` keeps
+  password managers from offering to store an API key.
+
 ## 1.0.1 — 2026-08-01
 
 No functional changes. Verifies the credential-free release pipeline: this is
