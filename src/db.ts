@@ -352,7 +352,11 @@ export async function saveQuery(question: string, query: string): Promise<SavedQ
     : { id: crypto.randomUUID(), question, query, createdAt: now, updatedAt: now, uses: 1 };
   const t = (await db()).transaction('queries', 'readwrite');
   t.objectStore('queries').put(rec);
-  for (const old of all.slice(KEEP_QUERIES)) t.objectStore('queries').delete(old.id);
+  // `all` predates the put: a new record grows the store by one, so cull from
+  // KEEP_QUERIES - 1; a dup replaces in place. Never cull the record just put.
+  for (const old of all.slice(dup ? KEEP_QUERIES : KEEP_QUERIES - 1)) {
+    if (old.id !== rec.id) t.objectStore('queries').delete(old.id);
+  }
   await done(t);
   return rec;
 }

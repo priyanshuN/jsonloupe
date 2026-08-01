@@ -1,7 +1,7 @@
 {
   "name": "jsonloupe",
   "version": "1.0.3",
-  "description": "A loupe for large JSON \u2014 lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
+  "description": "A loupe for large JSON — lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
   "license": "MIT",
   "author": "Priyanshu Nandan",
   "homepage": "https://jsonloupe.dev",
@@ -38,12 +38,10 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 5199",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "prepublishOnly": "npm test && npm run build"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@codemirror/commands": "^6.6.0",
     "@codemirror/lang-json": "^6.0.1",
@@ -52,8 +50,13 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.43.7",
     "@lezer/highlight": "^1.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "codemirror": "^6.0.1",
+    "fake-indexeddb": "^6.2.5",
     "jsonrepair": "^3.15.0",
-    "lossless-json": "^4.3.0"
+    "lossless-json": "^4.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

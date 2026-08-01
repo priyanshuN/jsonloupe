@@ -2,6 +2,18 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Saved-questions cap fixed.** The Ask panel's saved-question store settled at
+  101 entries instead of its nominal 100, and — worse — re-saving a question that
+  had aged past the cap could delete the very record being saved (the cull list
+  was read before the write and could include it). Both fixed; the store now
+  holds exactly 100 and a duplicate save always survives.
+- **The document store is now fully tested.** The IndexedDB layer (save/load
+  fidelity, Recents ordering, pinning, pruning, file-handle dedup, schema
+  upgrade) went from ~2% to 100% line coverage — 44 new tests against a real
+  fake-indexeddb backend. `npm run coverage` is now a first-class script.
+
 ## 1.0.3 — 2026-08-01
 
 - **jsonloupe.dev.** The hosted app moved to its own domain (the old
