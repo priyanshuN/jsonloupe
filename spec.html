@@ -10,6 +10,19 @@
   <meta property="og:title" content="jsonloupe — what it actually does" />
   <meta property="og:description" content="Six guarantees, in the order they matter when a payload lands on you." />
   <meta property="og:type" content="website" />
+  <!-- Same pre-paint theme gate as index.html: the stylesheet's bare :root is
+       the dark palette, so without this a light-theme user gets slammed into
+       dark the moment they click "spec". -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('wb-theme');
+        if (t !== 'light' && t !== 'dark')
+          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+      } catch (e) { /* private mode: no flash protection, nothing broken */ }
+    })();
+  </script>
 </head>
 <body class="spec-page">
   <header class="sp-header">
@@ -52,7 +65,7 @@
     <div class="sp-row">
       <span class="sp-num">05</span>
       <h2>Edit, undo, apply</h2>
-      <p>Inline-edit primitives in the tree, or edit in a CodeMirror code view and apply with ⌘S. Full undo/redo across edits.</p>
+      <p>Inline-edit primitives in the tree, or edit in a CodeMirror code view and apply with Ctrl/Cmd+S. Full undo/redo across edits.</p>
     </div>
     <div class="sp-row">
       <span class="sp-num">06</span>
