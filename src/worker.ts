@@ -34,15 +34,22 @@ import {
   type PayloadDecodeFailure,
   type PayloadDecodeSuccess,
 } from './codec';
-import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber, LosslessNumber } from 'lossless-json';
+import { parse as llParse, stringify as llStringify, isLosslessNumber, LosslessNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
 
-// Lossless number handling: box a number ONLY when JS can't hold it exactly
-// (int64 IDs beyond 2^53, high-precision decimals) — everything else stays a
-// native number so the parsed tree isn't bloated with wrappers. This is the
-// fidelity fix: order/consignment/snowflake IDs survive paste→view→copy→edit.
-const numberParser = (v: string): unknown =>
-  isSafeNumber(v, { approx: false }) ? parseFloat(v) : new LosslessNumber(v);
+// Lossless number handling: box a number whenever its canonical float form is
+// not byte-identical to the source literal — everything else stays a native
+// number so the parsed tree isn't bloated with wrappers. The obvious library
+// predicate, isSafeNumber(v, {approx: false}), compares *significant* digits,
+// so '88.10' passed as "safe" and every canonical copy silently became 88.1;
+// trailing zeros, '-0', '1e3' and '0.0000005' are formatting the author chose,
+// and this tool's one promise is that not a single digit changes. String(f)
+// also rejects everything isSafeNumber rejected (a differing significant digit
+// is in particular a differing byte), so this boxes strictly more, never less.
+const numberParser = (v: string): unknown => {
+  const f = parseFloat(v);
+  return String(f) === v ? f : new LosslessNumber(v);
+};
 
 function lparse(text: string): unknown {
   return llParse(text, undefined, numberParser as never);

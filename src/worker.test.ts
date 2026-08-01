@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { handle } from './worker';
-import { stringify as llStringify, parse as llParse, isSafeNumber, LosslessNumber } from 'lossless-json';
+import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';
 import type { CompareRow } from './protocol';
 
 // Drive the worker exactly as the UI thread does — real protocol messages through
@@ -47,7 +47,12 @@ const rows = (start = 0, count = 200): Row[] => h<{ rows: Row[] }>({ type: 'rows
 const stringify = (space = 0): string => h<{ text: string }>({ type: 'stringify', space }).text;
 const nodeValue = (id: number): string => h<{ text: string }>({ type: 'nodeValue', id }).text;
 
-const numberParser = (v: string): unknown => (isSafeNumber(v, { approx: false }) ? parseFloat(v) : new LosslessNumber(v));
+// Mirrors the worker's parser: box whenever the canonical float form is not
+// byte-identical to the source literal (trailing zeros, -0, exponent forms).
+const numberParser = (v: string): unknown => {
+  const f = parseFloat(v);
+  return String(f) === v ? f : new LosslessNumber(v);
+};
 const lparse = (t: string): unknown => llParse(t, undefined, numberParser as never);
 
 // ---------- parse ----------
@@ -63,6 +68,21 @@ describe('parse', () => {
     const rs = rows();
     expect(rs[0].depth).toBe(0);
     expect(rs.map((x) => x.key)).toEqual([null, 'a', 'b']);
+  });
+
+  it('chosen number spellings survive to the canonical form byte-identically', () => {
+    // Trailing zeros, -0, exponent forms, and sub-epsilon decimal spellings are
+    // formatting the author chose; isSafeNumber's significant-digit comparison
+    // used to strip them (88.10 → 88.1) from every canonical copy.
+    const src = '{"a":88.10,"b":1234.5600,"c":-0,"d":1e3,"e":0.0000005,"f":1.5,"g":0}';
+    const r = parse(src);
+    expect(r.ok).toBe(true);
+    expect(stringify()).toBe(src);
+    // Safe canonical literals stay native numbers — the tree must not be
+    // wrapper-bloated for ordinary data.
+    expect(lparse('1.5')).toBe(1.5);
+    expect(lparse('0')).toBe(0);
+    expect(lparse('88.10')).toBeInstanceOf(LosslessNumber);
   });
 
   it('accepts exactly one leading BOM for a current document', () => {
@@ -908,9 +928,10 @@ describe('CSV export (U2)', () => {
     expect(lines[3]).toBe('1234567890123456789'); // all 19 digits, still unfloated
     expect(lines[4]).toBe('-1.2345678901234567890e9'); // boxed LosslessNumber: exponent literal intact
     expect(lines[5]).toBe('-1.5e9'); // numeric string: exponent form untouched
-    // -1.5e9 fits a double exactly, so the parser keeps it native by design
-    // (see numberParser) — the value is exact either way, and still unprefixed.
-    expect(lines[6]).toBe('-1500000000');
+    // -1.5e9 fits a double exactly, but its canonical form spells it
+    // -1500000000, so the parser boxes it and the author's exponent literal
+    // survives to the export byte-identical (see numberParser).
+    expect(lines[6]).toBe('-1.5e9');
     expect(lines[7]).toBe("'-1-1"); // numeric-looking but not a literal → neutralized
   });
 
