@@ -81,5 +81,5 @@ The claims that matter here — no backend, three auditable `fetch` calls, no
 ## Reporting a vulnerability
 
 Open a GitHub issue for non-sensitive reports. For anything exploitable, email
-the maintainer (address on the GitHub profile) — please allow a reasonable
-window for a fix before public disclosure.
+**security@jsonloupe.dev** — please allow a reasonable window for a fix before
+public disclosure.

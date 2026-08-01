@@ -29,7 +29,7 @@ IndexedDB, and never uploaded anywhere. No backend, no account, no telemetry.
 
 ## Run it
 
-Use the hosted app at **[priyanshun.github.io/jsonloupe](https://priyanshun.github.io/jsonloupe/)** — or run the identical bundle from your own machine, fully offline:
+Use the hosted app at **[jsonloupe.dev](https://jsonloupe.dev)** — or run the identical bundle from your own machine, fully offline:
 
 ```bash
 npx jsonloupe

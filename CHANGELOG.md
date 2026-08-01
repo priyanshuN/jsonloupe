@@ -4,6 +4,9 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **jsonloupe.dev.** The hosted app moved to its own domain (the old
+  priyanshun.github.io/jsonloupe URL redirects). Vulnerability reports now go
+  to security@jsonloupe.dev.
 - **Oversize documents fail honestly.** Input past ~200 MB used to head for a
   tab OOM crash (the materialized object graph costs several times the text
   size in heap). Every intake path — paste, drop, import, reload, and payloads

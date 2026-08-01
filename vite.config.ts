@@ -63,10 +63,9 @@ function keyServer(): Plugin {
 }
 
 export default defineConfig({
-  // A project GitHub Pages site is served from /<repo>/, so the built asset URLs
-  // (JS, the worker, the zstd wasm, the favicon) must carry that prefix. Local
-  // dev and any root-domain host keep '/'.
-  base: process.env.GITHUB_ACTIONS ? '/jsonloupe/' : '/',
+  // Served from the root of the custom domain (jsonloupe.dev) everywhere:
+  // Pages deploys, local dev, and the npx static server all use '/'.
+  base: '/',
   plugins: [keyServer()],
   build: {
     // Two static entries: the app/landing and the standalone spec page.
