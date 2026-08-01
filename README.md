@@ -8,6 +8,7 @@
 <p align="center">
   <a href="https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml"><img src="https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/priyanshuN/jsonloupe"><img src="https://api.scorecard.dev/projects/github.com/priyanshuN/jsonloupe/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://www.npmjs.com/package/jsonloupe"><img src="https://img.shields.io/npm/v/jsonloupe.svg" alt="npm"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="tsconfig.json"><img src="https://img.shields.io/badge/TypeScript-strict-3178c6.svg" alt="TypeScript strict"></a>
   <a href="SECURITY.md"><img src="https://img.shields.io/badge/local--first-no%20backend%2C%20no%20telemetry-2ea44f.svg" alt="Local-first"></a>
