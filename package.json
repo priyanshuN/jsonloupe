@@ -40,8 +40,8 @@
     "prepublishOnly": "npm test && npm run build"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
-    "vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@codemirror/commands": "^6.6.0",
@@ -49,7 +49,7 @@
     "@codemirror/language": "^6.10.2",
     "@codemirror/search": "^6.5.6",
     "@codemirror/state": "^6.4.1",
-    "@codemirror/view": "^6.28.0",
+    "@codemirror/view": "^6.43.7",
     "@lezer/highlight": "^1.2.0",
     "codemirror": "^6.0.1",
     "jsonrepair": "^3.15.0",
