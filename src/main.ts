@@ -250,6 +250,16 @@ let pendingInitialSave: {
 // be fixed — but never lay tens of MB into the DOM, so cap what we echo back.
 const PASTE_ECHO_MAX = 2_000_000;
 
+// The worker holds the fully materialized object graph (~4-6x the text size in
+// heap), so past this point a tab is headed for OOM, not slowness. Refuse with
+// an honest message instead of crashing. Length is UTF-16 code units, which for
+// JSON (overwhelmingly ASCII) tracks bytes closely enough for a guard.
+const MAX_DOC_BYTES = 200 * 1024 * 1024;
+
+function oversizeMessage(size: number): string {
+  return `this document is ${fmtBytes(size)} — beyond the ~${fmtBytes(MAX_DOC_BYTES)} a browser tab can hold as live objects. Extract the part you need (e.g. with jq) and open that instead.`;
+}
+
 // ---------- helpers ----------
 
 let toastTimer = 0;
@@ -1331,6 +1341,19 @@ async function openText(
   requestToken = beginOpenRequest(),
 ): Promise<boolean> {
   if (requestToken !== openRequestToken) return false;
+  // Size guard: this runs again on the recursive call after payload decode, so
+  // a small compressed blob that inflates past the cap is caught too.
+  if (text.length > MAX_DOC_BYTES) {
+    if (keepCurrentOnFailure) {
+      showToast(`reload rejected: ${oversizeMessage(text.length)}`);
+      return false;
+    }
+    showParseError({ ok: false, error: oversizeMessage(text.length), line: null, column: null, context: null });
+    landing.hidden = false;
+    viewer.hidden = true;
+    codecPane.hidden = true;
+    return false;
+  }
   // Decode only strong, magic-gated transport encodings before JSON parsing.
   // This catches quoted DB/SQL cells that are themselves valid JSON strings,
   // while ordinary JSON scalars remain ordinary documents.
@@ -1503,6 +1526,10 @@ function hasRawZstdMagic(bytes: Uint8Array): boolean {
 // One binary-safe intake path for ordinary imports, drops, reload, the payload
 // panel, and comparison baselines. Raw Zstd is never passed through File.text().
 async function readPayloadFile(file: File): Promise<PayloadFileText> {
+  // Reject by declared size before reading a huge file into a string at all.
+  // (A compressed file under the cap that inflates past it is caught by the
+  // same guard in openText, after decode.)
+  if (file.size > MAX_DOC_BYTES) throw new Error(oversizeMessage(file.size));
   const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   if (hasRawZstdMagic(head)) {
     const decoded = await decodePayloadInWorker(await file.arrayBuffer());

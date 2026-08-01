@@ -2,6 +2,15 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Oversize documents fail honestly.** Input past ~200 MB used to head for a
+  tab OOM crash (the materialized object graph costs several times the text
+  size in heap). Every intake path — paste, drop, import, reload, and payloads
+  that decompress past the cap — now refuses with a clear message suggesting
+  extracting the needed slice instead. Files are rejected by declared size
+  before being read into memory at all.
+
 ## 1.0.2 — 2026-08-01
 
 - **One color system.** The light theme's accent is now the brand's loupe teal
