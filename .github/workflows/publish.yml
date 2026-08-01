@@ -1,0 +1,76 @@
+name: publish
+
+# Publishing happens here rather than from a laptop so npm can attach a
+# provenance attestation: a verifiable link from the published tarball back to
+# the exact public commit and workflow that produced it. For a package whose
+# whole pitch is "audit it, nothing leaves your machine", a signed origin is
+# part of the product.
+#
+# FIRST PUBLISH ONLY: authentication is the NPM_TOKEN repository secret below,
+# because npm's trusted publishing cannot create a package that does not exist
+# yet (npm/cli#8544). Once 1.0.0 is live: attach a trusted publisher on
+# npmjs.com (repo priyanshuN/jsonloupe, workflow publish.yml, environment name
+# BLANK — any value there rejects every publish), then DELETE the env block on
+# the publish step and revoke the token. Removing NODE_AUTH_TOKEN is the
+# mechanism, not cleanup: a stored token takes precedence over OIDC, so its
+# absence is what keeps this on the trusted-publishing path.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Actually publish (leave off for a rehearsal)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # mints the OIDC token: registry auth (post-token) and provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build # tsc --noEmit + vite build; prepublishOnly reruns both at publish
+
+      - name: Release tag and package version must agree
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "release tag ($tag) does not match package.json ($pkg)"
+            exit 1
+          fi
+
+      - name: Refuse to publish while the package is marked private
+        if: github.event_name == 'release' || inputs.publish
+        run: |
+          node -e "if (require('./package.json').private) {
+            console.error('package.json still has \"private\": true — remove it deliberately before releasing');
+            process.exit(1);
+          }"
+
+      # A rehearsal run (publish off) proves the build, NOT the auth — the
+      # publish step is skipped entirely, so authentication is never touched.
+      - name: Publish with provenance
+        if: github.event_name == 'release' || inputs.publish
+        run: npm publish --provenance --access public
+        env:
+          # DELETE this env block after attaching the trusted publisher.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Rehearsal only — nothing was published
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        run: echo "Build and tests passed. Re-run with publish=true, or cut a v1.0.0 release."
