@@ -138,6 +138,7 @@ const docTitleEl = $('#doc-title');
 const docStatsEl = $('#doc-stats');
 const searchBox = $<HTMLInputElement>('#search-box');
 const searchPanel = $('#search-panel');
+const treePane = $('#tree-pane');
 const treeViewport = $('#tree-viewport');
 const toast = $('#toast');
 const dropOverlay = $('#drop-overlay');
@@ -213,7 +214,7 @@ function showPane(p: Pane): void {
   activePane = p;
   const split = p === 'split';
   paneArea.classList.toggle('split', split);
-  treeViewport.hidden = !(p === 'tree' || split);
+  treePane.hidden = !(p === 'tree' || split);
   codeView.hidden = !(p === 'code' || split);
   splitDivider.hidden = !split;
   diffView.hidden = p !== 'diff';
@@ -2277,12 +2278,18 @@ async function runSearch(): Promise<void> {
     searchPanel.hidden = true;
     return;
   }
-  const r = await call<{ results: SearchHit[]; error?: string }>({ type: 'search', query: q });
+  const r = await call<{ results: SearchHit[]; total?: number; error?: string }>({ type: 'search', query: q });
   if (r.error) {
     renderSearchError(r.error);
     return;
   }
-  renderHits(r.results);
+  const total = r.total ?? r.results.length;
+  const header = !total
+    ? undefined
+    : total > r.results.length
+      ? `${total} matches — showing first ${r.results.length}`
+      : `${total} ${total === 1 ? 'match' : 'matches'}`;
+  renderHits(r.results, header);
 }
 
 async function findSameValue(id: number): Promise<void> {
@@ -3325,7 +3332,7 @@ window.addEventListener('keydown', async (e) => {
     await (redo ? doRedoUI() : doUndoUI());
     return;
   }
-  if (viewer.hidden || typing || treeViewport.hidden) return;
+  if (viewer.hidden || typing || treePane.hidden) return;
   const sel = tree.selectedIndex();
   switch (e.key) {
     case 'j':

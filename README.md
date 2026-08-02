@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/priyanshuN/jsonloupe/main/.github/assets/demo.gif">
-    <img src=".github/assets/demo.gif" width="820" alt="Demo: pasting JSON with int64 IDs and exact decimals — every digit survives — then opening a 5-million-element, 37 MB array that parses in ~470 ms. Click to view full size." />
+    <img src=".github/assets/demo.gif" width="820" alt="Demo: pasting JSON with int64 IDs and exact decimals — every digit survives — then a 5-million-element, 28 MB array parsing in ~420 ms, then a Base64-Zstd blob pasted straight in and decoded to JSON automatically. Click to view full size." />
   </a>
 </p>
 

@@ -34,7 +34,14 @@
     9. Third-party chrome gets themed, not tolerated: the CodeMirror search
        panel is restyled to this contract in both themes, pure CSS, near the
        bottom of this file. Its behaviour is CodeMirror's; its look is ours.
-   10. This block is the contract. Extend it here when the vocabulary changes.
+   10. Operations live on the pane they act on (.code-bar / .tree-bar): if you
+       do it while READING a document it is one click on its pane, never behind
+       the ⋯ menu. The global toolbar carries only document/view concerns
+       (back, title, compare, mode, search, ask); ⋯ is once-per-document-or-
+       less residue. An action gets a glyph instead of a word ONLY when the
+       glyph is universal (◂ back, ⋯ more); anything ambiguous keeps its
+       lowercase label.
+   11. This block is the contract. Extend it here when the vocabulary changes.
    ========================================================================== */
 
 :root,
@@ -1407,10 +1414,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #search-box {
   flex: 1;
   min-width: 0;
+  /* Stretch to the shell's full height: the whole field is the input, not a
+     text-height strip floating in it — clicks anywhere in the box focus it. */
+  align-self: stretch;
   background: transparent;
   border: none;
   color: var(--text);
-  padding: 0 var(--gap-3);
+  padding: 0 var(--gap-2);
   font: 12.5px var(--mono);
   outline: none;
 }
@@ -1476,13 +1486,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    bordered box 40px under a quiet toolbar reads as a leftover from the old
    design. Each bar keeps one standout: its fill (apply changes / ask run) and
    any toggled state (source .on, which re-tints via its own rule). */
-#code-format, #code-copy, #code-raw, #ask-key {
+#code-format, #code-copy, #code-raw, #ask-key,
+.tree-bar button {
   background: none;
   border-color: transparent;
   box-shadow: none;
   color: var(--text-dim);
 }
-#code-format:hover, #code-copy:hover, #code-raw:hover, #ask-key:hover {
+#code-format:hover, #code-copy:hover, #code-raw:hover, #ask-key:hover,
+.tree-bar button:hover {
   background: var(--bg-hover);
   color: var(--text);
   border-color: transparent;
@@ -1679,7 +1691,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: flex;
   position: relative;
 }
-#pane-area > #tree-viewport,
+#pane-area > #tree-pane,
 #pane-area > #code-view,
 #pane-area > #diff-view,
 #pane-area > #semantic-view,
@@ -1687,7 +1699,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   flex: 1 1 0;
   min-width: 0;
 }
-#pane-area.split > #tree-viewport { flex: 0 0 var(--split-w, 50%); }
+#pane-area.split > #tree-pane { flex: 0 0 var(--split-w, 50%); }
 #pane-area.split > #code-view { border-left: 1px solid var(--border); }
 
 #split-divider {
@@ -1703,6 +1715,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 /* ---------- tree ---------- */
 
+#tree-pane { display: flex; flex-direction: column; min-height: 0; }
 #tree-viewport {
   flex: 1;
   overflow: auto;
@@ -1925,7 +1938,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* ---------- code view (CodeMirror) ---------- */
 
 #code-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.code-bar {
+.code-bar,
+.tree-bar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1933,7 +1947,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
 }
-.code-bar .spacer { flex: 1; }
+.code-bar .spacer,
+.tree-bar .spacer { flex: 1; }
 /* At narrow split widths the status text is what gives way — the primary
    action always keeps its label on one line. The status truncates with an
    ellipsis rather than wrapping (per-character wrap turns it into a 1ch-wide

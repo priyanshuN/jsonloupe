@@ -254,16 +254,13 @@
             <button id="filter-btn" class="tb-chip" title="Prune the tree to branches matching the search text">filter</button>
           </div>
           <button id="ask-btn" title="Ask a question about this document in English">ask</button>
-          <!-- Overflow: everything that is real but not per-second. The buttons
-               keep their ids, so their handlers are unchanged. -->
+          <!-- Overflow: once-per-document-or-less. Anything you do while READING
+               a document lives on the pane it acts on (tree-bar / code-bar). -->
           <div class="tb-more">
             <button id="more-btn" class="btn-icon" type="button" aria-haspopup="menu"
               aria-expanded="false" aria-controls="more-menu" title="More actions">⋯</button>
             <div id="more-menu" class="menu" role="menu" hidden>
-              <button id="collapse-btn" role="menuitem" type="button" title="Collapse every expanded node">collapse</button>
-              <button id="fmt-btn" role="menuitem" type="button" title="Copy pretty-printed JSON">copy</button>
-              <button id="min-btn" role="menuitem" type="button" title="Copy minified JSON">minify</button>
-              <button id="dl-btn" role="menuitem" type="button" title="Download the original bytes">download original</button>
+              <button id="min-btn" role="menuitem" type="button" title="Copy minified JSON">copy minified</button>
               <div class="menu-sep" role="separator"></div>
               <button id="zstd-btn" role="menuitem" type="button"
                 title="Compress this document to base64 zstd and open payload tools">payload tools</button>
@@ -300,9 +297,19 @@
         </div>
         <div id="search-panel" hidden></div>
         <div id="pane-area">
-        <div id="tree-viewport">
-          <div id="tree-spacer"></div>
-          <div id="tree-layer"></div>
+        <div id="tree-pane">
+          <!-- Per-pane strip, same idiom as .code-bar: operations live on the
+               pane they act on. Tree ops = document shape; code ops = text. -->
+          <div class="tree-bar">
+            <button id="collapse-btn" type="button" title="Collapse every expanded node">collapse</button>
+            <button id="fmt-btn" type="button" title="Copy pretty-printed JSON">copy</button>
+            <button id="dl-btn" type="button" title="Download the original bytes">download</button>
+            <span class="spacer"></span>
+          </div>
+          <div id="tree-viewport">
+            <div id="tree-spacer"></div>
+            <div id="tree-layer"></div>
+          </div>
         </div>
         <div id="split-divider" hidden></div>
         <div id="code-view" hidden>

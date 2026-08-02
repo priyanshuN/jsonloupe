@@ -2,6 +2,21 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Operations live on the pane they act on.** The tree pane gained its own bar
+  (`collapse · copy · download`), the same idiom the code view always had — so
+  every while-reading operation is one click, and the `⋯` menu shrank to true
+  residue (copy minified, payload tools, size report). The global toolbar now
+  carries only document and view concerns.
+- **Search says how many.** Tree search opens with a real occurrence count
+  ("333 matches — showing first 300"), and the code view's Ctrl+F finally has a
+  live match counter beside its close button (capped at 999+ so a one-letter
+  query over a 37 MB document stops counting early). The search field itself is
+  now clickable across its whole height instead of a text-height strip.
+- Demo GIF re-recorded: int64 fidelity, the 5-million-element array, and a
+  Base64-Zstd blob pasted straight in and decoded automatically.
+
 ## 1.1.0 — 2026-08-02
 
 - **jsonloupe is an MCP server.** `npx -y -p jsonloupe jsonloupe-mcp` (register it with

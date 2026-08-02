@@ -1240,7 +1240,7 @@ function parseRegexQuery(query: string): { re: RegExp } | { literal: true } | { 
   return { literal: true };
 }
 
-function doSearch(query: string): { results: SearchHit[]; error?: string } {
+function doSearch(query: string): { results: SearchHit[]; total?: number; error?: string } {
   searchPaths = [];
   const results: SearchHit[] = [];
   if (!query) return { results };
@@ -1259,8 +1259,11 @@ function doSearch(query: string): { results: SearchHit[]; error?: string } {
     results.push({ pathText: formatPath(path), preview, where });
   };
 
+  // The traversal always runs to completion so `total` is the real occurrence
+  // count; only the rendered hit list is capped at SEARCH_LIMIT.
+  let total = 0;
   const stack: { v: unknown; path: (string | number)[] }[] = [{ v: root.value, path: [] }];
-  while (stack.length && results.length < SEARCH_LIMIT) {
+  while (stack.length) {
     const { v, path } = stack.pop()!;
     if (Array.isArray(v)) {
       for (let i = v.length - 1; i >= 0; i--) stack.push({ v: v[i], path: [...path, i] });
@@ -1269,17 +1272,21 @@ function doSearch(query: string): { results: SearchHit[]; error?: string } {
       for (let i = keys.length - 1; i >= 0; i--) {
         const k = keys[i];
         const cv = (v as Record<string, unknown>)[k];
-        if (hit(k) && results.length < SEARCH_LIMIT) {
-          add([...path, k], previewOf(cv), 'key');
+        if (hit(k)) {
+          total++;
+          if (results.length < SEARCH_LIMIT) add([...path, k], previewOf(cv), 'key');
         }
         stack.push({ v: cv, path: [...path, k] });
       }
     } else {
       const s = v === null ? 'null' : String(v);
-      if (hit(s)) add(path, previewOf(v), 'value');
+      if (hit(s)) {
+        total++;
+        if (results.length < SEARCH_LIMIT) add(path, previewOf(v), 'value');
+      }
     }
   }
-  return { results };
+  return { results, total };
 }
 
 // Resolve one path segment under a parent, transparently crossing chunk rows.
