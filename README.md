@@ -95,6 +95,40 @@ flagged, with the original bytes preserved.
   the page makes zero network requests. A disclosure panel shows exactly what
   would be sent. See [SECURITY.md](SECURITY.md).
 
+## Use with AI agents
+
+The same engine runs as an [MCP](https://modelcontextprotocol.io) server, so an
+agent can work on a document that would never fit in its context:
+
+```bash
+claude mcp add jsonloupe -- npx jsonloupe-mcp
+```
+
+**If you have jq and plain JSON, use jq.** This is for the cases jq is awkward
+about: compressed payloads (`.zst`, Base64-Zstd, PostgreSQL `\x…` bytea) that
+have to be decoded first, int64 and decimal digits that must survive the whole
+pipeline exactly, identity-keyed semantic diff between two documents, and MCP
+hosts that have no shell to run jq in.
+
+Six tools: `load_doc`, `get_schema`, `run_query`, `sample`, `diff_docs`,
+`export_csv`. The document is opened once and stays in the server; only shapes
+and capped results (10,000 characters, always) travel back. A typical run over a
+37 MB routing payload:
+
+```
+load_doc  path=payload.json     → docId: d1 · 39,401,637 bytes · object · keys: generatedAt, tasks
+get_schema d1                   → tasks: array(70000) of { id: number, status: string, … }
+run_query d1 "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)"
+                                → ADDRESS_NOT_FOUND 5834 · CUSTOMER_UNAVAILABLE 5833 · …
+sample    d1 "$.tasks[0]"       → the whole element, id 9007199254740993 intact
+export_csv d1 "…| pluck(@.id, @.failureReason)" out=failed.csv
+                                → outPath, rows, bytes — the rows never enter the transcript
+```
+
+That whole session costs the agent about 12 KB of context. The server makes no
+network calls of any kind and reads only the paths it is handed; a bad query
+comes back with the grammar and a suggestion rather than an empty result.
+
 ## Privacy & security
 
 Documents never leave your machine. The complete network-call inventory (three
@@ -117,8 +151,9 @@ visitor adds their own key.
 ## Development
 
 ```sh
-npm test           # vitest — query engine, worker, NL translation suites
-npm run build      # tsc --noEmit + vite build
+npm test           # vitest — query engine, worker, MCP dispatch, NL translation suites
+npm run build      # tsc --noEmit + vite build + the MCP bundle
+npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture
 ```
 
 Design and internals are documented in [SPEC.md](SPEC.md).

@@ -2,8 +2,20 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## Unreleased — staged for 1.1.0
 
+- **jsonloupe is an MCP server.** `npx jsonloupe-mcp` (register it with
+  `claude mcp add jsonloupe -- npx jsonloupe-mcp`) exposes the same engine the
+  viewer runs on to an AI agent, so a document far too large for a model's
+  context can still be answered from: `load_doc`, `get_schema`, `run_query`,
+  `sample`, `diff_docs`, `export_csv`. The document is opened once and stays in
+  the server; only shapes and results travel back, under a flat 10,000-character
+  cap that says what it truncated and why. Compressed payloads decode on intake
+  exactly as they do in the browser, int64 and decimal digits stay exact all the
+  way to a written CSV, and each document gets its own worker thread (eight live
+  at a time, coldest evicted with a notice). It makes no network calls at all
+  and reads only the paths its client hands it. The MCP SDK is bundled at build
+  time, so the package still installs with zero runtime dependencies.
 - **One design system for the chrome.** A component contract now lives at the top
   of style.css: two control sizes (28px/20px), lowercase labels, one focus ring,
   and two button voices — a soft accent tint for anything accented (`compare`,

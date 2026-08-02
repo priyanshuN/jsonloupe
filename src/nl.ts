@@ -7,6 +7,8 @@
 // OpenRouter keys (sk-or-…) go to OpenRouter's OpenAI-compatible endpoint;
 // Anthropic keys (sk-ant-…) go direct to the Anthropic API.
 
+import { QUERY_EXAMPLES, QUERY_GRAMMAR } from './query-grammar';
+
 const KEY_STORAGE = 'wb-api-key';
 const OPENROUTER_MODEL = 'anthropic/claude-haiku-4.5';
 const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
@@ -33,24 +35,10 @@ export function setApiKey(key: string): void {
 
 const GRAMMAR = `You translate a question about a JSON document into a single query in this grammar (a JSONPath subset with aggregation pipes):
 
-Paths: $.key  $['odd key']  $[3]  $[-1]  $[1:5]  $.arr[*]  $..key (recursive)
-Predicates filter the CHILDREN of the current node: $.tasks[?(...)]
-  Operators: == != > >= < <=   (numbers and strings)
-  Boolean: && || !   Grouping: ( )
-  Strings: @.name contains 'x'  |  startsWith  |  endsWith  |  @.name =~ /regex/i
-  Membership: @.status in ['A','B']    Arrays: @.tags contains 'x'
-  Existence: @.field  (present, non-null)   Absence: !@.field
-  Fields compare to fields: @.capacity.used > @.capacity.max
-Pipes (append one): | count   | sum(@.x)  | avg(@.x)  | min(@.x)  | max(@.x)
-  | distinct   | group(@.x)   | pluck(@.a, @.b.c)
-  A pipe without args operates on the matched values themselves: $.a[*].n | sum
+${QUERY_GRAMMAR}
 
 Examples:
-"how many tasks have no route" → $.tasks[?(!@.routeId)] | count
-"failed tasks by reason" → $.tasks[?(@.status == 'FAILED')] | group(@.failureReason)
-"all statuses that appear" → $..status | distinct
-"ids and etas of pending tasks" → $.tasks[?(@.status == 'PENDING')] | pluck(@.id, @.eta)
-"tasks outside india" → $.tasks[?(@.loc.lat < 8 || @.loc.lat > 37)]
+${QUERY_EXAMPLES}
 
 Output ONLY the query string. No explanation, no backticks, no quotes around it.`;
 

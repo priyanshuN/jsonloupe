@@ -613,6 +613,38 @@ describe('serializeWithLines', () => {
   });
 });
 
+// ---------- schema summary ----------
+
+describe('schema', () => {
+  interface Schema { text?: string; ok?: false; error?: string }
+  const schema = (path?: string): Schema => h<Schema>({ type: 'schema', path });
+
+  it('describes the whole document as names and types, never values', () => {
+    parse('{"id":1234567890123456789,"tasks":[{"status":"FAILED","eta":3}]}');
+    const text = schema().text!;
+    expect(text).toContain('id: number');
+    expect(text).toContain('tasks: array(1) of');
+    expect(text).toContain('status: string');
+    expect(text).not.toContain('FAILED');
+    expect(text).not.toContain('1234567890123456789');
+  });
+
+  it('scopes to a path and merges the shape across every match', () => {
+    parse('{"tasks":[{"a":1},{"b":"x"},{"a":2}]}');
+    const text = schema('$.tasks[*]').text!;
+    expect(text).toContain('a: number');
+    expect(text).toContain('b: string');
+    expect(text).not.toContain('tasks');
+  });
+
+  it('reports a query error rather than an empty shape', () => {
+    parse('{"tasks":[]}');
+    expect(schema('$.tasks[?(').ok).toBe(false);
+    expect(schema('$.nope').error).toBe('no match for $.nope');
+    expect(schema('$.tasks | count').error).toContain('aggregate pipe');
+  });
+});
+
 // ---------- unpack ----------
 
 describe('unpack', () => {

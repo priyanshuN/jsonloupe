@@ -21,6 +21,9 @@ all belonging to the **opt-in** "Ask" (natural-language query) feature:
 With no key configured, **no network request ever leaves the page**. Verify this
 yourself: `grep -rn "fetch(" src/`.
 
+The MCP server (`npx jsonloupe-mcp`) makes **zero network calls of any kind**: it
+speaks JSON-RPC on stdio and reads only the file paths its client passes it.
+
 ## What the Ask feature transmits
 
 Only your question and the document's **shape** — field names, types, and array

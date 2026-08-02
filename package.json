@@ -1,6 +1,6 @@
 {
   "name": "jsonloupe",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "A loupe for large JSON — lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
   "license": "MIT",
   "author": "Priyanshu Nandan",
@@ -14,6 +14,8 @@
     "viewer",
     "diff",
     "jsonpath",
+    "mcp",
+    "mcp-server",
     "lossless",
     "int64",
     "zstd",
@@ -21,11 +23,13 @@
   ],
   "type": "module",
   "bin": {
-    "jsonloupe": "bin/jsonloupe.mjs"
+    "jsonloupe": "bin/jsonloupe.mjs",
+    "jsonloupe-mcp": "bin/jsonloupe-mcp.mjs"
   },
   "files": [
     "bin",
     "dist",
+    "dist-mcp",
     "SECURITY.md",
     "THIRD_PARTY_LICENSES.md",
     "CHANGELOG.md"
@@ -35,7 +39,9 @@
   },
   "scripts": {
     "dev": "vite --port 5199",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && npm run build:mcp",
+    "build:mcp": "tsc -p tsconfig.mcp.json --noEmit && node scripts/build-mcp.mjs",
+    "smoke:mcp": "node scripts/mcp-smoke.mjs",
     "preview": "vite preview --port 5199",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
@@ -50,8 +56,11 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.43.7",
     "@lezer/highlight": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@types/node": "^24.13.3",
     "@vitest/coverage-v8": "^4.1.10",
     "codemirror": "^6.0.1",
+    "esbuild": "^0.28.1",
     "fake-indexeddb": "^6.2.5",
     "jsonrepair": "^3.15.0",
     "lossless-json": "^4.3.0",

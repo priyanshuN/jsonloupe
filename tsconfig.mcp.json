@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // vite/client stays for the `?url` asset import in codec.ts, which the MCP
+    // bundle resolves to the wasm bytes instead of a URL (see scripts/build-mcp.mjs).
+    "types": ["node", "vite/client"]
+  },
+  "include": ["src/mcp"],
+  "exclude": []
+}

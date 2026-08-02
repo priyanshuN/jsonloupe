@@ -1773,11 +1773,31 @@ function renderSpec(s: Spec, indent: string): string {
 
 let schemaCache: string | null = null;
 
-function buildSchema(): string {
-  if (schemaCache !== null) return schemaCache;
+type SchemaResult = { text: string } | { ok: false; error: string; pos: number };
+
+// The shape of the whole document, or — given a query — of just what it selects,
+// merged across matches so `$.tasks[*]` describes the element rather than the
+// first element. Values never appear either way. Only the document-wide answer
+// is cached; it is the one asked for repeatedly.
+function buildSchema(path?: string): SchemaResult {
   const root = nodes.get(rootId);
-  schemaCache = root ? renderSpec(specOf(root.value, 0), '').slice(0, 4000) : '(no document)';
-  return schemaCache;
+  if (!root) return { text: '(no document)' };
+  if (!path?.trim()) {
+    if (schemaCache === null) schemaCache = renderSpec(specOf(root.value, 0), '').slice(0, 4000);
+    return { text: schemaCache };
+  }
+  const r = runQuery(root.value, path);
+  if (!r.ok) return r;
+  if (r.kind !== 'matches') {
+    return { ok: false, error: 'schema takes a path, not an aggregate pipe', pos: 0 };
+  }
+  if (r.matches.length === 0) return { ok: false, error: `no match for ${path}`, pos: 0 };
+  let spec: Spec | null = null;
+  for (const m of r.matches.slice(0, SCHEMA_SAMPLE)) {
+    const s = specOf(m.value, 0);
+    spec = spec ? mergeSpec(spec, s) : s;
+  }
+  return { text: renderSpec(spec!, '').slice(0, 4000) };
 }
 
 // ---------- table view over an array node ----------
@@ -2009,7 +2029,7 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
     case 'queryCopy':
       return queryCopy();
     case 'schema':
-      return { text: buildSchema() };
+      return buildSchema(msg.path as string | undefined);
     case 'undo':
       return doUndo();
     case 'redo':

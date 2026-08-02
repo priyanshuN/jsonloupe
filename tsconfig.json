@@ -11,5 +11,9 @@
     "skipLibCheck": true,
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // src/mcp is Node-only (worker_threads, fs). It is typechecked by
+  // tsconfig.mcp.json, which adds the node types this browser config must not
+  // carry — nothing shipped to a page should see them.
+  "exclude": ["src/mcp"]
 }

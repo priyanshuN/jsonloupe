@@ -24,6 +24,13 @@ import {
   type PayloadInput,
 } from './codec';
 import {
+  MAX_DOC_BYTES,
+  fmtBytes,
+  hasRawZstdMagic,
+  oversizeMessage,
+  payloadSniffNeedsDecode,
+} from './intake';
+import {
   KIBIBYTE,
   type TransportBudget,
   type TransportEnvelope,
@@ -250,16 +257,6 @@ let pendingInitialSave: {
 // be fixed — but never lay tens of MB into the DOM, so cap what we echo back.
 const PASTE_ECHO_MAX = 2_000_000;
 
-// The worker holds the fully materialized object graph (~4-6x the text size in
-// heap), so past this point a tab is headed for OOM, not slowness. Refuse with
-// an honest message instead of crashing. Length is UTF-16 code units, which for
-// JSON (overwhelmingly ASCII) tracks bytes closely enough for a guard.
-const MAX_DOC_BYTES = 200 * 1024 * 1024;
-
-function oversizeMessage(size: number): string {
-  return `this document is ${fmtBytes(size)} — beyond the ~${fmtBytes(MAX_DOC_BYTES)} a browser tab can hold as live objects. Extract the part you need (e.g. with jq) and open that instead.`;
-}
-
 // ---------- helpers ----------
 
 let toastTimer = 0;
@@ -358,12 +355,6 @@ async function exportCsv(source: 'table' | 'query', suffix: string): Promise<voi
   }
   downloadCsv(r.text, csvFilename(suffix));
   showToast('CSV downloaded');
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function relTime(ts: number): string {
@@ -808,10 +799,6 @@ function provenanceTrace(provenance: store.DocProvenance): string {
 
 function beginOpenRequest(): number {
   return ++openRequestToken;
-}
-
-function payloadSniffNeedsDecode(sniff: ReturnType<typeof sniffPayloadText>): boolean {
-  return sniff.recognized && (sniff.format !== 'json-text' || sniff.wrapper !== 'none');
 }
 
 function attachInitialSave(
@@ -1515,14 +1502,6 @@ interface PayloadFileText {
   text: string;
   title: string;
   provenance: store.DocProvenance | null;
-}
-
-function hasRawZstdMagic(bytes: Uint8Array): boolean {
-  return bytes.length >= 4 &&
-    bytes[0] === 0x28 &&
-    bytes[1] === 0xb5 &&
-    bytes[2] === 0x2f &&
-    bytes[3] === 0xfd;
 }
 
 // One binary-safe intake path for ordinary imports, drops, reload, the payload
