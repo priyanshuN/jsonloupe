@@ -230,7 +230,7 @@ The rule that keeps this from becoming a language: **formatting, not programming
 | Param | Values |
 |---|---|
 | `parse` | a format string (`HH:mm`, `yyyy-MM-dd HH:mm:ss`, `dd/MM/yyyy`), or `minutesOfDay`, `epochMillis`, `epochSeconds` |
-| `baseDate` | `"today"`, an ISO literal, or a **path** — required when `parse` yields a time with no date **and** `out` consumes one |
+| `baseDate` | `"today"`, an ISO literal, or a **path** — required when `parse` yields a time with no date **and** `out` consumes one (resolution ladder below) |
 | `out` | output format string, or `minutesOfDay` / `epochMillis` / `epochSeconds` |
 
 `baseDate` accepting a path is the single deliberate exception to "no cross-field expressions", and the
@@ -260,6 +260,24 @@ are correct. Two consequences that matter more than they look:
 
 An hour past 23 means "next day" only where no date was given; `2026-08-01 30:00:00` is malformed,
 and is refused. The cap is 7 days, which still rejects a mis-declared format.
+
+### Where a time-only column gets its date
+
+A ladder, in order of how much each rung is worth trusting:
+
+1. **What the caller said** — `baseDate` already in the spec, `--base-date` on the CLI, the date the
+   UI asked for. A human decision always wins and is never second-guessed.
+2. **A date already in the document**, on the row or on an ancestor within two levels. This is the
+   DHL case: `dispatchDate` sits two levels up and is the actual day the window belongs to, so the
+   draft proposes `^^.dispatchDate` rather than inventing one. The field's name must say date or day
+   — `createdAt` would parse, but the day a record was written is not the day its delivery window
+   falls on, and quietly using it would be worse than asking.
+3. **`today`** — a guess, and labelled as one. It is the day the conversion *ran*, not the day the
+   data is about, and on an overnight payload those differ. Every surface says so out loud: the UI
+   asks for the date, the CLI prints which columns are affected and how to override.
+
+The rung that matters is 2. Reaching for today when the answer was sitting two levels up in the same
+document is the difference between a tool that read the file and one that only parsed it.
 
 **Naive datetimes only.** No timezone is attached, applied, or inferred at any point in v1. A value
 that says `09:00` produces `09:00`. Timezone handling that is implicit is timezone handling that is
@@ -411,8 +429,14 @@ a detector that guesses under uncertainty is worse than one that asks.
 
 A node is a **collection** if it is:
 - an array whose elements are ≥80% objects, or
-- an object with ≥2 entries whose values are ≥80% objects, and whose value-objects share ≥50% of
-  their key sets (homogeneous values = map-as-collection; heterogeneous = an ordinary record).
+- an object whose values are ≥80% objects **and** either every key is an id (a number or a uuid) or
+  there are ≥2 entries whose value-objects share ≥50% of their key sets (homogeneous values =
+  map-as-collection; heterogeneous = an ordinary record).
+
+The id-key clause carries its weight: a numeric key is *data*, never a field name a schema author
+chose, so `{"23": {…}}` with one hub in it is still a map. Without it, a single-entry map reads as a
+record and the drafted anchor bakes in the literal `23` — the same failure explicit array indexes
+are refused for, arriving through the back door.
 
 Arrays of scalars are never tables (§3.3). The detector reports every collection it finds, at every
 depth, and the UI's first screen is *"we found N tables in your JSON"*.

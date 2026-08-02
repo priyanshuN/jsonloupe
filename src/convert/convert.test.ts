@@ -363,6 +363,13 @@ describe('detection', () => {
     expect(ins.tables.map((t) => t.anchor)).toEqual(['$.orders[]', '$.orders[].items[]']);
   });
 
+  it('treats an id-keyed single entry as a map, not a record', () => {
+    // Otherwise the anchor bakes in the literal hub id and the spec only ever
+    // works on the file it was drafted from.
+    const ins = inspect({ doc: { hubs: { '23': { code: 'ND1' } } } });
+    expect(ins.tables.map((t) => t.anchor)).toEqual(['$.hubs{}']);
+  });
+
   it('tells a map-of-objects from an ordinary record', () => {
     const ins = inspect({
       doc: {
@@ -424,6 +431,33 @@ describe('detection', () => {
 
     const ambiguous = inspect({ doc: { rows: [{ d: '01/02/2026' }, { d: '03/04/2026' }] } });
     expect(ambiguous.tables[0].fields[0].suggest).toEqual({ ambiguous: 'dayMonth' });
+  });
+
+  it('dates a time-only column from a date already in the document', () => {
+    const doc = {
+      hubs: {
+        '23': {
+          dispatchDate: '2026-08-01 00:00:00',
+          jobs: { 'J-1': { startTime: 540 }, 'J-2': { startTime: 900 } },
+        },
+      },
+    };
+    const spec = draftSpec(inspect({ doc }));
+    const jobs = spec.tables.find((t) => t.name === 'jobs')!;
+    const start = jobs.columns.find((c) => c.name === 'startTime')!;
+    expect(start.baseDate).toBe('^.dispatchDate');
+  });
+
+  it('falls back to today only when the document has no date to borrow', () => {
+    const spec = draftSpec(inspect({ doc: { rows: [{ startTime: 540 }, { startTime: 900 }] } }));
+    expect(spec.tables[0].columns[0].baseDate).toBe('today');
+  });
+
+  it('lets the caller override both', () => {
+    const spec = draftSpec(inspect({ doc: { rows: [{ startTime: 540 }, { startTime: 900 }] } }), {
+      baseDate: '2026-08-01',
+    });
+    expect(spec.tables[0].columns[0].baseDate).toBe('2026-08-01');
   });
 
   it('drafts a spec with the parent key already chosen', () => {

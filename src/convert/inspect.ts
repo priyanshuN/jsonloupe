@@ -86,11 +86,20 @@ function isCollectionOfObjects(vals: unknown[]): boolean {
   return items.filter(isRecord).length / items.length >= 0.8;
 }
 
+// A key that is a number or a uuid is DATA, not a field name any schema author
+// chose. `{"23": {…}}` with a single hub in it is still a map, and treating it
+// as a record would bake the literal `23` into the anchor — the same failure
+// mode explicit array indexes are refused for.
+const ID_KEY = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
 function isMapOfObjects(vals: unknown[]): boolean {
-  const entries = vals.flatMap((v) => (isRecord(v) ? Object.values(v) : []));
+  const entries = vals.flatMap((v) => (isRecord(v) ? Object.entries(v) : []));
+  if (!entries.length) return false;
+  const objs = entries.map(([, v]) => v).filter(isRecord);
+  if (objs.length / entries.length < 0.8) return false;
+  if (entries.every(([k]) => ID_KEY.test(k))) return true;
   if (entries.length < 2) return false;
-  if (entries.filter(isRecord).length / entries.length < 0.8) return false;
-  return homogeneous(entries.filter(isRecord));
+  return homogeneous(objs);
 }
 
 function homogeneous(objs: Record<string, unknown>[]): boolean {

@@ -27,10 +27,12 @@ usage:
   jsonloupe draft   <file> [-o spec.json]      write a starter mapping spec
   jsonloupe convert <file> --spec <spec.json> [-o out] [--format xlsx|csv]
 
-  --format     override the input format (json | jsonl | csv); inferred from
-               the extension otherwise
-  --out, -o    output path. xlsx → a file; csv → a directory, one file per table
-  --rows       inspect/draft only: print a preview of N rows (default 0)
+  --format      override the input format (json | jsonl | csv); inferred from
+                the extension otherwise
+  --out, -o     output path. xlsx → a file; csv → a directory, one per table
+  --base-date   draft only: what to date time-only columns against —
+                a yyyy-MM-dd date, or "today". By default the draft looks for
+                a date already in the document and only falls back to today
 
 Everything runs locally. A spec is a small JSON document you can read, edit,
 commit, and re-run — the same input plus the same spec is the same output.`;
@@ -42,6 +44,7 @@ interface Args {
   out?: string;
   format?: SourceFormat;
   outFormat?: 'xlsx' | 'csv';
+  baseDate?: string;
   rows: number;
 }
 
@@ -53,6 +56,13 @@ function parse(argv: string[]): Args | { error: string } {
     if (v === '--spec') a.spec = argv[++i];
     else if (v === '--out' || v === '-o') a.out = argv[++i];
     else if (v === '--rows') a.rows = Number(argv[++i]);
+    else if (v === '--base-date') {
+      const b = argv[++i];
+      if (b !== 'today' && !/^\d{4}-\d{2}-\d{2}$/.test(b ?? '')) {
+        return { error: `--base-date wants yyyy-MM-dd or "today", got \`${b}\`` };
+      }
+      a.baseDate = b;
+    }
     else if (v === '--format') {
       const f = argv[++i];
       if (f === 'xlsx' || f === 'csv') a.outFormat = f;
@@ -136,17 +146,41 @@ async function cmdDraft(a: Args & { file: string }): Promise<number> {
   const fmt = formatOf(a.file, a.format);
   const input = await read(a.file, fmt);
   const ins = inspect(input, fmt);
-  const spec = draftSpec(ins, { output: a.outFormat ?? 'xlsx' });
+  const spec = draftSpec(ins, { output: a.outFormat ?? 'xlsx', baseDate: a.baseDate });
   const text = JSON.stringify(spec, null, 2);
 
   if (a.out) {
     await writeFile(resolve(a.out), text + '\n');
     console.error(`wrote ${a.out} — ${spec.tables.length} table(s). Read it before you run it.`);
+    reportBaseDates(spec, !!a.baseDate);
     warnAboutAmbiguity(ins);
   } else {
     console.log(text);
   }
   return 0;
+}
+
+/**
+ * Say where every time-only column got its date. `today` is the day the
+ * conversion ran, not the day the data is about — on an overnight payload those
+ * differ, and a user who is not told will not think to check.
+ */
+function reportBaseDates(spec: ConvertSpec, explicit: boolean): void {
+  const dated = spec.tables.flatMap((t) =>
+    t.columns.filter((c) => c.baseDate).map((c) => ({ table: t.name, col: c.name, base: c.baseDate! })),
+  );
+  if (!dated.length) return;
+  const guessed = dated.filter((d) => d.base === 'today');
+  for (const d of dated.filter((x) => x.base !== 'today')) {
+    console.error(`  ${d.table}.${d.col}: dated from ${d.base}`);
+  }
+  if (guessed.length && !explicit) {
+    const names = guessed.map((g) => `${g.table}.${g.col}`).join(', ');
+    console.error(
+      `  note: ${names} carry a time but no date, and this document has none to borrow — ` +
+        `they will be dated TODAY. Pass --base-date yyyy-MM-dd if they belong to another day.`,
+    );
+  }
 }
 
 /** A draft is a guess the user is about to trust, so its soft spots are named. */
