@@ -70,6 +70,13 @@
        .r-actions button and every field in #ask-panel all hit this the day the
        bars were tinted. Dark never showed it (that token is 9-12 units off
        chrome there), so light is where this must always be checked.
+       Last tier: --bg-well, the ground a FLOATING card sits on, deeper than
+       everything else so the card lifts. App mode had the paste card's ground
+       and the sidebar both on #eef1f6 with only the sidebar's 1px border
+       between them. Note it steps the opposite way from --bg-chrome-2 — that
+       stacks a bar above chrome, this sinks a well below it — which is why they
+       cannot share a token even though light has so little room that their
+       values land close.
    12. Motion is decoration here — every transition and keyframe dresses a state
        change that has already happened. One prefers-reduced-motion block at the
        very bottom of this file collapses all of it, so new animation never
@@ -103,6 +110,11 @@
      direction as --bg-chrome — dark keeps going up, so this is the value that
      bar already had. */
   --bg-chrome-2: #2a303b;
+  /* The ground a floating card sits on — the DEEPEST surface, below even the
+     canvas, so the card lifts off it. Note this steps the opposite way from
+     --bg-chrome-2: that one stacks a bar above chrome, this one sinks a well
+     below it, and only in dark do the two directions visibly diverge. */
+  --bg-well: #15181e;
   --bg-elevated: #21262f;
   --bg-elevated-2: #2a303b;
   --bg-inset: #171b21;
@@ -173,6 +185,10 @@
   /* His call: a real step, not flat. Light goes DOWN from chrome (no headroom
      above white), which is why this cannot be one shared offset with dark. */
   --bg-chrome-2: #e5e9f1;
+  /* App mode put the paste card's ground and the sidebar on the same #eef1f6,
+     so the only thing dividing them was the sidebar's 1px border. The well
+     sinks below chrome and gives the white card something to lift off. */
+  --bg-well: #e7ebf3;
   --bg-elevated: #ffffff;
   --bg-elevated-2: #f1f4f9;
   --bg-inset: #f7f9fc;
@@ -623,7 +639,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    one. `margin-block: auto` rather than justify-content: centre, because this
    is an overflow-y: auto container and centring would clip the top of a card
    taller than the pane instead of letting it scroll. */
-#landing.landing--app { display: flex; flex-direction: column; }
+/* Only app mode gets the well: in full marketing mode the sidebar is hidden and
+   the bands carry their own grounds, so there is nothing for it to separate. */
+#landing.landing--app { display: flex; flex-direction: column; background: var(--bg-well); }
 #landing.landing--app .lp-hero {
   margin-block: auto;
   grid-template-columns: min(680px, 100%);
