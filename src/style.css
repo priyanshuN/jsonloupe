@@ -774,13 +774,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-chip-removed { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .lp-chip-reordered { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
-/* privacy */
-.lp-privacy {
+/* privacy + agents (same copy-left / facts-right band) */
+.lp-privacy,
+.lp-agents {
   display: grid;
   grid-template-columns: 1fr 380px;
   gap: 48px;
   align-items: center;
 }
+.lp-agents .lp-code { margin-top: 18px; }
 .lp-facts { display: flex; flex-direction: column; gap: 8px; }
 .lp-fact {
   display: flex;
@@ -833,7 +835,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   .lp-band, .lp-split-cell { padding: 40px 24px; }
   .lp-grid { grid-template-columns: 1fr; }
   .lp-split { grid-template-columns: 1fr; }
-  .lp-privacy { grid-template-columns: 1fr; gap: 28px; }
+  .lp-privacy, .lp-agents { grid-template-columns: 1fr; gap: 28px; }
   .lp-footer { padding: 20px 24px; flex-wrap: wrap; }
 }
 

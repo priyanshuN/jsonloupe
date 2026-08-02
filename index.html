@@ -57,6 +57,7 @@
           <nav class="lp-nav">
             <a href="#features">features</a>
             <a href="#query">query language</a>
+            <a href="#agents">agents</a>
             <a href="#privacy">privacy</a>
             <a href="./spec.html">spec</a>
             <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
@@ -157,6 +158,19 @@
             </div>
           </section>
         </div>
+
+        <section class="lp-band lp-agents" id="agents">
+          <div>
+            <h2 class="lp-h2 lp-h2-sm">Your AI agent can use it too</h2>
+            <p class="lp-body lp-body-wide">The same engine runs as an MCP server. An agent loads a document once — a file, or a compressed blob — and works from schemas, queries and samples while the document itself stays in the server process. Every response is capped, so a huge payload costs the model kilobytes, and int64 digits stay exact all the way to an exported CSV.</p>
+            <pre class="lp-code">claude mcp add jsonloupe -- npx -y -p jsonloupe jsonloupe-mcp</pre>
+          </div>
+          <div class="lp-facts">
+            <div class="lp-fact"><span>tools</span><span class="lp-fact-accent">load · schema · query · sample · diff · csv</span></div>
+            <div class="lp-fact"><span>document in model context</span><span class="lp-fact-ok">never</span></div>
+            <div class="lp-fact"><span>network calls</span><span class="lp-fact-ok">none</span></div>
+          </div>
+        </section>
 
         <section class="lp-band lp-privacy" id="privacy">
           <div>
