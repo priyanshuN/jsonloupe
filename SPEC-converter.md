@@ -1,6 +1,7 @@
 # jsonloupe Converter — Specification
 
-**Status:** v1 draft (design frozen 2026-08-02) · **Created:** 2026-08-02 · **Branch:** `converter`
+**Status:** v1 · design frozen 2026-08-02 · engine + sinks landed 2026-08-03 (§12 steps 1–2) ·
+**Branch:** `converter`
 
 Companion to [SPEC.md](SPEC.md). That document specifies the *viewer*; this one specifies the
 **converter addon** — a visual schema-mapper that turns nested JSON into flat tables a non-developer
@@ -229,7 +230,7 @@ The rule that keeps this from becoming a language: **formatting, not programming
 | Param | Values |
 |---|---|
 | `parse` | a format string (`HH:mm`, `yyyy-MM-dd HH:mm:ss`, `dd/MM/yyyy`), or `minutesOfDay`, `epochMillis`, `epochSeconds` |
-| `baseDate` | `"today"`, an ISO literal, or a **path** — required when `parse` yields a time with no date |
+| `baseDate` | `"today"`, an ISO literal, or a **path** — required when `parse` yields a time with no date **and** `out` consumes one |
 | `out` | output format string, or `minutesOfDay` / `epochMillis` / `epochSeconds` |
 
 `baseDate` accepting a path is the single deliberate exception to "no cross-field expressions", and the
@@ -238,7 +239,11 @@ over two fields. Time-of-day columns are meaningless without a date, and in real
 lives on an ancestor. Widening this to arbitrary field references is how the type system quietly
 becomes arithmetic.
 
-Extraction is the same mechanism running backwards: parse the full timestamp, emit `HH:mm`.
+Extraction is the same mechanism running backwards: parse the full timestamp, emit `HH:mm`. The
+`out`-side condition on `baseDate` is not a nicety — `HH:mm:ss` → `minutesOfDay` is a *duration*
+conversion that reads only the clock, and demanding a base date for it would be asking the user to
+supply an answer nothing will use. (Found by running the corpus against the validator, not by
+inspection.)
 
 **Naive datetimes only.** No timezone is attached, applied, or inferred at any point in v1. A value
 that says `09:00` produces `09:00`. Timezone handling that is implicit is timezone handling that is
@@ -583,9 +588,20 @@ this tool is for lives in Excel; handing them a zip of CSVs to re-assemble loses
 Zip-of-CSVs is the secondary option for anyone piping the result somewhere.
 
 **Decision: hand-rolled minimal OOXML writer.** jsonloupe ships zero runtime dependencies, and the
-xlsx libraries are large. An xlsx is a zip of a few XML parts; the writer needs a zip container and
-deflate, both available from the platform (`CompressionStream` in the browser, `node:zlib` in Node).
-~200 lines against ~1 MB of dependency, and the zero-deps promise survives.
+xlsx libraries are large. An xlsx is a zip of a few XML parts, so the writer is ~200 lines against
+~1 MB of dependency, and the zero-deps promise survives.
+
+**Entries are STORED, not deflated** (decided during implementation): `deflate-raw` is not available
+identically in both runtimes this code has to serve — `CompressionStream('deflate-raw')` in browsers
+versus `node:zlib` in Node — and splitting the writer on that would buy compression at the cost of
+two code paths and an async seam through the sink. A store-only zip is a valid xlsx everywhere;
+`compressor` is left as the seam for adding deflate once one API covers both. Verified end to end:
+the §7 example writes a 3.1 KB workbook that `unzip -t` reports clean and LibreOffice opens with
+every cell intact.
+
+**Numbers stay text past 15 digits.** A cell is written as a real numeric cell only when its value
+fits a double exactly; an int64 id — the case this tool exists for — is written as an inline string,
+because Excel would round it and the digits are the whole point.
 
 Formula-injection escaping follows the viewer's existing CSV rule, including the numeric-literal
 exemption that protects exact int64 digits.
@@ -594,13 +610,18 @@ exemption that protects exact int64 digits.
 
 ## 12. Build order
 
-| # | Deliverable | Gate |
-|---|---|---|
-| 1 | `src/convert/` — types, validator, path engine, row iterator, typed parse layer. No DOM. | vitest suite reproducing all 8 corpus converters (§6), including their stated gaps as skipped cases |
-| 2 | Sinks — memory, CSV, xlsx writer | the §7 example round-trips to a real file Excel opens |
-| 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is |
-| 4 | MCP — `inspect`, `convert`, `draft_spec` (names already reserved in `PLAN-mcp-server.md`) | agent drafts a spec, human approves it in the UI, engine runs it |
-| 5 | CLI — `jsonloupe convert file.json --spec spec.json` | a frozen spec re-runs headless with no UI and no model |
+| # | Deliverable | Gate | Status |
+|---|---|---|---|
+| 1 | `src/convert/` — types, validator, path engine, row iterator, typed parse layer. No DOM. | vitest suite reproducing all 8 corpus converters (§6), including their stated gaps as skipped cases | **done** — 60 passing, 5 gaps skipped |
+| 2 | Sinks — memory, CSV, xlsx writer | the §7 example round-trips to a real file Excel opens | **done** — `unzip -t` clean, LibreOffice reads every cell |
+| 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is | |
+| 4 | MCP — `inspect`, `convert`, `draft_spec` (names already reserved in `PLAN-mcp-server.md`) | agent drafts a spec, human approves it in the UI, engine runs it | |
+| 5 | CLI — `jsonloupe convert file.json --spec spec.json` | a frozen spec re-runs headless with no UI and no model | |
+
+Two shared modules were extracted rather than duplicated while building step 1: `src/csv.ts` (the
+formula-injection neutralizer and RFC 4180 field rule) and `src/lossless.ts` (the number-boxing
+predicate). Both were previously private to the worker, and a second copy of either would have been
+a second answer to a question the tool only gets to answer once.
 
 The MCP tools invert the obvious framing. Instead of an agent writing throwaway conversion code for
 every file, **the agent authors the spec once and never touches the data** — the deterministic engine
@@ -609,13 +630,20 @@ surface for agent-authored conversions: draft → visual review → run on the r
 
 ---
 
-## 13. Open calls
+## 13. Decisions on the open calls
 
-1. **Table naming.** `orders[].items[]` → `order_items` (parent-prefixed) or `items` (leaf name, with
-   a suffix only on collision)? Prefixing is unambiguous; leaf naming is what a user expects to see.
-2. **`{key}` column, by default or on request?** For map-shaped collections the key is often the only
-   identifier in the document. Emitting it always adds a column nobody asked for; emitting it never
-   means the important one is a click away and easy to miss.
-3. **Where the spec lives for the user.** Download-a-file is honest and zero-infrastructure;
-   save-to-IndexedDB alongside recents matches how the viewer already remembers things and makes
-   "run last month's mapping" a two-click operation.
+Resolved 2026-08-03, before the engine was written.
+
+1. **Table naming: leaf name, parent-prefixed only on collision.** `orders[].items[]` is `items`,
+   because that is the word the user clicked in their own document; a second `items` under a
+   different parent becomes `order_items`, deterministically. This costs nothing to reverse — the
+   resolved name is written into the spec as `name`, so it is always editable and never re-derived.
+2. **`{key}` is emitted by default, with a redundancy check.** A map-anchored table gets a
+   `<table>_key` column, because the key is frequently the only place the row's identifier lives —
+   §7 is exactly that case. It is suppressed when a field already repeats the key
+   (`{"J-1": {"jobId": "J-1"}}`), which turns the coin-flip into a decidable rule. Ancestor keys
+   stay explicit: only the row's *own* map level is automatic.
+3. **Specs save to IndexedDB by default, with export to file.** The determinism pitch is worthless
+   if re-running requires the user to have kept a download, and the viewer already remembers
+   everything the user opens — "run last month's mapping" should be two clicks. Export stays, because
+   the CLI and MCP server need a file and because a spec is the sharable artifact.

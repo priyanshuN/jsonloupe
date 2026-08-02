@@ -16,6 +16,8 @@ import type {
   CompareStatus,
 } from './protocol';
 import { runQuery, type PathSeg, type QueryResult } from './query';
+import { csvCell, csvSerialize } from './csv';
+import { lparse, numberParser } from './lossless';
 import {
   compareSemantic,
   type SemanticCompareOptions,
@@ -37,23 +39,8 @@ import {
 import { parse as llParse, stringify as llStringify, isLosslessNumber, LosslessNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
 
-// Lossless number handling: box a number whenever its canonical float form is
-// not byte-identical to the source literal — everything else stays a native
-// number so the parsed tree isn't bloated with wrappers. The obvious library
-// predicate, isSafeNumber(v, {approx: false}), compares *significant* digits,
-// so '88.10' passed as "safe" and every canonical copy silently became 88.1;
-// trailing zeros, '-0', '1e3' and '0.0000005' are formatting the author chose,
-// and this tool's one promise is that not a single digit changes. String(f)
-// also rejects everything isSafeNumber rejected (a differing significant digit
-// is in particular a differing byte), so this boxes strictly more, never less.
-const numberParser = (v: string): unknown => {
-  const f = parseFloat(v);
-  return String(f) === v ? f : new LosslessNumber(v);
-};
-
-function lparse(text: string): unknown {
-  return llParse(text, undefined, numberParser as never);
-}
+// Lossless number handling lives in ./lossless so the converter engine and the
+// MCP server parse through the exact same predicate.
 
 // A UTF-8 decoder may surface the byte-order mark as U+FEFF. JSON parsers do
 // not accept it, but it is transport metadata rather than document content.
@@ -1895,60 +1882,8 @@ function tableRows(start: number, count: number): { index: number; cells: string
 }
 
 // ---------- CSV export (RFC 4180) ----------
-
-// Ceiling on the built string — refuse rather than materialize a >50M-char blob
-// (and never truncate silently: a half CSV is worse than none).
-const CSV_CAP = 50_000_000;
-
-// A CSV cell: LosslessNumber → exact digit string (unfloated), null/undefined →
-// empty, nested object/array → its JSON (llStringify) folded into one cell,
-// everything else (string/number/boolean) stringified as-is.
-function csvCell(v: unknown): string {
-  if (v === undefined || v === null) return '';
-  if (isLosslessNumber(v)) return v.toString();
-  if (typeof v === 'object') return llStringify(v) ?? '';
-  return String(v);
-}
-
-// A field whose first non-blank character is one of = + - @ TAB CR is executed as
-// a formula when the CSV is opened in Excel / Sheets / LibreOffice (CWE-1236), so
-// it is prefixed with an apostrophe — the standard neutralizer, which those apps
-// strip on display. Plain numeric literals are exempt: `-123`, `+42`, `-1.5e9`
-// and exact int64 digit strings are not formulas, and the lossless-number
-// guarantee requires their CSV form to stay byte-identical.
-const CSV_FORMULA_LEAD = /^[ \t]*[=+\-@\t\r]/;
-const CSV_PLAIN_NUMBER = /^[ \t]*[-+]?\d+(\.\d+)?([eE][-+]?\d+)?[ \t]*$/;
-
-// Neutralization first, then RFC 4180 field quoting: wrap in double-quotes when
-// the field contains a comma, a double-quote, or a line break; inner
-// double-quotes are doubled. Every export path (table cells, query rows, group
-// keys, and all headers) goes through here, so this is the one control point.
-function csvField(s: string): string {
-  const safe = CSV_FORMULA_LEAD.test(s) && !CSV_PLAIN_NUMBER.test(s) ? `'${s}` : s;
-  return /[",\r\n]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe;
-}
-
-// Serialize header + rows with CRLF row endings, watching the running size so we
-// bail before crossing CSV_CAP instead of building the whole thing first.
-function csvSerialize(
-  cols: string[],
-  rows: string[][],
-): { ok: true; text: string } | { ok: false; error: string } {
-  let size = 0;
-  const lines: string[] = [];
-  const push = (fields: string[]): boolean => {
-    const line = fields.map(csvField).join(',');
-    size += line.length + 2; // + CRLF
-    if (size > CSV_CAP) return false;
-    lines.push(line);
-    return true;
-  };
-  if (!push(cols)) return { ok: false, error: 'too large for CSV' };
-  for (const r of rows) {
-    if (!push(r)) return { ok: false, error: 'too large for CSV' };
-  }
-  return { ok: true, text: lines.map((l) => l + '\r\n').join('') };
-}
+// Cell/field/serialize live in ./csv so the converter engine shares this exact
+// neutralizer rather than growing a second one.
 
 // Build a CSV from either the open table view (respecting its sort order and
 // exact column set) or the last query result (rows / groups only — value and
