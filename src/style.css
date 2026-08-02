@@ -70,7 +70,18 @@
        .r-actions button and every field in #ask-panel all hit this the day the
        bars were tinted. Dark never showed it (that token is 9-12 units off
        chrome there), so light is where this must always be checked.
-   12. This block is the contract. Extend it here when the vocabulary changes.
+   12. Motion is decoration here — every transition and keyframe dresses a state
+       change that has already happened. One prefers-reduced-motion block at the
+       very bottom of this file collapses all of it, so new animation never
+       needs its own opt-out. If you ever add motion that carries MEANING rather
+       than polish, that is the moment to revisit this rule, not to exempt a
+       selector from it.
+   13. Digits that stack in a column get font-variant-numeric: tabular-nums —
+       the tree gutter, #doc-stats, .baseline-size, .chunk-range, transport
+       figures. Proportional figures make a right-aligned column ripple as it
+       crosses 9 → 99 → 999. On a tool whose subject is numbers this is not
+       optional.
+   14. This block is the contract. Extend it here when the vocabulary changes.
    ========================================================================== */
 
 :root,
@@ -606,7 +617,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #landing.landing--app > .lp-split,
 #landing.landing--app > .lp-footer,
 #landing.landing--app .lp-hero-copy { display: none; }
+/* Centre the card in the pane. Stripped of the marketing surface it was sitting
+   at the top edge with ~450px of empty --bg under it on an 800px viewport —
+   over half the screen, reading as an unfinished page rather than a deliberate
+   one. `margin-block: auto` rather than justify-content: centre, because this
+   is an overflow-y: auto container and centring would clip the top of a card
+   taller than the pane instead of letting it scroll. */
+#landing.landing--app { display: flex; flex-direction: column; }
 #landing.landing--app .lp-hero {
+  margin-block: auto;
   grid-template-columns: min(680px, 100%);
   justify-content: center;
   padding: 40px 24px;
@@ -645,17 +664,23 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .lp-nav a:hover { color: var(--text); }
 .lp-meta { font: 500 11.5px var(--mono); color: var(--text-faint); white-space: nowrap; }
+/* Rule 6: the landing may shout ONCE, and `parse` is what it shouts — pasting
+   is the page's whole job. This CTA goes to the same place and was wearing the
+   identical solid fill 350px away in the same viewport, so the hero had two
+   equally loud targets and no primary. Outline instead, and on the canvas
+   rather than --btn-bg: the header sits on --bg, where --btn-bg is three units
+   away and would vanish (rule 11's control-on-chrome corollary). */
 .lp-cta {
-  background: var(--accent-fill);
-  color: var(--accent-fill-ink);
-  border: none;
+  background: var(--bg-canvas);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
   border-radius: var(--r);
   padding: 0 var(--gap-4);
   font: 700 13.5px var(--display);
   white-space: nowrap;
   box-shadow: none;
 }
-.lp-cta:hover { background: var(--accent-fill-hover); color: var(--accent-fill-ink); }
+.lp-cta:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
 
 /* hero */
 .lp-hero {
@@ -863,8 +888,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .lp-agents .lp-code { margin-top: 18px; }
 .lp-facts { display: flex; flex-direction: column; gap: 8px; }
+/* Wrap the ROW, not the value. Without this the tools list broke mid-sequence
+   inside its own span — `… diff ·` stranded a separator at the line end and
+   dropped a lone `csv` onto line two. Wrapping the row instead sends the whole
+   value to its own full-width line, where it fits, and margin-left keeps it in
+   the value column when it does. */
 .lp-fact {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
   padding: 10px 14px;
@@ -874,6 +905,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   font: 12px var(--mono);
   color: var(--text-dim);
 }
+.lp-fact > :last-child { margin-left: auto; }
 .lp-fact-ok { color: var(--ok); }
 .lp-fact-accent { color: var(--accent); }
 
@@ -1107,7 +1139,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #doc-title:hover { color: var(--accent); }
 /* Document identity is secondary text: the title carries it, the numbers sit
    behind it rather than competing with the controls. */
-#doc-stats { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
+#doc-stats { color: var(--text-faint); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 #reload-btn, #original-btn { min-height: var(--ctl-h-mini); padding: 0 var(--gap-2); font-size: 11.5px; }
 /* .tb-doc is a shrinkable flex row — the label must not break across two lines. */
 #original-btn { white-space: nowrap; }
@@ -1230,6 +1262,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .baseline-age {
   color: var(--text-faint);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 .baseline-age {
   grid-column: 1;
@@ -1406,6 +1439,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .transport-metric .transport-value {
   color: var(--text);
   font: 600 11.5px var(--mono);
+  font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
 }
@@ -1867,6 +1901,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   margin-right: 6px;
   color: var(--text-faint);
   font-size: 11px;
+  /* Right-aligned digits in a fixed column: without tabular figures the right
+     edge ripples as the count crosses 9 → 99 → 999 while you scroll. */
+  font-variant-numeric: tabular-nums;
   background: var(--gutter-bg);
   border-right: 1px solid var(--border);
   user-select: none;
@@ -2654,4 +2691,24 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   z-index: 30;
   pointer-events: none;
   backdrop-filter: blur(2px);
+}
+
+/* ---------- reduced motion ---------- */
+
+/* Rule 13. Every transition and keyframe in this file is decoration over a
+   state change that has already happened — nothing here animates meaning — so
+   under a reduced-motion preference they all collapse to effectively instant
+   rather than being individually unwound. Kept last so it outranks anything
+   declared above it at equal specificity. `0.01ms` rather than `0`: animations
+   still fire their end events, so any JS waiting on animationend/transitionend
+   keeps working. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
