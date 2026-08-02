@@ -21,7 +21,7 @@ export {
   type Warning,
   type Frame,
 } from './engine';
-export { memorySink, csvTextSink, xlsxSink, buildXlsx, crc32, colRef, sheetName, type CapturedTable } from './sinks';
+export { memorySink, csvTextSink, xlsxSink, buildXlsx, zipTextFiles, crc32, colRef, sheetName, type CapturedTable } from './sinks';
 export {
   parseAnchor,
   parseFrom,

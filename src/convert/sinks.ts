@@ -198,6 +198,15 @@ export function buildXlsx(tables: CapturedTable[]): Uint8Array {
   return zipStore(parts.map((p) => ({ path: p.path, bytes: new TextEncoder().encode(p.data) })));
 }
 
+/**
+ * A zip of text files, for the CSV-per-table output. One download beats N
+ * download prompts, and it reuses the container the xlsx writer already needs.
+ */
+export function zipTextFiles(files: { name: string; text: string }[]): Uint8Array {
+  const enc = new TextEncoder();
+  return zipStore(files.map((f) => ({ path: f.name, bytes: enc.encode(f.text) })));
+}
+
 // ---------- zip (store) ----------
 
 const CRC_TABLE = (() => {

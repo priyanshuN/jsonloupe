@@ -240,6 +240,7 @@
             <button id="reload-btn" title="Re-read this file from disk" hidden>⟳ reload</button>
           </div>
           <button id="compare-btn" title="Choose a baseline and open semantic side-by-side comparison">⇆ compare</button>
+          <button id="convert-btn" title="Turn this document into flat tables you can open in Excel">convert</button>
           <div class="mode-switch" id="mode-switch">
             <button data-mode="tree" class="on">tree</button>
             <button data-mode="code">code</button>
@@ -375,6 +376,39 @@
           </div>
           <div id="sem-crumb"></div>
         </section>
+        <!-- Converter. The left rail answers "what is in here", the right pane
+             answers "what will I get" — and the preview under it is the real
+             product: a non-developer decides whether each item should be its
+             own row only by seeing the rows. -->
+        <div id="convert-view" hidden>
+          <div class="convert-bar">
+            <span id="convert-title">tables in this document</span>
+            <span id="convert-count"></span>
+            <span class="spacer"></span>
+            <div class="mode-switch" id="convert-format" role="group" aria-label="Output format">
+              <button data-fmt="xlsx" class="on" title="One spreadsheet, one sheet per table, already linked by id">Excel</button>
+              <button data-fmt="csv" title="One CSV file per table">CSV</button>
+            </div>
+            <button id="convert-spec" title="Download the mapping spec — re-run it later, or hand it to an agent">spec</button>
+            <button id="convert-dl" class="primary" title="Convert and download">download</button>
+            <button id="convert-close">back to tree</button>
+          </div>
+          <div id="convert-body">
+            <div id="convert-tables" role="list" aria-label="Detected tables"></div>
+            <div id="convert-detail">
+              <div id="convert-cols-head">
+                <span id="convert-detail-name"></span>
+                <span id="convert-detail-src"></span>
+              </div>
+              <div id="convert-cols" role="list" aria-label="Columns"></div>
+              <div id="convert-preview-head">
+                <span>preview</span>
+                <span id="convert-preview-note"></span>
+              </div>
+              <div id="convert-preview"></div>
+            </div>
+          </div>
+        </div>
         <div id="table-view" hidden>
           <div class="table-bar">
             <span id="table-title"></span>

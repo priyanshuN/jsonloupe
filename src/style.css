@@ -2542,3 +2542,147 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   pointer-events: none;
   backdrop-filter: blur(2px);
 }
+
+/* ---------- converter ----------
+   Left rail: what is in the document. Right: what each table becomes, with the
+   live preview under it. The preview is the product — a non-developer decides
+   whether an item should be its own row only by seeing the rows — so it gets
+   the space and the rail stays narrow. Contract rules 1/2/4/6 apply unchanged:
+   28px controls, lowercase labels, the --gap scale, and exactly one accent
+   fill in this view (download, which commits the work). */
+
+.convert-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+#convert-title { font: 12.5px var(--mono); color: var(--c-key); }
+#convert-count { color: var(--text-dim); font-size: 12px; }
+
+#convert-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#convert-body { flex: 1; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; min-height: 0; }
+
+#convert-tables {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: var(--gap-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-1);
+  background: var(--bg-elevated);
+}
+
+.convert-table {
+  padding: var(--gap-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.convert-table:hover { background: var(--bg-hover); }
+.convert-table.on { background: var(--bg-sel); border-color: var(--border-strong); }
+.convert-table.off { opacity: 0.5; }
+.convert-table-head { display: flex; align-items: center; gap: var(--gap-2); }
+.convert-meta { margin-left: auto; color: var(--text-faint); font: 11.5px var(--mono); white-space: nowrap; }
+.convert-where { margin: var(--gap-1) 0 0 calc(var(--icon) + var(--gap-2)); color: var(--text-faint); font-size: 11.5px; }
+
+/* Names are edited in place: the value IS the heading, so it reads as text
+   until you touch it rather than announcing itself as a form field. */
+.convert-name,
+.convert-colname {
+  flex: 1;
+  min-width: 0;
+  height: var(--ctl-h-mini);
+  padding: 0 var(--gap-1);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: 12.5px var(--mono);
+}
+.convert-name:hover,
+.convert-colname:hover { border-color: var(--border); }
+.convert-name:focus,
+.convert-colname:focus { border-color: var(--accent); background: var(--bg-inset); outline: none; }
+
+#convert-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#convert-cols-head,
+#convert-preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-2);
+  padding: var(--gap-2) 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#convert-preview-head { border-top: 1px solid var(--border); }
+#convert-detail-name { font: 12.5px var(--mono); color: var(--c-key); }
+#convert-detail-src,
+#convert-preview-head span:first-child { color: var(--text-dim); font-size: 12px; }
+#convert-preview-note { color: var(--text-faint); font-size: 11.5px; margin-left: auto; }
+#convert-preview-note.bad { color: var(--c-string); }
+
+#convert-cols { overflow-y: auto; padding: var(--gap-2) 14px; max-height: 38%; }
+.convert-col { display: flex; align-items: center; gap: var(--gap-2); padding: 2px 0; }
+.convert-col.off { opacity: 0.45; }
+.convert-src { color: var(--text-faint); font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.convert-type {
+  font: 11.5px var(--mono);
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.convert-note { margin: 0 0 var(--gap-2); color: var(--text-faint); font-size: 11.5px; }
+.convert-empty { padding: var(--gap-3); color: var(--text-dim); font-size: 12.5px; }
+
+/* Rung 3 of the baseDate ladder: where a time has no date to borrow, ask —
+   never quietly use the day the conversion happens to run on. */
+.convert-ask {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  margin-bottom: var(--gap-2);
+  padding: var(--gap-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.convert-date {
+  height: var(--ctl-h);
+  padding: 0 var(--gap-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated-2);
+  color: var(--text);
+  font: 12.5px var(--mono);
+}
+
+#convert-preview { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
+.convert-grid { border-collapse: collapse; font: 12px var(--mono); white-space: nowrap; }
+.convert-grid th,
+.convert-grid td {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.convert-grid th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-elevated);
+  color: var(--c-key);
+  font-weight: 500;
+  z-index: 1;
+}
+.convert-grid td.empty { color: var(--text-faint); }
+.convert-grid tbody tr:hover td { background: var(--bg-hover); }

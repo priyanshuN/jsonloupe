@@ -12,6 +12,8 @@ import type {
   CompareError,
 } from './protocol';
 import { SemanticCompareView, type CompareRow } from './compare-view';
+import { ConvertView } from './convert-view';
+import type { ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
 import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
@@ -198,6 +200,9 @@ const tableViewportEl = $('#table-viewport');
 const tableSpacer = $('#table-spacer');
 const tableLayer = $('#table-layer');
 
+const convertView = $('#convert-view');
+const convertBtn = $('#convert-btn');
+
 const modeSwitch = $('#mode-switch');
 const paneArea = $('#pane-area');
 const splitDivider = $<HTMLElement>('#split-divider');
@@ -208,7 +213,7 @@ const codeStatus = $('#code-status');
 // Split-view line map: `$`-path → 1-based line in the code editor.
 let codeLineMap = new Map<string, number>();
 
-type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic';
+type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic' | 'convert';
 let activePane: Pane = 'tree';
 function showPane(p: Pane): void {
   activePane = p;
@@ -220,7 +225,8 @@ function showPane(p: Pane): void {
   diffView.hidden = p !== 'diff';
   semanticView.hidden = p !== 'semantic';
   tableView.hidden = p !== 'table';
-  crumb.hidden = p === 'semantic';
+  convertView.hidden = p !== 'convert';
+  crumb.hidden = p === 'semantic' || p === 'convert';
   viewer.classList.toggle('semantic-open', p === 'semantic');
   // The mode switch reflects tree/code/split; transient sub-views have no tab.
   setModeTab(p === 'tree' || p === 'code' || p === 'split' ? p : null);
@@ -339,6 +345,20 @@ function csvFilename(suffix: string): string {
 function downloadCsv(text: string, filename: string): void {
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Same mechanism as downloadCsv, for anything that is bytes rather than text
+// (a workbook, a zip of CSVs) or carries its own filename already.
+function downloadBlob(filename: string, data: Uint8Array | string, mime: string): void {
+  const part: BlobPart = typeof data === 'string' ? data : new Uint8Array(data);
+  const url = URL.createObjectURL(new Blob([part], { type: mime }));
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
@@ -1265,6 +1285,46 @@ async function showBaselinePicker(): Promise<void> {
 }
 
 compareBtn.addEventListener('click', () => void showBaselinePicker());
+
+// ---------- converter ----------
+
+// The worker keeps the document; this view keeps the spec. Every call ships the
+// spec down and gets rows back, so the parsed document still never crosses.
+const converter = new ConvertView(
+  {
+    count: $('#convert-count'),
+    tables: $('#convert-tables'),
+    detailName: $('#convert-detail-name'),
+    detailSrc: $('#convert-detail-src'),
+    cols: $('#convert-cols'),
+    previewNote: $('#convert-preview-note'),
+    preview: $('#convert-preview'),
+    format: $('#convert-format'),
+  },
+  {
+    inspect: () => call<{ inspection: Inspection; spec: ConvertSpec }>({ type: 'convertInspect' }),
+    preview: (spec, rows) =>
+      call<PreviewResult | { errors: SpecError[] }>({ type: 'convertPreview', spec, rows }),
+    run: (spec) =>
+      call<{ errors: SpecError[] } | { format: 'xlsx' | 'csv'; bytes: Uint8Array; rows: number }>({
+        type: 'convertRun',
+        spec,
+      }),
+    download: downloadBlob,
+    toast: showToast,
+    docName: () => sanitizeFilePart((currentTitle || 'data').replace(/\.[^.]*$/, ''), 60) || 'data',
+  },
+);
+
+convertBtn.addEventListener('click', () => {
+  showPane('convert');
+  void converter.open().catch((err: Error) => showToast(err.message));
+});
+$('#convert-close').addEventListener('click', () => showPane('tree'));
+$('#convert-spec').addEventListener('click', () => converter.downloadSpec());
+$('#convert-dl').addEventListener('click', () => {
+  void converter.downloadResult().catch((err: Error) => showToast(err.message));
+});
 
 baselineRecents.addEventListener('click', (event) => {
   const option = (event.target as HTMLElement).closest<HTMLButtonElement>('.baseline-option');

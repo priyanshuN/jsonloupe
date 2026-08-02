@@ -667,9 +667,15 @@ exemption that protects exact int64 digits.
 |---|---|---|---|
 | 1 | `src/convert/` — types, validator, path engine, row iterator, typed parse layer. No DOM. | vitest suite reproducing all 8 corpus converters (§6), including their stated gaps as skipped cases | **done** — 60 passing, 5 gaps skipped |
 | 2 | Sinks — memory, CSV, xlsx writer | the §7 example round-trips to a real file Excel opens | **done** — `unzip -t` clean, LibreOffice reads every cell |
-| 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is | |
+| 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is | **built**, awaiting a design pass |
 | 4 | MCP — `inspect`, `convert`, `draft_spec` (names already reserved in `PLAN-mcp-server.md`) | agent drafts a spec, human approves it in the UI, engine runs it | |
 | 5 | CLI — `jsonloupe convert file.json --spec spec.json` | a frozen spec re-runs headless with no UI and no model | **done** — `inspect` / `draft` / `convert`, driven on a real routing payload |
+
+The UI keeps the division of labour the viewer already runs on: the worker owns the parsed document
+and never ships it, the UI owns the **spec** — small, editable, and the thing the user is actually
+working on — so every call sends a spec down and gets rows back. The vocabulary is deliberately not
+the spec's: `$.problems[].jobs[]` is shown as `problems › jobs`, and nobody is asked to learn a path
+syntax to rename a column.
 
 Two shared modules were extracted rather than duplicated while building step 1: `src/csv.ts` (the
 formula-injection neutralizer and RFC 4180 field rule) and `src/lossless.ts` (the number-boxing

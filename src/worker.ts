@@ -18,6 +18,8 @@ import type {
 import { runQuery, type PathSeg, type QueryResult } from './query';
 import { csvCell, csvSerialize } from './csv';
 import { lparse, numberParser } from './lossless';
+import { convertInspect, convertPreview, convertRun, resetConvertCache } from './convert/session';
+import type { ConvertSpec } from './convert/index';
 import {
   compareSemantic,
   type SemanticCompareOptions,
@@ -124,6 +126,7 @@ const post = (d: unknown) => (self as unknown as Worker).postMessage(d);
 // code-view Apply).
 function clearState(): void {
   clearCompareState();
+  resetConvertCache();
   nodes = new Map();
   children = new Map();
   expanded = new Set();
@@ -2031,6 +2034,19 @@ export async function handleAsync(
     | TransportInspectWorkerMessage
     | DecodePayloadWorkerMessage,
 ): Promise<object | TransportInspection | DecodePayloadWorkerResult> {
+  // Converter ops. The document never leaves the worker; the spec arrives from
+  // the UI on every call and the rows go back.
+  if (msg.type === 'convertInspect' || msg.type === 'convertPreview' || msg.type === 'convertRun') {
+    const root = nodes.get(rootId);
+    if (!root) return { error: 'no document open' };
+    const doc = effValue(root);
+    if (msg.type === 'convertInspect') return convertInspect(doc);
+    const spec = (msg as unknown as { spec: ConvertSpec }).spec;
+    if (msg.type === 'convertPreview') {
+      return convertPreview(doc, spec, ((msg as { rows?: number }).rows ?? 20));
+    }
+    return convertRun(doc, spec);
+  }
   if (msg.type === 'decodePayload') {
     const input = msg.input;
     if (
@@ -2089,7 +2105,13 @@ export async function handleAsync(
 if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessage === 'function') {
   (self as unknown as Worker).onmessage = (e: MessageEvent) => {
     const msg = e.data as { reqId: number; type: string } & Record<string, unknown>;
-    if (msg.type === 'transportInspect' || msg.type === 'decodePayload') {
+    if (
+      msg.type === 'transportInspect' ||
+      msg.type === 'decodePayload' ||
+      msg.type === 'convertInspect' ||
+      msg.type === 'convertPreview' ||
+      msg.type === 'convertRun'
+    ) {
       void handleAsync(msg).then(
         (result) => post({ reqId: msg.reqId, ...result }),
         (err) => post({ reqId: msg.reqId, error: String(err) }),
