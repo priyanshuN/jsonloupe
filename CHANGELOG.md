@@ -2,7 +2,7 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased — staged for 1.1.0
+## 1.1.0 — 2026-08-02
 
 - **jsonloupe is an MCP server.** `npx jsonloupe-mcp` (register it with
   `claude mcp add jsonloupe -- npx jsonloupe-mcp`) exposes the same engine the
