@@ -1124,7 +1124,9 @@ async function renderRecents(): Promise<void> {
   }
   for (const d of docs) {
     const el = document.createElement('div');
-    el.className = `recent${d.id === currentDocId ? ' active' : ''}`;
+    // `pinned` is chrome-only: it keeps the star visible when the row is not
+    // hovered, so a never-pruned document says so without a tooltip.
+    el.className = `recent${d.id === currentDocId ? ' active' : ''}${d.pinned ? ' pinned' : ''}`;
     el.dataset.id = d.id;
 
     const title = document.createElement('div');
@@ -1149,15 +1151,15 @@ async function renderRecents(): Promise<void> {
     const actions = document.createElement('div');
     actions.className = 'r-actions';
     const dif = document.createElement('button');
-    dif.className = 'dif';
+    dif.className = 'dif btn-icon btn-mini';
     dif.textContent = '⇆';
     dif.title = 'Compare this baseline side by side with the open document';
     const pin = document.createElement('button');
-    pin.className = 'pin';
+    pin.className = 'pin btn-icon btn-mini';
     pin.textContent = d.pinned ? '★' : '☆';
     pin.title = d.pinned ? 'Unpin' : 'Pin (never pruned)';
     const del = document.createElement('button');
-    del.className = 'del';
+    del.className = 'del btn-icon btn-mini';
     del.textContent = '×';
     del.title = 'Delete';
     actions.append(dif, pin, del);
@@ -1996,6 +1998,37 @@ $('#dl-btn').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// ---------- toolbar overflow menu ----------
+
+// The bar keeps what is used per-second; the rest lives behind ⋯. The menu holds
+// the same buttons as before — every handler above is untouched, this only
+// decides when the list is on screen.
+const moreWrap = $('.tb-more');
+const moreBtn = $<HTMLButtonElement>('#more-btn');
+const moreMenu = $('#more-menu');
+
+const isMoreMenuOpen = (): boolean => !moreMenu.hidden;
+
+function setMoreMenu(open: boolean): void {
+  moreMenu.hidden = !open;
+  moreBtn.setAttribute('aria-expanded', String(open));
+}
+
+moreBtn.addEventListener('click', () => setMoreMenu(!isMoreMenuOpen()));
+// The item's own handler has already run by the time this fires (same click,
+// bubbling), so the menu closes on whatever was picked.
+moreMenu.addEventListener('click', () => setMoreMenu(false));
+document.addEventListener('click', (e) => {
+  if (!isMoreMenuOpen()) return;
+  const target = e.target;
+  if (!(target instanceof Node) || !moreWrap.contains(target)) setMoreMenu(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !isMoreMenuOpen()) return;
+  setMoreMenu(false);
+  moreBtn.focus();
+});
+
 // ---------- code view (editable, CodeMirror) ----------
 
 const CODE_MAX = 3_000_000; // above this, the editor pane falls back to the tree
@@ -2018,7 +2051,7 @@ function showCodeTooBig(): void {
   }
   const div = document.createElement('div');
   div.className = 'code-toobig';
-  div.textContent = `This document is ${fmtBytes(currentText.length)} — too large for the editable code view.\nUse the Tree, or download the original.`;
+  div.textContent = `This document is ${fmtBytes(currentText.length)} — too large for the editable code view.\nUse the tree, or download the original.`;
   codeHost.replaceChildren(div);
   setCodeStatus('', '');
 }
@@ -2571,7 +2604,7 @@ function renderSemanticSummary(res: CompareOk): void {
     identities ? `${identities} identity-aligned` : '',
     conservative ? `${conservative} need review` : '',
   ].filter(Boolean);
-  semPlanSummary.textContent = `Alignment plan · ${bits.join(' · ')}`;
+  semPlanSummary.textContent = `alignment plan · ${bits.join(' · ')}`;
 
   const warnings: string[] = [];
   if (res.truncated) {
@@ -3364,7 +3397,7 @@ const themeLabel = $('#theme-label');
 function paintThemeToggle(): void {
   const t = currentTheme();
   themeIc.textContent = t === 'dark' ? '☾' : '☀';
-  themeLabel.textContent = t === 'dark' ? 'Dark' : 'Light';
+  themeLabel.textContent = t === 'dark' ? 'dark' : 'light';
 }
 
 $('#theme-btn').addEventListener('click', () => toggleTheme());

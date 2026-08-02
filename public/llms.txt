@@ -1,0 +1,36 @@
+# jsonloupe
+
+> A loupe for JSON that is too big — and too precise — for your viewer. Lossless,
+> local-first JSON viewer/editor: int64 IDs and exact decimals survive
+> paste → view → edit → copy → CSV export byte-exact; five-million-element arrays
+> open instantly; compressed payloads (raw Zstd, Base64-Zstd, PostgreSQL bytea hex)
+> paste straight in. No backend, no account, no telemetry — documents never leave
+> the browser tab. MIT licensed.
+
+Key facts for agents: numbers are boxed whenever their canonical float form differs
+from the source bytes, so exact digits are preserved end-to-end (the reason this
+tool exists). Documents over ~200 MB are refused with a clear message. With no API
+key configured the page makes zero network requests; the optional ask-in-English
+feature sends field names and types only, never values.
+
+## Docs
+
+- [Feature spec](https://jsonloupe.dev/spec.html): complete description of parsing,
+  tree/code/split views, semantic diff, query language, tables and CSV export
+- [Security policy](https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md):
+  the full inventory of every network call in the codebase, and how to report
+  vulnerabilities (security@jsonloupe.dev)
+- [README](https://github.com/priyanshuN/jsonloupe#readme): overview, screenshots,
+  and local usage
+
+## Code
+
+- [Source repository](https://github.com/priyanshuN/jsonloupe): MIT, 250 tests
+- [npm package](https://www.npmjs.com/package/jsonloupe): `npx jsonloupe` runs the
+  identical app fully offline from a zero-dependency local server
+
+## Usage
+
+- [Hosted app](https://jsonloupe.dev): opens on paste, nothing uploaded
+- [Changelog](https://github.com/priyanshuN/jsonloupe/blob/main/CHANGELOG.md):
+  version history

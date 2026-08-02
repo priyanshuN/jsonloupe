@@ -4,6 +4,18 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **One design system for the chrome.** A component contract now lives at the top
+  of style.css: two control sizes (28px/20px), lowercase labels, one focus ring,
+  and two button voices — a soft accent tint for anything accented (`compare`,
+  `ask`, `run`, `apply changes`) and quiet text for utilities; the solid fill
+  survives only on the landing CTAs. The toolbar slimmed from fourteen
+  equal-weight controls to seven plus a `⋯` menu; the Ask panel's run button is
+  now labelled `run` (no more two buttons named `ask`); Recents became flat list
+  rows; the code view's Ctrl+F panel finally matches the app instead of shipping
+  stock browser widgets; buttons no longer bounce on press. The paste screen and
+  landing now say out loud that zstd / base64 / bytea blobs paste straight in.
+- **Agent-facing files.** `/llms.txt` (site summary + key links for AI agents)
+  and `/robots.txt` are served at the root.
 - **Saved-questions cap fixed.** The Ask panel's saved-question store settled at
   101 entries instead of its nominal 100, and — worse — re-saving a question that
   had aged past the cap could delete the very record being saved (the cull list
