@@ -187,8 +187,42 @@ describe('datetime is naive and closed-vocabulary', () => {
 
   it('rejects values that do not fit the declared format', () => {
     expect(parseNaive('not a time', 'HH:mm')).toBeNull();
-    expect(parseNaive('25:00', 'HH:mm')).toBeNull();
+    expect(parseNaive('13:99', 'HH:mm')).toBeNull();
+    expect(parseNaive('200:00', 'HH:mm')).toBeNull(); // past the 7-day cap
     expect(parseNaive(-5, 'minutesOfDay')).toBeNull();
+    // An hour past 23 means "next day" only where no date was given.
+    expect(parseNaive('2026-08-01 30:00:00', 'yyyy-MM-dd HH:mm:ss')).toBeNull();
+  });
+});
+
+describe('the overnight convention', () => {
+  // A delivery window written 18:00 → 30:00 ends at 6am the following day. This
+  // is how the domain writes "tomorrow" without a date, and the pair has to come
+  // out in the same format it went in.
+  it('rolls an hour past 24 into the next day once a date exists', () => {
+    const start = parseNaive('18:00', 'HH:mm')!;
+    const end = parseNaive('30:00', 'HH:mm')!;
+    const on = { y: 2026, mo: 8, d: 1 };
+    expect(renderNaive({ ...start, ...on }, 'yyyy-MM-dd HH:mm:ss')).toBe('2026-08-01 18:00:00');
+    expect(renderNaive({ ...end, ...on }, 'yyyy-MM-dd HH:mm:ss')).toBe('2026-08-02 06:00:00');
+  });
+
+  it('rolls minutes-of-day past 1440 the same way, as the corpus converter does', () => {
+    const n = parseNaive(1800, 'minutesOfDay')!;
+    expect(renderNaive({ ...n, y: 2026, mo: 8, d: 1 }, 'yyyy-MM-dd HH:mm:ss')).toBe('2026-08-02 06:00:00');
+  });
+
+  it('crosses a month boundary as calendar arithmetic, not 24h of milliseconds', () => {
+    const n = parseNaive('30:00', 'HH:mm')!;
+    expect(renderNaive({ ...n, y: 2026, mo: 1, d: 31 }, 'yyyy-MM-dd')).toBe('2026-02-01');
+    const leap = parseNaive('30:00', 'HH:mm')!;
+    expect(renderNaive({ ...leap, y: 2024, mo: 2, d: 28 }, 'yyyy-MM-dd')).toBe('2024-02-29');
+  });
+
+  it('keeps the convention in the clock when no date absorbs it', () => {
+    const n = parseNaive('30:00', 'HH:mm')!;
+    expect(renderNaive(n, 'HH:mm')).toBe('30:00');
+    expect(renderNaive(n, 'minutesOfDay')).toBe('1800');
   });
 });
 
@@ -370,10 +404,18 @@ describe('detection', () => {
   });
 
   it('never proposes a format the parser would then reject', () => {
-    // `18:00 → 30:00` is the overnight convention in routing payloads: it looks
-    // like HH:mm and is not one. Found against a real request file.
-    const ins = inspect({ doc: { rows: [{ endTime: '30:00' }, { endTime: '29:30' }] } });
+    // Matches ^\d{1,2}:\d{2}$ by shape; minute 99 is not a minute.
+    const ins = inspect({ doc: { rows: [{ t: '13:99' }, { t: '14:99' }] } });
     expect(ins.tables[0].fields[0].suggest).toBeUndefined();
+  });
+
+  it('types an overnight end time the same as the start it follows', () => {
+    const ins = inspect({
+      doc: { rows: [{ startTime: '18:00', endTime: '30:00' }, { startTime: '19:00', endTime: '29:30' }] },
+    });
+    const [start, end] = ins.tables[0].fields;
+    expect(start.suggest).toMatchObject({ type: 'datetime', parse: 'HH:mm' });
+    expect(end.suggest).toEqual(start.suggest);
   });
 
   it('decides dd/MM from evidence, and refuses to guess without it', () => {

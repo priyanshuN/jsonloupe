@@ -245,6 +245,22 @@ conversion that reads only the clock, and demanding a base date for it would be 
 supply an answer nothing will use. (Found by running the corpus against the validator, not by
 inspection.)
 
+**The overnight convention is first-class.** A delivery window written `18:00 → 30:00`, or a
+`parsedEndTime` of 1800 minutes, ends at **6am the following day** — this is how the domain writes
+"tomorrow" without a date, and the corpus converter already relies on it (`timedelta(minutes=…)`
+rolls past midnight with no upper bound). Hour 30 is therefore parsed, not rejected: it carries a
+day offset that is applied once a date is known, as calendar arithmetic, so month ends and leap days
+are correct. Two consequences that matter more than they look:
+
+- **A start/end pair keeps one format.** Rejecting hour 30 would have typed `startTime` as a
+  timestamp and left `endTime` a bare string — the same window described two different ways in
+  adjacent columns.
+- **Where no date absorbs the offset, it stays in the clock.** `30:00 → HH:mm` renders `30:00`,
+  never `06:00` on the wrong day. The convention that came in is the convention that goes out.
+
+An hour past 23 means "next day" only where no date was given; `2026-08-01 30:00:00` is malformed,
+and is refused. The cap is 7 days, which still rejects a mis-declared format.
+
 **Naive datetimes only.** No timezone is attached, applied, or inferred at any point in v1. A value
 that says `09:00` produces `09:00`. Timezone handling that is implicit is timezone handling that is
 wrong at midnight.
@@ -448,10 +464,9 @@ correction.
 inspection — both are now the reason a whole class of false positives cannot recur):
 
 - **A shape match is not a parse.** The sniffer may only propose a format the engine can actually
-  execute, verified by running the parser over the samples. `endTime: "30:00"` matches `HH:mm` by
-  regex and means *6am the next day*; the parser rightly refuses hour 30. Proposing `HH:mm` there
-  would have handed the user a column of empty cells and a warning in place of the literal value
-  they already had.
+  execute, verified by running the parser over the samples rather than by matching their shape.
+  `"13:99"` matches `^\d{1,2}:\d{2}$` and is not a time; proposing `HH:mm` for it would hand the user
+  a column of empty cells and a warning in place of the literal values they already had.
 - **Minutes-of-day is held to a higher bar**, because it is the one form inferred from a *name*
   rather than from the value: at least two distinct values, at least one non-zero, and a name that
   suggests a point in the day rather than a length of one. Real payloads are full of

@@ -12,7 +12,15 @@ import { isLosslessNumber } from 'lossless-json';
 import { csvCell } from '../csv';
 import type { GeoForm } from './spec';
 
-/** A naive wall-clock instant. Date parts are null when the input carried none. */
+/**
+ * A naive wall-clock instant. Date parts are null when the input carried none.
+ *
+ * `dayOffset` carries the overnight convention: a delivery window written
+ * `18:00 → 30:00`, or a `parsedEndTime` of 1800 minutes, means 6am the FOLLOWING
+ * day. Hour 30 is not a broken hour 6 — it is how this domain writes "tomorrow"
+ * without a date, and dropping it would silently move a stop back by 24 hours.
+ * The offset is applied once the date is known, so the arithmetic stays naive.
+ */
 export interface Naive {
   y: number | null;
   mo: number | null;
@@ -20,7 +28,13 @@ export interface Naive {
   h: number;
   mi: number;
   s: number;
+  dayOffset: number;
 }
+
+// A window may legitimately run past midnight; it may not run for a week. The
+// cap is what still rejects a mis-declared format instead of accepting nonsense.
+const MAX_HOURS = 168;
+const MAX_MINUTES = 7 * 24 * 60;
 
 export function isScalar(v: unknown): boolean {
   if (v === null || v === undefined) return true;
@@ -131,9 +145,15 @@ export function parseNaive(v: unknown, parse: string): Naive | null {
     const n = toNum(v);
     if (n === null) return null;
     if (parse === 'minutesOfDay') {
-      if (n < 0 || n > 24 * 60) return null;
+      if (n < 0 || n > MAX_MINUTES) return null;
       const m = Math.round(n);
-      return { y: null, mo: null, d: null, h: Math.floor(m / 60), mi: m % 60, s: 0 };
+      return {
+        y: null, mo: null, d: null,
+        dayOffset: Math.floor(m / (24 * 60)),
+        h: Math.floor((m % (24 * 60)) / 60),
+        mi: m % 60,
+        s: 0,
+      };
     }
     const ms = parse === 'epochSeconds' ? n * 1000 : n;
     const dt = new Date(ms);
@@ -145,6 +165,7 @@ export function parseNaive(v: unknown, parse: string): Naive | null {
       h: dt.getUTCHours(),
       mi: dt.getUTCMinutes(),
       s: dt.getUTCSeconds(),
+      dayOffset: 0,
     };
   }
   const c = compileFormat(parse);
@@ -153,26 +174,48 @@ export function parseNaive(v: unknown, parse: string): Naive | null {
   if (!m) return null;
   const got: Partial<Record<Token, number>> = {};
   c.order.forEach((t, i) => (got[t] = +m[i + 1]));
+  const hours = got.HH ?? 0;
   const naive: Naive = {
     y: got.yyyy ?? null,
     mo: got.MM ?? null,
     d: got.dd ?? null,
-    h: got.HH ?? 0,
+    dayOffset: Math.floor(hours / 24),
+    h: hours % 24,
     mi: got.mm ?? 0,
     s: got.ss ?? 0,
   };
   if (naive.mo !== null && (naive.mo < 1 || naive.mo > 12)) return null;
   if (naive.d !== null && (naive.d < 1 || naive.d > 31)) return null;
-  if (naive.h > 23 || naive.mi > 59 || naive.s > 59) return null;
+  if (hours >= MAX_HOURS || naive.mi > 59 || naive.s > 59) return null;
+  // An hour past 23 means "the next day" only where no date was given; a full
+  // timestamp that says 2026-08-01 30:00 is malformed, not overnight.
+  if (naive.dayOffset > 0 && naive.y !== null) return null;
   return naive;
 }
 
 const pad = (n: number, w = 2) => String(n).padStart(w, '0');
 
+/**
+ * Roll a pending `dayOffset` into the date, once there is a date to roll it
+ * into. Done through Date.UTC purely as calendar arithmetic — month lengths and
+ * leap years, no timezone meaning attached.
+ */
+export function applyOffset(n: Naive): Naive {
+  if (!n.dayOffset || n.y === null || n.mo === null || n.d === null) return n;
+  const dt = new Date(Date.UTC(n.y, n.mo - 1, n.d + n.dayOffset));
+  return { ...n, y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate(), dayOffset: 0 };
+}
+
 /** Render a naive instant per the column's `out` spec. */
-export function renderNaive(n: Naive, out: string): string | null {
+export function renderNaive(raw: Naive, out: string): string | null {
+  const n = applyOffset(raw);
+  // applyOffset zeroes the offset once a date has absorbed it. Anything left
+  // had no date to land on, so it stays in the clock and the convention that
+  // came in is the convention that goes out: 30:00 renders as 30:00, never as
+  // 06:00 on the wrong day.
+  const hh = n.h + n.dayOffset * 24;
   if (isEpochToken(out)) {
-    if (out === 'minutesOfDay') return String(n.h * 60 + n.mi);
+    if (out === 'minutesOfDay') return String(hh * 60 + n.mi);
     if (n.y === null || n.mo === null || n.d === null) return null;
     const ms = Date.UTC(n.y, n.mo - 1, n.d, n.h, n.mi, n.s);
     return String(out === 'epochSeconds' ? Math.floor(ms / 1000) : ms);
@@ -195,7 +238,7 @@ export function renderNaive(n: Naive, out: string): string | null {
     } else if (tok === 'dd') {
       if (n.d === null) return null;
       s += pad(n.d);
-    } else if (tok === 'HH') s += pad(n.h);
+    } else if (tok === 'HH') s += pad(hh);
     else if (tok === 'mm') s += pad(n.mi);
     else s += pad(n.s);
     i += tok.length;
