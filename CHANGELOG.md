@@ -4,8 +4,8 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## 1.1.0 — 2026-08-02
 
-- **jsonloupe is an MCP server.** `npx jsonloupe-mcp` (register it with
-  `claude mcp add jsonloupe -- npx jsonloupe-mcp`) exposes the same engine the
+- **jsonloupe is an MCP server.** `npx -y -p jsonloupe jsonloupe-mcp` (register it with
+  `claude mcp add jsonloupe -- npx -y -p jsonloupe jsonloupe-mcp`) exposes the same engine the
   viewer runs on to an AI agent, so a document far too large for a model's
   context can still be answered from: `load_doc`, `get_schema`, `run_query`,
   `sample`, `diff_docs`, `export_csv`. The document is opened once and stays in

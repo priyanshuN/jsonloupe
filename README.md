@@ -101,7 +101,7 @@ The same engine runs as an [MCP](https://modelcontextprotocol.io) server, so an
 agent can work on a document that would never fit in its context:
 
 ```bash
-claude mcp add jsonloupe -- npx jsonloupe-mcp
+claude mcp add jsonloupe -- npx -y -p jsonloupe jsonloupe-mcp
 ```
 
 **If you have jq and plain JSON, use jq.** This is for the cases jq is awkward

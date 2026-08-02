@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// npx jsonloupe-mcp — jsonloupe as an MCP server, speaking JSON-RPC on stdio.
+// npx -y -p jsonloupe jsonloupe-mcp — jsonloupe as an MCP server, speaking JSON-RPC on stdio.
 //
 // Register it with an agent host, e.g.:
-//   claude mcp add jsonloupe -- npx jsonloupe-mcp
+//   claude mcp add jsonloupe -- npx -y -p jsonloupe jsonloupe-mcp
 //
 // This launcher is deliberately thin: the server is the prebuilt bundle in
 // dist-mcp/, which has no runtime dependencies and makes no network calls. It
