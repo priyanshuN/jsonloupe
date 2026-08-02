@@ -6,7 +6,7 @@
 import { isLosslessNumber } from 'lossless-json';
 import { formatAnchor, type AnchorSeg, type GeoForm, type SourceFormat } from './spec';
 import { loadSource, type SourceInput } from './engine';
-import { compileFormat, needsBaseDate, parseGeo, toNum } from './coerce';
+import { compileFormat, needsBaseDate, parseGeo, parseNaive, toNum } from './coerce';
 
 export interface Inspection {
   source: SourceFormat;
@@ -231,7 +231,24 @@ const DATE_PATTERNS: { re: RegExp; parse: string }[] = [
 ];
 
 const SLASHED = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/;
-const TIMEISH = /time|start|end|slot|eta|date|when/i;
+
+// Names that suggest a point in the day, not a length of one. A bare `time`
+// token is deliberately absent: real payloads are full of `breakTimeDuration`,
+// `maximumLoadingTime` and `driverSwapTime`, which are durations, and offering
+// to reformat those as clock times produces confident nonsense.
+const TIMEISH = /start|end|eta|arriv|departur|slot|pickup|delivery|open|close/i;
+
+/**
+ * A shape match is not a parse. `endTime: "30:00"` matches `HH:mm` by regex but
+ * means 6am the next day, and the parser rightly refuses hour 30 — so proposing
+ * `HH:mm` for it would hand the user a column of empty cells and a warning
+ * instead of the literal value they already had. The sniffer may only offer what
+ * the engine can actually execute.
+ */
+function propose(samples: string[], parse: string, out: string): Suggestion | undefined {
+  if (agreement(samples, (s) => parseNaive(s, parse) !== null) < AGREE) return undefined;
+  return { type: 'datetime', parse, out, needsBaseDate: needsBaseDate(parse) && !!compileFormat(parse) };
+}
 
 function suggestFor(path: string, rows: Record<string, unknown>[], samples: string[]): Suggestion | undefined {
   if (!samples.length) return undefined;
@@ -246,7 +263,16 @@ function suggestFor(path: string, rows: Record<string, unknown>[], samples: stri
     if (ns.every((n) => n >= 1e9 && n <= 2e9)) {
       return { type: 'datetime', parse: 'epochSeconds', out: 'yyyy-MM-dd HH:mm:ss', needsBaseDate: false };
     }
-    if (TIMEISH.test(path) && ns.every((n) => Number.isInteger(n) && n >= 0 && n <= 1439)) {
+    // Minutes-of-day is the one form inferred from a NAME rather than from the
+    // value itself, so it is held to a higher bar: at least two distinct values
+    // (samples are deduped) and at least one of them non-zero. A column of
+    // zeros, or a document with a single row, is not evidence of anything.
+    if (
+      TIMEISH.test(path) &&
+      samples.length >= 2 &&
+      ns.some((n) => n > 0) &&
+      ns.every((n) => Number.isInteger(n) && n >= 0 && n <= 1439)
+    ) {
       return { type: 'datetime', parse: 'minutesOfDay', out: 'yyyy-MM-dd HH:mm:ss', needsBaseDate: true };
     }
     return undefined;
@@ -254,9 +280,7 @@ function suggestFor(path: string, rows: Record<string, unknown>[], samples: stri
 
   // String datetime forms.
   for (const { re, parse } of DATE_PATTERNS) {
-    if (agreement(samples, (s) => re.test(s)) >= AGREE) {
-      return { type: 'datetime', parse, out: 'yyyy-MM-dd HH:mm:ss', needsBaseDate: needsBaseDate(parse) && !!compileFormat(parse) };
-    }
+    if (agreement(samples, (s) => re.test(s)) >= AGREE) return propose(samples, parse, 'yyyy-MM-dd HH:mm:ss');
   }
 
   // dd/MM vs MM/dd — decided by evidence, or not at all (§8.3).
@@ -270,8 +294,8 @@ function suggestFor(path: string, rows: Record<string, unknown>[], samples: stri
       if (+m[2] > 12) secondOver12 = true;
     }
     if (firstOver12 && secondOver12) return { ambiguous: 'dayMonth' };
-    if (firstOver12) return { type: 'datetime', parse: 'dd/MM/yyyy', out: 'yyyy-MM-dd HH:mm:ss', needsBaseDate: false };
-    if (secondOver12) return { type: 'datetime', parse: 'MM/dd/yyyy', out: 'yyyy-MM-dd HH:mm:ss', needsBaseDate: false };
+    if (firstOver12) return propose(samples, 'dd/MM/yyyy', 'yyyy-MM-dd HH:mm:ss');
+    if (secondOver12) return propose(samples, 'MM/dd/yyyy', 'yyyy-MM-dd HH:mm:ss');
     return { ambiguous: 'dayMonth' };
   }
 

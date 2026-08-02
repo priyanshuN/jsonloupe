@@ -353,6 +353,29 @@ describe('detection', () => {
     });
   });
 
+  it('infers minutes-of-day only with real evidence', () => {
+    const good = inspect({ doc: { rows: [{ startTime: 540 }, { startTime: 1080 }] } });
+    expect(good.tables[0].fields[0].suggest).toMatchObject({ parse: 'minutesOfDay' });
+
+    // A duration that happens to be named `…Time` — the false positive found
+    // against a real routing payload.
+    const duration = inspect({ doc: { rows: [{ breakTimeDuration: 0 }, { breakTimeDuration: 45 }] } });
+    expect(duration.tables[0].fields[0].suggest).toBeUndefined();
+
+    // One row, or a column of zeros, is not evidence.
+    const single = inspect({ doc: { rows: [{ startTime: 540 }] } });
+    expect(single.tables[0].fields[0].suggest).toBeUndefined();
+    const zeros = inspect({ doc: { rows: [{ startTime: 0 }, { startTime: 0 }] } });
+    expect(zeros.tables[0].fields[0].suggest).toBeUndefined();
+  });
+
+  it('never proposes a format the parser would then reject', () => {
+    // `18:00 → 30:00` is the overnight convention in routing payloads: it looks
+    // like HH:mm and is not one. Found against a real request file.
+    const ins = inspect({ doc: { rows: [{ endTime: '30:00' }, { endTime: '29:30' }] } });
+    expect(ins.tables[0].fields[0].suggest).toBeUndefined();
+  });
+
   it('decides dd/MM from evidence, and refuses to guess without it', () => {
     const evident = inspect({ doc: { rows: [{ d: '31/01/2026' }, { d: '05/02/2026' }] } });
     expect(evident.tables[0].fields[0].suggest).toMatchObject({ parse: 'dd/MM/yyyy' });

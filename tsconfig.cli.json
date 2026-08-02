@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Node-only, and unlike the MCP config it needs no vite/client: the
+    // converter engine imports no assets and touches no browser API, which is
+    // the DOM-free boundary of SPEC-converter.md §9.1 stated as a type config.
+    "types": ["node"]
+  },
+  "include": ["src/cli"],
+  "exclude": []
+}

@@ -30,6 +30,7 @@
     "bin",
     "dist",
     "dist-mcp",
+    "dist-cli",
     "SECURITY.md",
     "THIRD_PARTY_LICENSES.md",
     "CHANGELOG.md"
@@ -39,8 +40,9 @@
   },
   "scripts": {
     "dev": "vite --port 5199",
-    "build": "tsc --noEmit && vite build && npm run build:mcp",
+    "build": "tsc --noEmit && vite build && npm run build:mcp && npm run build:cli",
     "build:mcp": "tsc -p tsconfig.mcp.json --noEmit && node scripts/build-mcp.mjs",
+    "build:cli": "tsc -p tsconfig.cli.json --noEmit && node scripts/build-cli.mjs",
     "smoke:mcp": "node scripts/mcp-smoke.mjs",
     "preview": "vite preview --port 5199",
     "test": "vitest run",

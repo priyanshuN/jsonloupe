@@ -1,7 +1,7 @@
 # jsonloupe Converter — Specification
 
-**Status:** v1 · design frozen 2026-08-02 · engine + sinks landed 2026-08-03 (§12 steps 1–2) ·
-**Branch:** `converter`
+**Status:** v1 · design frozen 2026-08-02 · engine, sinks and CLI landed 2026-08-03
+(§12 steps 1–2, 5) · **Branch:** `converter`
 
 Companion to [SPEC.md](SPEC.md). That document specifies the *viewer*; this one specifies the
 **converter addon** — a visual schema-mapper that turns nested JSON into flat tables a non-developer
@@ -444,6 +444,20 @@ Range check, applied as confirmation in every case: if any sampled `|first| > 90
 cannot be a latitude. If that contradicts the rule that matched, it is a hard error, not a silent
 correction.
 
+**Two rules the real data added** (found by running `draft` over an actual routing request, not by
+inspection — both are now the reason a whole class of false positives cannot recur):
+
+- **A shape match is not a parse.** The sniffer may only propose a format the engine can actually
+  execute, verified by running the parser over the samples. `endTime: "30:00"` matches `HH:mm` by
+  regex and means *6am the next day*; the parser rightly refuses hour 30. Proposing `HH:mm` there
+  would have handed the user a column of empty cells and a warning in place of the literal value
+  they already had.
+- **Minutes-of-day is held to a higher bar**, because it is the one form inferred from a *name*
+  rather than from the value: at least two distinct values, at least one non-zero, and a name that
+  suggests a point in the day rather than a length of one. Real payloads are full of
+  `breakTimeDuration`, `maximumLoadingTime` and `driverSwapTime` — all durations, all previously
+  offered as clock times.
+
 ### 8.4 Column name mapping
 
 When the user supplies target column names (a template, a previous spec, a CSV header row), source
@@ -616,7 +630,7 @@ exemption that protects exact int64 digits.
 | 2 | Sinks — memory, CSV, xlsx writer | the §7 example round-trips to a real file Excel opens | **done** — `unzip -t` clean, LibreOffice reads every cell |
 | 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is | |
 | 4 | MCP — `inspect`, `convert`, `draft_spec` (names already reserved in `PLAN-mcp-server.md`) | agent drafts a spec, human approves it in the UI, engine runs it | |
-| 5 | CLI — `jsonloupe convert file.json --spec spec.json` | a frozen spec re-runs headless with no UI and no model | |
+| 5 | CLI — `jsonloupe convert file.json --spec spec.json` | a frozen spec re-runs headless with no UI and no model | **done** — `inspect` / `draft` / `convert`, driven on a real routing payload |
 
 Two shared modules were extracted rather than duplicated while building step 1: `src/csv.ts` (the
 formula-injection neutralizer and RFC 4180 field rule) and `src/lossless.ts` (the number-boxing

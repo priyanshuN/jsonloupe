@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-mcp/
+dist-cli/
 .api-key
 .anthropic-key
 .env
