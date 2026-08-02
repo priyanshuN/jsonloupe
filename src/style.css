@@ -18,15 +18,21 @@
        toolbar groups are separated by --gap-4.
     5. One focus ring and one hover treatment, defined once (button:focus-visible
        and .focus-ring:focus-visible below) and reused; never restyled locally.
-    6. Accent FILL lands on at most ONE control per view, and only on a button
-       that commits work (.primary: parse, ask run, apply changes…). Buttons
-       that merely reveal something (`ask`, `compare`) wear the soft tint
-       (.accent-soft/.tb-chip.on); toolbar utilities are quiet (text-only);
-       selection states (mode switch .on) are neutral, not accent. Filled
-       surfaces use the --accent-fill* tokens (brand teal + white ink, same
-       pair both themes — fill and tint must read as ONE hue family, never two
-       button species); --accent itself is text/hairline colour and is never
-       used as a fill.
+    6. Three tiers, and the accent does one job in each. FILL is the LANDING's
+       alone — #parse-btn and .lp-cta, where a marketing page may shout once.
+       Inside the workbench there is no fill: every accent button, whether it
+       reveals (`ask`, `compare`, `choose a file…`) or commits (`apply changes`,
+       `ask run`, `recalculate`), wears the OUTLINE — neutral --btn-bg, accent
+       hairline, accent ink at the base weight — defined once on button.primary
+       and never restated. TINT (--accent-soft) means exactly one thing: this
+       toggle is currently ON (.tb-chip.on, #code-raw.on, .sem-filters .on,
+       #ask-btn.on). Everything else is QUIET (text-only), and selection states
+       that are not accent-worthy (mode switch .on) stay neutral. Filled
+       surfaces use the --accent-fill* tokens (brand teal + white ink, same pair
+       both themes); --accent itself is text/hairline colour, never a fill.
+       Reveal, commit and toggle-on all shared the tint until 2026-08-03: three
+       different meanings on one treatment, and over light's white that tint
+       composited to a grubby near-neutral rather than reading teal.
     7. Checkboxes and toggles use the one styled component (.chk); stock browser
        widgets are never visible.
     8. Toasts, chips and badges inherit this radius and type scale — --r-sm for
@@ -41,7 +47,30 @@
        less residue. An action gets a glyph instead of a word ONLY when the
        glyph is universal (◂ back, ⋯ more); anything ambiguous keeps its
        lowercase label.
-   11. This block is the contract. Extend it here when the vocabulary changes.
+   11. Two surfaces, and neither of them is --bg. CANVAS (--bg-canvas) is where
+       a document is read: the tree pane and the CodeMirror pane, which are one
+       reading surface interrupted by a divider and must never disagree —
+       code.ts's theme reads this same token rather than carrying its own hex,
+       which is how light drifted to #eef1f6 on one side and #ffffff on the
+       other while dark stayed accidentally in sync. CHROME (--bg-chrome) is
+       everything that frames it: the sidebar and EVERY control strip bordered
+       against a pane — #toolbar, .tree-bar, .code-bar, .diff-head, .sem-head,
+       #crumb, #ask-panel, #search-panel. A bar stacked directly under another
+       bar takes --bg-chrome-2 so the two stay a visible step apart.
+       Chrome must read as a different surface from canvas, but WHICH DIRECTION
+       is per-theme, not constant — dark has headroom above the canvas and goes
+       lighter (#21262f), light has none above white and goes down to the page
+       tint (#eef1f6). Do not "unify" these into one offset; that is the bug,
+       not the fix.
+       Corollary, and the part that is easy to miss: a CONTROL sitting on chrome
+       takes --bg-canvas, not --bg-elevated-2. That token means "one step off
+       white" and is right for controls inside dialogs, which are white; on
+       tinted chrome it lands 3 units LIGHTER than its own host and the control
+       disappears. .mode-switch, .tb-search, .crumb-chip, .theme-toggle,
+       .r-actions button and every field in #ask-panel all hit this the day the
+       bars were tinted. Dark never showed it (that token is 9-12 units off
+       chrome there), so light is where this must always be checked.
+   12. This block is the contract. Extend it here when the vocabulary changes.
    ========================================================================== */
 
 :root,
@@ -49,6 +78,20 @@
   color-scheme: dark;
 
   --bg: #191d24;
+  /* Rule 11: the document reading surface. Same value as --bg here — dark was
+     designed with one surface — but it is a SEPARATE role, and light proves
+     why: chrome and canvas want different values there. */
+  --bg-canvas: #191d24;
+  /* Rule 11: app chrome that frames the document — the sidebar. It must read as
+     a DIFFERENT surface from --bg-canvas; which direction achieves that is a
+     per-theme fact, not a constant. Dark has headroom above the canvas, so
+     chrome goes lighter, exactly as it always has here. */
+  --bg-chrome: #21262f;
+  /* A SECOND chrome tier for a bar stacked under another bar (.sem-toolbar
+     under .sem-head). One step further from the canvas, same per-theme
+     direction as --bg-chrome — dark keeps going up, so this is the value that
+     bar already had. */
+  --bg-chrome-2: #2a303b;
   --bg-elevated: #21262f;
   --bg-elevated-2: #2a303b;
   --bg-inset: #171b21;
@@ -108,6 +151,17 @@
   color-scheme: light;
 
   --bg: #eef1f6;
+  /* Rule 11: white, not the #eef1f6 chrome tint — a long read wants the least
+     tinted ground, and the code pane has always been white here. */
+  --bg-canvas: #ffffff;
+  /* Rule 11: chrome goes DOWN here, because the canvas is already white and
+     there is no headroom above it. Same #eef1f6 the page has always used —
+     until now the sidebar was --bg-elevated, i.e. white on white, separated
+     from the document by a single hairline and nothing else. */
+  --bg-chrome: #eef1f6;
+  /* His call: a real step, not flat. Light goes DOWN from chrome (no headroom
+     above white), which is why this cannot be one shared offset with dark. */
+  --bg-chrome-2: #e5e9f1;
   --bg-elevated: #ffffff;
   --bg-elevated-2: #f1f4f9;
   --bg-inset: #f7f9fc;
@@ -250,6 +304,11 @@ button {
   transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
 }
 button:hover { border-color: var(--btn-border-hover); background: var(--btn-bg-hover); }
+/* One gap-filler for every flex bar and dialog action row. It used to be scoped
+   to .code-bar/.tree-bar/.sem-head, which silently made the identical <span> in
+   the baseline and transport dialogs a zero-width no-op — `cancel` sat glued to
+   its neighbour instead of being pushed to the far edge. */
+.spacer { flex: 1; }
 /* Rule 5: the one focus ring, stated once. .focus-ring carries it to widgets
    that are neither a button, a link nor an input. */
 button:focus-visible,
@@ -288,18 +347,31 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .btn-icon.btn-mini { width: var(--ctl-h-mini); height: var(--ctl-h-mini); padding: 0; font-size: 12px; }
 
-/* Primary — commits work. His call 2026-08-02: inside the WORKBENCH the tint
-   is the only accent treatment (fill + tint + quiet on one working page read
-   as three button species). The solid fill survives on the landing only
-   (#parse-btn below, .lp-cta), where a marketing page shouting once is right. */
-button.primary {
-  background: var(--accent-soft);
+/* The OUTLINE tier (rule 6) — the workbench's ONLY accent treatment, stated
+   once here and never restated. It covers both jobs a non-quiet button does on
+   a working page: revealing something (`ask`, `compare`, `choose a file…`) and
+   committing work (`apply changes`, `ask run`, `recalculate`). His call
+   2026-08-02 was that fill + tint + quiet read as three button species, so the
+   workbench kept only the tint; 2026-08-03 that tint became this outline —
+   over light's white it composited to a grubby near-neutral, and sharing it
+   with toggled chips made a button and an already-engaged toggle identical.
+   The solid fill survives on the landing only (#parse-btn below, .lp-cta),
+   where a marketing page shouting once is right. Separation from the quiet
+   utilities beside them comes from the accent hairline and ink; nothing in the
+   workbench needs to shout twice. */
+button.primary,
+#ask-btn,
+#compare-btn,
+#baseline-file-btn {
+  background: var(--btn-bg);
   border-color: var(--accent-line);
   color: var(--accent);
-  font-weight: 600;
   box-shadow: none;
 }
-button.primary:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+button.primary:hover,
+#ask-btn:hover,
+#compare-btn:hover,
+#baseline-file-btn:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
 #parse-btn {
   background: var(--accent-fill);
   border-color: var(--accent-fill-edge);
@@ -307,15 +379,6 @@ button.primary:hover { background: color-mix(in srgb, var(--accent) 18%, transpa
 }
 #parse-btn:hover { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
 
-/* Tinted — reveals something. Same colour at a third of the volume. */
-button.accent-soft {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-button.accent-soft:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 button.ghost {
   background: transparent;
@@ -374,7 +437,11 @@ input:focus {
 /* ---------- sidebar ---------- */
 
 #sidebar {
-  background: var(--bg-elevated);
+  /* Rule 11: chrome, not document. --bg-elevated made this white on white in
+     light — the shell and the thing being read were the same surface, with only
+     the hairline telling them apart. Dark is unaffected: --bg-chrome carries
+     the same #21262f the sidebar already had. */
+  background: var(--bg-chrome);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -461,9 +528,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .recent:hover .r-actions { display: flex; }
 .recent.pinned .r-actions { display: flex; }
 .recent.pinned:not(:hover) .r-actions > :not(.pin) { display: none; }
+/* Rule 11: a control sitting ON chrome takes the canvas — in the sidebar these
+   were --bg-elevated-2, which is only 3 units off #eef1f6 and stopped reading
+   as controls at all once the sidebar went tinted. Dark never had the problem
+   (that token is 9-12 units off chrome there); --bg-canvas restores the gap in
+   light and keeps dark's, in the opposite direction, exactly as rule 11 says. */
 .r-actions button {
   border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border-color: var(--border-strong);
   box-shadow: none;
 }
@@ -486,7 +558,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
   border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 11.5px;
@@ -991,13 +1063,18 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #viewer { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* Rule 4: groups are separated by --gap-4, controls inside a group by --gap-2. */
+/* Rule 11: every control strip bordered against a pane is chrome, so it takes
+   --bg-chrome and joins the sidebar as one continuous frame around the white
+   document. --bg-elevated stays for things that FLOAT (dialogs, .menu,
+   #search-panel) — those are above the frame, not part of it. Dark is unmoved:
+   --bg-chrome carries the same #21262f these strips already had. */
 #toolbar {
   display: flex;
   align-items: center;
   gap: var(--gap-4);
   padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   flex-wrap: wrap;
 }
 
@@ -1034,9 +1111,6 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #reload-btn, #original-btn { min-height: var(--ctl-h-mini); padding: 0 var(--gap-2); font-size: 11.5px; }
 /* .tb-doc is a shrinkable flex row — the label must not break across two lines. */
 #original-btn { white-space: nowrap; }
-/* Rule 6: the toolbar spends its one accent on `ask`. Compare is a neutral
-   control like every other survivor in the bar. */
-#compare-btn { white-space: nowrap; }
 
 /* segmented mode switcher — the shell is one regular control (rule 1); segment
    height DERIVES from --ctl-h (shell = segment + 2px padding + 1px border per
@@ -1047,7 +1121,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  background: var(--bg-elevated-2);
+  /* Rule 11: control on chrome — canvas. The track has to out-contrast the
+     toolbar it sits in or the whole segmented shape disappears. */
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r);
 }
@@ -1123,12 +1199,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   overflow-y: auto;
   padding: 8px;
 }
+/* 8px list inset + this row's own 1px border + 9px = the same 18px of ink inset
+   the heading and the action row sit on. The hover fill still bleeds wider than
+   the text column, which is what makes it read as a row, not a paragraph. */
 .baseline-option {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 3px 14px;
-  padding: 10px 12px;
+  padding: 10px 9px;
   text-align: left;
   color: var(--text);
   background: transparent;
@@ -1162,16 +1241,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   font-size: 12.5px;
   line-height: 1.55;
 }
+/* 18px matches .baseline-head's inset, so the button's box edge lines up with
+   the heading above it — a bordered control aligns by its edge, not its ink. */
 .baseline-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 12px 18px;
   border-top: 1px solid var(--border);
-}
-#baseline-file-btn {
-  color: var(--accent);
-  border-color: var(--accent-line);
 }
 
 /* ---------- transport size inspector ---------- */
@@ -1405,7 +1482,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-width: 220px;
   height: var(--ctl-h);
   padding: 0 var(--gap-1) 0 0;
-  background: var(--bg-elevated-2);
+  /* A field on chrome takes the canvas — see #ask-box. This one sits directly
+     in #toolbar, so it was the first to go invisible when the bar was tinted. */
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
@@ -1424,8 +1503,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   font: 12.5px var(--mono);
   outline: none;
 }
-/* Rule 6: a toggled chip states its mode with the soft accent tint — the filled
-   accent stays reserved for `ask`. */
+/* Rule 6: a toggled chip states its mode with the soft accent tint, which is
+   now the tint's ONLY job — every accent button in the workbench is outline. */
 .tb-chip {
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
@@ -1443,40 +1522,24 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-color: var(--accent-line);
 }
 
-/* Rule 6: `ask` reveals a panel, so it wears the tint — the solid fill belongs
-   to the button that spends the token (`ask run`, .primary). Otherwise opening
-   the panel puts two identical filled buttons twelve pixels apart. */
-#ask-btn {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-#ask-btn:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-#ask-btn.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
-
-/* `compare` also reveals (the baseline picker) — same tint as `ask`. */
-#compare-btn {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-#compare-btn:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+/* `ask` and `compare` wear the outline tier, defined once with button.primary
+   near the top of this file — nothing to restate here. Only their two local
+   facts live below. Open IS a toggle state, so the tint here means exactly what
+   it means everywhere else. */
+#ask-btn.on { background: var(--accent-soft); border-color: var(--accent); }
+#compare-btn { white-space: nowrap; }
 
 /* Quiet — everything else in the toolbar is text-only at rest; borders return
    inside dialogs, the code bar and the diff head, where a button sits alone.
    (This carries #toolbar's id specificity, so tinted/segmented controls must be
    excluded explicitly.) */
-#toolbar button:not(.primary):not(.accent-soft):not(.tb-chip):not(#ask-btn):not(#compare-btn):not(.mode-switch *) {
+#toolbar button:not(.primary):not(.tb-chip):not(#ask-btn):not(#compare-btn):not(.mode-switch *) {
   background: none;
   border-color: transparent;
   box-shadow: none;
   color: var(--text-dim);
 }
-#toolbar button:not(.primary):not(.accent-soft):not(.tb-chip):not(#ask-btn):not(#compare-btn):not(.mode-switch *):hover {
+#toolbar button:not(.primary):not(.tb-chip):not(#ask-btn):not(#compare-btn):not(.mode-switch *):hover {
   background: var(--bg-hover);
   color: var(--text);
   border-color: transparent;
@@ -1486,14 +1549,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    bordered box 40px under a quiet toolbar reads as a leftover from the old
    design. Each bar keeps one standout: its fill (apply changes / ask run) and
    any toggled state (source .on, which re-tints via its own rule). */
-#code-format, #code-copy, #code-raw, #ask-key,
+#code-format, #code-copy, #code-raw, #ask-key, #ask-query-copy,
 .tree-bar button {
   background: none;
   border-color: transparent;
   box-shadow: none;
   color: var(--text-dim);
 }
-#code-format:hover, #code-copy:hover, #code-raw:hover, #ask-key:hover,
+#code-format:hover, #code-copy:hover, #code-raw:hover, #ask-key:hover, #ask-query-copy:hover,
 .tree-bar button:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -1528,9 +1591,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 /* ---------- ask panel ---------- */
 
+/* Rule 11: an inline strip between #toolbar and the panes — chrome, like every
+   other bar, not a floating surface. It was --bg-elevated, so once the toolbar
+   went tinted this panel stayed white directly beneath it: two full-width
+   strips, touching, different colours, for no reason. */
 #ask-panel {
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   padding: 11px 14px;
   display: flex;
   flex-direction: column;
@@ -1538,14 +1605,24 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   max-height: 46vh;
   overflow-y: auto;
 }
-.ask-row { display: flex; gap: 8px; }
+/* Rule 1: without align-items the buttons STRETCH to the input's natural
+   height, which made every control in this panel 31px — a third size the
+   contract does not have. The input is pinned to --ctl-h and the row centres,
+   so 28px holds even if the font changes. */
+.ask-row { display: flex; align-items: center; gap: 8px; }
+/* A field on chrome takes the CANVAS, which is what makes it read as a field:
+   white against #eef1f6 in light, dark against #21262f in dark — the same
+   per-theme direction rule 11 states for chrome itself. --bg-elevated-2 used to
+   do this job when the bars were white; against tinted chrome it lands 3 units
+   LIGHTER than its own surround and stops reading as a control at all. */
 #ask-box, #ask-key-input {
   flex: 1;
-  background: var(--bg-elevated-2);
+  min-height: var(--ctl-h);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text);
-  padding: 7px 12px;
+  padding: 0 12px;
   font: 13px var(--mono);
   outline: none;
 }
@@ -1561,11 +1638,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #ask-query-edit {
   flex: 1;
   min-width: 0;
-  background: var(--bg-elevated-2);
+  min-height: var(--ctl-h);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--c-number);
-  padding: 5px 10px;
+  padding: 0 10px;
   font: 12px var(--mono);
   outline: none;
 }
@@ -1591,10 +1669,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 
 /* "sent to model" transparency disclosure */
+/* Cards sitting ON the ask panel's chrome take the canvas, same reasoning as
+   the fields above. */
 #ask-disclosure {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   padding: 5px 9px;
 }
 #ask-disclosure > summary {
@@ -1649,7 +1729,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 3px 6px 3px 12px;
@@ -1662,11 +1742,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 /* ---------- search panel ---------- */
 
+/* Rule 11: static in the flow, not floating — an inline strip like #ask-panel,
+   so it is chrome. (I misfiled it as a floating surface on the first pass; its
+   computed position is `static`.) */
 #search-panel {
   max-height: 38vh;
   overflow-y: auto;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
 .hit {
   display: flex;
@@ -1721,7 +1804,33 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   overflow: auto;
   position: relative;
   min-height: 0;
-  background: var(--bg);
+  /* Rule 11 — this is document content, so it takes the canvas, same as the
+     CodeMirror pane beside it in split view. The two panes are one reading
+     surface interrupted by a divider, not two surfaces.
+
+     The gutter stripe is painted HERE, not by the rows. .rownum is per-row, so
+     the strip died at the last row while CodeMirror's single full-height column
+     ran to the bottom of its pane — the two panes disagreed below the content.
+     Geometry tracks .rownum exactly: border-box 52px wide with its 1px border
+     inside, so gutter 0→51, hairline 51→52; the rows then paint their own
+     matching strip on top and the join is invisible.
+
+     Default (scroll) attachment, deliberately, NOT local: it pins the stripe to
+     the pane box, which is both what we want — full height however short the
+     document is — and free, since a local background would have to repaint on
+     every scroll frame of a virtualized 37MB tree. That is only safe because
+     this viewport never scrolls horizontally (#tree-layer is left:0/right:0, so
+     long rows overflow visibly rather than growing the scroll width — verified
+     at 260px with a 400-char value). If that ever changes, the stripe and the
+     numbers would drift apart on scrollLeft; make .rownum sticky at left:0 then
+     rather than switching this to local. */
+  background-color: var(--bg-canvas);
+  background-image: linear-gradient(
+    to right,
+    var(--gutter-bg) 0 51px,
+    var(--border) 51px 52px,
+    transparent 52px
+  );
 }
 #tree-spacer { width: 1px; }
 #tree-layer {
@@ -1857,16 +1966,19 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   white-space: nowrap;
 }
 #payload-badge:hover { border-color: var(--accent); }
+/* Rule 6: unpacking an embedded payload commits work, so this is the outline
+   tier like every other accent button in the workbench — it just happens to sit
+   inline on a row (--ctl-h-mini) rather than in a bar. */
 .btn-unpack {
   margin-left: 8px;
   color: var(--accent);
   border-color: var(--accent-line);
-  background: var(--accent-soft);
+  background: var(--btn-bg);
   border-radius: var(--r-sm);
   flex-shrink: 0;
   box-shadow: none;
 }
-.btn-unpack:hover { background: var(--accent-soft); border-color: var(--accent); }
+.btn-unpack:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
 
 .actions { display: none; gap: 4px; margin-left: auto; padding-left: 12px; }
 .row:hover .actions { display: flex; }
@@ -1889,7 +2001,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 #crumb {
   border-top: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   padding: 5px 16px;
   font: 12px var(--mono);
   color: var(--text-dim);
@@ -1911,7 +2023,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   flex-shrink: 0;
   font-family: var(--mono);
   color: var(--text-dim);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: none;
@@ -1945,10 +2057,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   gap: 10px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
-.code-bar .spacer,
-.tree-bar .spacer { flex: 1; }
 /* At narrow split widths the status text is what gives way — the primary
    action always keeps its label on one line. The status truncates with an
    ellipsis rather than wrapping (per-character wrap turns it into a 1ch-wide
@@ -2077,18 +2187,20 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   gap: 10px;
   padding: 9px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   flex-wrap: wrap;
 }
 #diff-title { font: 12.5px var(--mono); color: var(--text); }
 #diff-ignore {
   flex: 1;
   min-width: 220px;
-  background: var(--bg-elevated-2);
+  min-height: var(--ctl-h);
+  /* Field on chrome (.diff-head) — canvas, see #ask-box. */
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text);
-  padding: 6px 11px;
+  padding: 0 11px;
   font: 12px var(--mono);
   outline: none;
 }
@@ -2135,9 +2247,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: 43px;
   padding: 7px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
-.sem-head .spacer { flex: 1; }
 .sem-heading {
   display: flex;
   align-items: baseline;
@@ -2166,7 +2277,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: 42px;
   padding: 6px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated-2);
+  /* Second bar under .sem-head — --bg-chrome-2 keeps them a visible step apart.
+     They were 3 units apart in light once .sem-head went chrome. */
+  background: var(--bg-chrome-2);
 }
 .sem-filters {
   display: flex;
