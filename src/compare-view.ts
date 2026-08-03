@@ -10,7 +10,10 @@ export interface SemanticCompareCallbacks {
   onSelect?(row: CompareRow): void;
 }
 
-const ROW_H = 32;
+// Must equal .compare-row's height in style.css (contract rule 8b: one row
+// rhythm across every scrolling list of rows). This view is virtualized, so the
+// two numbers cannot drift apart without the rows tearing.
+const ROW_H = 28;
 const OVERSCAN = 12;
 const INDENT_W = 16;
 

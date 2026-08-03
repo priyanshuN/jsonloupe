@@ -38,7 +38,7 @@ import {
   type TransportMeasure,
 } from './transport';
 import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayload } from './nl';
-import { currentTheme, toggleTheme, onThemeChange } from './theme';
+import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
@@ -169,7 +169,7 @@ const repairBadge = $<HTMLButtonElement>('#repair-badge');
 const payloadBadge = $<HTMLButtonElement>('#payload-badge');
 const originalBtn = $<HTMLButtonElement>('#original-btn');
 const filterBtn = $<HTMLButtonElement>('#filter-btn');
-const crumb = $('#crumb');
+const statusBar = $('#status-bar');
 const diffView = $('#diff-view');
 const diffTitle = $('#diff-title');
 const diffIgnore = $<HTMLInputElement>('#diff-ignore');
@@ -180,8 +180,7 @@ const semTitle = $('#sem-title');
 const semSummaryBtn = $<HTMLButtonElement>('#sem-summary');
 const semCloseBtn = $<HTMLButtonElement>('#sem-close');
 const semFilters = $('#sem-filters');
-const semPlan = $<HTMLDetailsElement>('#sem-plan');
-const semPlanSummary = $('#sem-plan-summary');
+const semPlanBtn = $<HTMLButtonElement>('#sem-plan-btn');
 const semPlanBody = $('#sem-plan-body');
 const semWarning = $('#sem-warning');
 const semLeftTitle = $('#sem-left-title');
@@ -189,7 +188,6 @@ const semRightTitle = $('#sem-right-title');
 const semViewport = $('#sem-viewport');
 const semSpacer = $('#sem-spacer');
 const semLayer = $('#sem-layer');
-const semCrumb = $('#sem-crumb');
 const tableView = $('#table-view');
 const tableTitle = $('#table-title');
 const tableCountEl = $('#table-count');
@@ -203,10 +201,102 @@ const paneArea = $('#pane-area');
 const splitDivider = $<HTMLElement>('#split-divider');
 const codeView = $('#code-view');
 const codeHost = $('#code-host');
-const codeStatus = $('#code-status');
+const toolbarTreeOps = $('#tb-tree-ops');
+const treeBarOps = $('#tree-bar-ops');
+const collapseBtn = $<HTMLButtonElement>('#collapse-btn');
+const treeCopyBtn = $<HTMLButtonElement>('#fmt-btn');
+const treeDownloadBtn = $<HTMLButtonElement>('#dl-btn');
 
 // Split-view line map: `$`-path → 1-based line in the code editor.
 let codeLineMap = new Map<string, number>();
+
+// ---------- status strip: the app's bottom edge (style.css rule 19) ----------
+
+// One strip under every pane, rebuilt from this state on every write — so a
+// note left behind by the view you just left can never survive into the next
+// one, which is how the app ended up with two half-strips and four views that
+// ran to the window edge.
+//
+//   lead  — the view's "where am I": a path, a caret, a diff verdict.
+//   chips — the actions that lead earns (copy $path, /pointer, .js).
+//   trail — what the view wants to say ABOUT it, parked at the right edge: the
+//           editor's unapplied state, a live match count, the same-value chip.
+//
+// `tone` is rule 15's mapping. '' and dirty/error/saved are ink only — they
+// update as you work and you are already looking at them. 'bulk' is the one
+// tier-2 state here (ink + hairline): a replace-all you did not type out is a
+// change to notice before moving on.
+type StatusTone = '' | 'dirty' | 'bulk' | 'error' | 'saved';
+
+interface StatusState {
+  lead: string;
+  leadIsPath: boolean;
+  chips: HTMLElement[];
+  trailChips: HTMLElement[];
+  note: string;
+  tone: StatusTone;
+  count: string;
+}
+
+const statusState: StatusState = {
+  lead: '', leadIsPath: false, chips: [], trailChips: [], note: '', tone: '', count: '',
+};
+
+function renderStatus(): void {
+  const lead = document.createElement('span');
+  lead.className = statusState.leadIsPath ? 'status-lead is-path' : 'status-lead';
+  lead.textContent = statusState.lead;
+  if (statusState.lead) lead.title = statusState.lead;
+  statusBar.replaceChildren(lead, ...statusState.chips);
+  const trail = document.createElement('span');
+  trail.className = 'status-trail';
+  if (statusState.note) {
+    const note = document.createElement('span');
+    note.className = statusState.tone ? `status-note ${statusState.tone}` : 'status-note';
+    note.textContent = statusState.note;
+    note.title = statusState.note;
+    trail.appendChild(note);
+  }
+  if (statusState.count) {
+    const count = document.createElement('span');
+    count.className = 'status-count';
+    count.textContent = statusState.count;
+    trail.appendChild(count);
+  }
+  trail.append(...statusState.trailChips);
+  if (trail.childElementCount > 0) statusBar.appendChild(trail);
+}
+
+// Setting the lead clears both chip groups: chips belong to the thing the lead
+// is pointing at, and it just stopped pointing there.
+function setStatusLead(
+  text: string,
+  o?: { path?: boolean; chips?: HTMLElement[]; trailChips?: HTMLElement[] },
+): void {
+  statusState.lead = text;
+  statusState.leadIsPath = o?.path ?? false;
+  statusState.chips = o?.chips ?? [];
+  statusState.trailChips = o?.trailChips ?? [];
+  renderStatus();
+}
+
+function setStatusNote(text: string, tone: StatusTone = ''): void {
+  statusState.note = text;
+  statusState.tone = tone;
+  renderStatus();
+}
+
+function setStatusCount(text: string): void {
+  statusState.count = text;
+  renderStatus();
+}
+
+// A chip the lead earned late (the tree's `decode payload` needs a worker round
+// trip to know whether the value is one).
+function addStatusTrailChip(chip: HTMLElement): void {
+  statusState.trailChips.push(chip);
+  renderStatus();
+}
 
 type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic';
 let activePane: Pane = 'tree';
@@ -220,10 +310,43 @@ function showPane(p: Pane): void {
   diffView.hidden = p !== 'diff';
   semanticView.hidden = p !== 'semantic';
   tableView.hidden = p !== 'table';
-  crumb.hidden = p === 'semantic';
   viewer.classList.toggle('semantic-open', p === 'semantic');
+  // style.css reads this to decide which strips a layout is allowed: the tree
+  // ops group upstairs when the tree stands alone, the split strip when it does
+  // not (contract rule 10, revised).
+  viewer.dataset.pane = p;
+  // Top-layer panels outlive the pane that opened them (rule 21) — the plan
+  // panel would otherwise still be floating over the tree.
+  if (p !== 'semantic') closeSemPlan();
+  placeTreeOps(split);
   // The mode switch reflects tree/code/split; transient sub-views have no tab.
   setModeTab(p === 'tree' || p === 'code' || p === 'split' ? p : null);
+  paintStatusForPane(p);
+}
+
+// Handing the bottom edge to the pane taking over. Only the views that keep a
+// standing lead are repainted here — table, diff and compare write theirs when
+// they open, and nothing else can overwrite it now that there is one strip.
+function paintStatusForPane(p: Pane): void {
+  const codeOnScreen = codeOwnsStatus();
+  // The editor's note and its search count are the editor's: off screen, the
+  // shortcut they name is not even bound. The unapplied buffer itself survives
+  // — loadCodeContent re-reads it the next time the pane opens.
+  setStatusCount('');
+  setStatusNote(codeOnScreen ? codeStatusText : '', codeOnScreen ? codeStatusKind : '');
+  // In split the tree owns the lead and the code pane owns the note, which is
+  // the arrangement 8g wanted: the path you are reading and the fact that the
+  // buffer under it is not the parsed document, on one line.
+  if (p === 'tree' || p === 'split') updateCrumbSoon();
+  else if (p === 'code') setStatusLead(caretLead);
+}
+
+// One set of buttons with one set of listeners, moved rather than duplicated:
+// the tree's three document ops live on the global toolbar while the tree is
+// the only pane, and in the tree half of the split strip once there is a pane
+// to scope them to.
+function placeTreeOps(split: boolean): void {
+  (split ? treeBarOps : toolbarTreeOps).append(collapseBtn, treeCopyBtn, treeDownloadBtn);
 }
 
 function setModeTab(mode: 'tree' | 'code' | 'split' | null): void {
@@ -260,9 +383,48 @@ const PASTE_ECHO_MAX = 2_000_000;
 
 // ---------- helpers ----------
 
+// One icon set (style.css contract rule 3): the <symbol> sprite at the top of
+// index.html is the only place the paths live, so a button built here gets the
+// same box, the same 1.5 stroke and the same currentColor ink as one written in
+// markup — which is the whole point of dropping the six characters.
+type IconName = 'back' | 'compare' | 'reload' | 'download' | 'warn' | 'theme';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function icon(name: IconName): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ic');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+
+// One empty state, two sizes (style.css contract rule 17): a dim line naming
+// the emptiness plus a fainter one saying what to do next. Built here rather
+// than at each call site so the second line cannot be forgotten again.
+function emptyState(
+  line: string,
+  hint: string,
+  opts?: { className?: string; pane?: boolean },
+): HTMLElement {
+  const el = document.createElement('div');
+  el.className = opts?.className ?? 'empty-state';
+  if (opts?.pane) el.classList.add('is-pane');
+  el.append(line);
+  const sub = document.createElement('span');
+  sub.className = 'empty-hint';
+  sub.textContent = hint;
+  el.appendChild(sub);
+  return el;
+}
+
 let toastTimer = 0;
-function showToast(msg: string): void {
+// `bad` is the failure tier (style.css contract rule 15): a copy that worked and
+// a file that could not be read must not be announced in the same colour.
+function showToast(msg: string, tone: 'info' | 'bad' = 'info'): void {
   toast.textContent = msg;
+  toast.classList.toggle('bad', tone === 'bad');
   toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (toast.hidden = true), 1800);
@@ -273,6 +435,7 @@ function showToast(msg: string): void {
 // clears the button via textContent assignment.
 function showToastAction(msg: string, actionLabel: string, onAction: () => void): void {
   toast.replaceChildren();
+  toast.classList.remove('bad');
   const span = document.createElement('span');
   span.textContent = msg + ' — ';
   const btn = document.createElement('button');
@@ -351,7 +514,7 @@ function downloadCsv(text: string, filename: string): void {
 async function exportCsv(source: 'table' | 'query', suffix: string): Promise<void> {
   const r = await call<{ ok: boolean; text?: string; error?: string }>({ type: 'csv', source });
   if (!r.ok || r.text === undefined) {
-    showToast(r.error ?? 'CSV export failed');
+    showToast(r.error ?? 'CSV export failed', 'bad');
     return;
   }
   downloadCsv(r.text, csvFilename(suffix));
@@ -570,10 +733,11 @@ async function runTransportInspector(): Promise<void> {
   const selectedBaselinePayload = diffBaselineProvenance;
   transportError.hidden = true;
   transportResults.replaceChildren();
-  const loading = document.createElement('div');
-  loading.className = 'transport-loading';
-  loading.textContent = 'Compressing the exact document bytes…';
-  transportResults.appendChild(loading);
+  transportResults.appendChild(
+    emptyState('Compressing the exact document bytes…', 'Recompression runs in the worker.', {
+      className: 'transport-loading',
+    }),
+  );
 
   try {
     const { settings, envelope, budgets } = readTransportSettings();
@@ -815,7 +979,7 @@ function attachInitialSave(
     return renderRecents();
   }).catch((error) => {
     if (documentToken === currentDocumentToken) {
-      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`);
+      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   });
 }
@@ -847,7 +1011,7 @@ function persistCurrentSnapshot(
 
   void write.then(renderRecents).catch((error) => {
     if (documentToken === currentDocumentToken) {
-      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`);
+      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   });
 }
@@ -896,7 +1060,7 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
   try {
     raw = JSON.parse(value.text);
   } catch {
-    showToast('could not read this string value');
+    showToast('could not read this string value', 'bad');
     return;
   }
   if (typeof raw !== 'string') {
@@ -909,7 +1073,7 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
     parentDocumentToken !== currentDocumentToken
   ) return;
   if (!decoded.ok) {
-    showToast(decoded.error.message);
+    showToast(decoded.error.message, 'bad');
     return;
   }
   // Read the parent's id here rather than at entry: the guards above proved the
@@ -936,21 +1100,35 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
   );
 }
 
+// The strip's resting line in the tree: an empty bottom edge would be the one
+// view that still says nothing (rule 19 — every view carries a "where am I",
+// including "nowhere yet").
+const TREE_STATUS_RESTING = 'Select a row to see its path.';
+
+// The crumb is debounced and then awaits the worker, so by the time it has an
+// answer the bottom edge may belong to another view. It only ever paints while
+// the tree is on screen.
+function treeOwnsStatus(): boolean {
+  return activePane === 'tree' || activePane === 'split';
+}
+
 let crumbTimer = 0;
 function updateCrumbSoon(): void {
   clearTimeout(crumbTimer);
+  // Nothing selected needs no worker round trip, so paint the resting line now
+  // rather than in 90ms — this is the reset path when a document opens, and the
+  // last document's path must not sit there in the meantime. The timer still
+  // runs: the selected row's own slice may not have been fetched yet.
+  if (tree.selectedIndex() < 0) setStatusLead(TREE_STATUS_RESTING);
   crumbTimer = window.setTimeout(async () => {
+    if (!treeOwnsStatus()) return;
     const r = tree.getSelected();
     if (!r) {
-      crumb.replaceChildren();
+      setStatusLead(TREE_STATUS_RESTING);
       return;
     }
     const p = await call<{ jsonpath: string; pointer: string; js: string }>({ type: 'nodePaths', id: r.id });
-    crumb.replaceChildren();
-    const path = document.createElement('span');
-    path.className = 'crumb-path';
-    path.textContent = p.jsonpath;
-    crumb.appendChild(path);
+    if (!treeOwnsStatus()) return;
     const chip = (label: string, text: string, title: string): HTMLButtonElement => {
       const b = document.createElement('button');
       b.className = 'crumb-chip';
@@ -959,22 +1137,29 @@ function updateCrumbSoon(): void {
       b.addEventListener('click', () => void copyText(text).then(() => showToast(text)));
       return b;
     };
-    crumb.append(
-      chip('copy $path', p.jsonpath, 'Copy JSONPath'),
-      chip('/pointer', p.pointer, 'Copy RFC-6901 JSON Pointer'),
-      chip('.js', p.js, 'Copy JS accessor'),
-    );
+    // Copy chips ride with the path; the ones that open something else are
+    // trailing chips, at the strip's right edge.
+    const trailChips: HTMLElement[] = [];
     if (!r.hasChildren) {
       const same = document.createElement('button');
       same.className = 'crumb-chip same';
       same.textContent = '≡ same value';
       same.title = 'Find every node in this document holding the same value';
       same.addEventListener('click', () => void findSameValue(r.id));
-      crumb.appendChild(same);
+      trailChips.push(same);
     }
+    setStatusLead(p.jsonpath, {
+      path: true,
+      chips: [
+        chip('copy $path', p.jsonpath, 'Copy JSONPath'),
+        chip('/pointer', p.pointer, 'Copy RFC-6901 JSON Pointer'),
+        chip('.js', p.js, 'Copy JS accessor'),
+      ],
+      trailChips,
+    });
     if (!r.hasChildren && r.type === 'string') {
       const value = await call<{ text: string }>({ type: 'nodeValue', id: r.id });
-      if (tree.getSelected()?.id !== r.id) return;
+      if (tree.getSelected()?.id !== r.id || !treeOwnsStatus()) return;
       try {
         const raw: unknown = JSON.parse(value.text);
         if (typeof raw === 'string') {
@@ -985,7 +1170,7 @@ function updateCrumbSoon(): void {
             decode.textContent = 'decode payload';
             decode.title = `Open this ${sniff.format} value as a derived JSON document`;
             decode.addEventListener('click', () => void openNestedPayload(r.id, p.jsonpath));
-            crumb.appendChild(decode);
+            addStatusTrailChip(decode);
           }
         }
       } catch {
@@ -1006,7 +1191,7 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
   onCopyValue: (id) => void copyValueOf(id),
   onUnpack: async (id, index) => {
     const r = await call<{ ok: boolean; totalRows: number; error?: string }>({ type: 'unpack', id, index });
-    if (!r.ok) showToast(r.error ?? 'not valid JSON');
+    if (!r.ok) showToast(r.error ?? 'not valid JSON', 'bad');
     else tree.setTotal(r.totalRows);
   },
   onTable: (id) => void openTable(id),
@@ -1026,7 +1211,7 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
       return { ok: false, error: 'document changed while the edit was applying' };
     }
     if (!r.ok) {
-      showToast(r.error ?? 'edit rejected');
+      showToast(r.error ?? 'edit rejected', 'bad');
       return { ok: false, error: r.error };
     }
     // The value changed under our feet — currentText/code map are now stale.
@@ -1060,7 +1245,7 @@ async function refreshAfterDocChange(totalRows: number, documentToken: number): 
   persistCurrentSnapshot(currentText, null);
   tree.setTotal(totalRows);
   tree.resetSelection();
-  crumb.textContent = '';
+  updateCrumbSoon();
   tree.refresh();
   if (!codeView.hidden) void loadCodeContent();
 }
@@ -1098,62 +1283,113 @@ function syncCodeToSelectionSoon(): void {
   }, 60);
 }
 
+// ---------- document rows ----------
+
+// ONE document row, used by the sidebar's Recents and by the baseline picker.
+// The two lists show the same three facts from the same store and used to be
+// built differently — name over meta here, name + size on one line there, and a
+// hover that meant "you are pointing at this" in one and materialised an accent
+// border in the other. Name over meta, size and age as one dim line, band on
+// hover, in both.
+type DocRowAction = 'dif' | 'pin' | 'del';
+
+function docRow(
+  d: store.DocMeta,
+  opts: { active?: boolean; actions: DocRowAction[]; focusable?: boolean },
+): HTMLElement {
+  const row = document.createElement('div');
+  // `pinned` is chrome-only: it keeps the star visible when the row is not
+  // hovered, so a never-pruned document says so without a tooltip.
+  row.className = `doc-row${opts.active ? ' active' : ''}${d.pinned ? ' pinned' : ''}`;
+  row.dataset.id = d.id;
+  // The picker's rows were real <button>s; they carry nested action buttons now,
+  // so they keep the keyboard route explicitly rather than losing it.
+  if (opts.focusable) {
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.classList.add('focus-ring');
+  }
+
+  const title = document.createElement('div');
+  title.className = 'doc-row-title';
+  title.textContent = `${d.handle ? '⛃ ' : ''}${d.provenance ? '↳ ' : ''}${d.title}`;
+  if (d.handle || d.provenance) {
+    const notes = [
+      d.handle ? 'Linked to a file on disk — reloadable' : '',
+      d.provenance
+        ? `Decoded from ${d.provenance.sourceTitle}${d.provenance.sourcePath ? ` at ${d.provenance.sourcePath}` : ''}`
+        : '',
+    ].filter(Boolean);
+    title.title = notes.join('\n');
+  }
+  row.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'doc-row-meta';
+  // The open document says so: a timestamp on the row you are reading answers a
+  // question nobody is asking.
+  meta.textContent = `${fmtBytes(d.size)} · ${opts.active ? 'open' : relTime(d.updatedAt)}`;
+  row.appendChild(meta);
+
+  if (opts.actions.length) {
+    const actions = document.createElement('div');
+    actions.className = 'doc-row-actions';
+    for (const kind of opts.actions) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `${kind} btn-icon btn-mini`;
+      if (kind === 'dif') {
+        btn.appendChild(icon('compare'));
+        btn.title = 'Compare this baseline side by side with the open document';
+        btn.setAttribute('aria-label', btn.title);
+      } else if (kind === 'pin') {
+        btn.textContent = d.pinned ? '★' : '☆';
+        btn.title = d.pinned ? 'Unpin' : 'Pin (never pruned)';
+      } else {
+        btn.textContent = '×';
+        btn.title = 'Delete';
+      }
+      actions.appendChild(btn);
+    }
+    row.appendChild(actions);
+  }
+
+  return row;
+}
+
+// Pin and delete act on the store, not on whichever list happens to be showing
+// the document, so both lists route through one handler and then re-render
+// themselves. Returns whether the click was one of those actions.
+async function runDocRowAction(target: HTMLElement, id: string): Promise<boolean> {
+  if (target.closest('.pin')) {
+    await store.togglePin(id);
+    return true;
+  }
+  if (target.closest('.del')) {
+    await store.removeDoc(id);
+    if (currentDocId === id) currentDocId = null;
+    return true;
+  }
+  return false;
+}
+
 // ---------- recents ----------
 
 async function renderRecents(): Promise<void> {
   const docs = await store.listDocs();
   recentsEl.replaceChildren();
   if (!docs.length) {
-    const empty = document.createElement('div');
-    empty.className = 'recents-empty';
-    empty.textContent = 'Nothing yet — paste some JSON.';
-    recentsEl.appendChild(empty);
+    recentsEl.appendChild(
+      emptyState('No documents yet', 'Paste JSON or drop a file to begin.', {
+        className: 'recents-empty',
+      }),
+    );
     return;
   }
   for (const d of docs) {
-    const el = document.createElement('div');
-    // `pinned` is chrome-only: it keeps the star visible when the row is not
-    // hovered, so a never-pruned document says so without a tooltip.
-    el.className = `recent${d.id === currentDocId ? ' active' : ''}${d.pinned ? ' pinned' : ''}`;
-    el.dataset.id = d.id;
-
-    const title = document.createElement('div');
-    title.className = 'r-title';
-    title.textContent = `${d.handle ? '⛃ ' : ''}${d.provenance ? '↳ ' : ''}${d.title}`;
-    if (d.handle || d.provenance) {
-      const notes = [
-        d.handle ? 'Linked to a file on disk — reloadable' : '',
-        d.provenance
-          ? `Decoded from ${d.provenance.sourceTitle}${d.provenance.sourcePath ? ` at ${d.provenance.sourcePath}` : ''}`
-          : '',
-      ].filter(Boolean);
-      title.title = notes.join('\n');
-    }
-    el.appendChild(title);
-
-    const meta = document.createElement('div');
-    meta.className = 'r-meta';
-    meta.textContent = `${fmtBytes(d.size)} · ${relTime(d.updatedAt)}`;
-    el.appendChild(meta);
-
-    const actions = document.createElement('div');
-    actions.className = 'r-actions';
-    const dif = document.createElement('button');
-    dif.className = 'dif btn-icon btn-mini';
-    dif.textContent = '⇆';
-    dif.title = 'Compare this baseline side by side with the open document';
-    const pin = document.createElement('button');
-    pin.className = 'pin btn-icon btn-mini';
-    pin.textContent = d.pinned ? '★' : '☆';
-    pin.title = d.pinned ? 'Unpin' : 'Pin (never pruned)';
-    const del = document.createElement('button');
-    del.className = 'del btn-icon btn-mini';
-    del.textContent = '×';
-    del.title = 'Delete';
-    actions.append(dif, pin, del);
-    el.appendChild(actions);
-
-    recentsEl.appendChild(el);
+    recentsEl.appendChild(
+      docRow(d, { active: d.id === currentDocId, actions: ['dif', 'pin', 'del'] }),
+    );
   }
 }
 
@@ -1184,7 +1420,7 @@ async function openStoredDoc(id: string): Promise<'opened' | 'missing' | 'supers
 
 recentsEl.addEventListener('click', async (e) => {
   const t = e.target as HTMLElement;
-  const item = t.closest('.recent') as HTMLElement | null;
+  const item = t.closest('.doc-row') as HTMLElement | null;
   if (!item) return;
   const id = item.dataset.id!;
   if (t.closest('.dif')) {
@@ -1199,18 +1435,11 @@ recentsEl.addEventListener('click', async (e) => {
     await compareRecent(id);
     return;
   }
-  if (t.closest('.pin')) {
-    await store.togglePin(id);
+  if (await runDocRowAction(t, id)) {
     await renderRecents();
     return;
   }
-  if (t.closest('.del')) {
-    await store.removeDoc(id);
-    if (currentDocId === id) currentDocId = null;
-    await renderRecents();
-    return;
-  }
-  if (await openStoredDoc(id) === 'missing') showToast('document body missing');
+  if (await openStoredDoc(id) === 'missing') showToast('document body missing', 'bad');
 });
 
 // A visible, document-level entry point for semantic comparison. The picker is
@@ -1221,6 +1450,14 @@ async function showBaselinePicker(): Promise<void> {
     showToast('open a document first');
     return;
   }
+  if (!(await renderBaselineList())) return;
+  baselinePicker.showModal();
+}
+
+// Split from showBaselinePicker so a pin or a delete inside the dialog can
+// repaint the list without reopening the modal. Returns false when a newer
+// document open won the race, which is when the caller must not show it.
+async function renderBaselineList(): Promise<boolean> {
   const documentRevision = currentDocumentRevision;
   const currentId = currentDocId;
   const currentBody = currentText;
@@ -1234,43 +1471,51 @@ async function showBaselinePicker(): Promise<void> {
     }
     docs.push(doc);
   }
-  if (documentRevision !== currentDocumentRevision) return;
+  if (documentRevision !== currentDocumentRevision) return false;
   baselineRecents.replaceChildren();
   if (docs.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'baseline-empty';
-    empty.textContent = 'No other recent documents yet. Choose a file to use as the baseline.';
-    baselineRecents.appendChild(empty);
-  } else {
-    for (const doc of docs) {
-      const option = document.createElement('button');
-      option.type = 'button';
-      option.className = 'baseline-option';
-      option.dataset.id = doc.id;
-
-      const name = document.createElement('span');
-      name.className = 'baseline-name';
-      name.textContent = doc.title;
-      const size = document.createElement('span');
-      size.className = 'baseline-size';
-      size.textContent = fmtBytes(doc.size);
-      const age = document.createElement('span');
-      age.className = 'baseline-age';
-      age.textContent = `${relTime(doc.updatedAt)}${doc.handle ? ' · linked file' : ''}`;
-      option.append(name, size, age);
-      baselineRecents.appendChild(option);
-    }
+    baselineRecents.appendChild(
+      emptyState('No other documents to compare against', 'Choose a file to use as the baseline.', {
+        className: 'baseline-empty',
+      }),
+    );
+    return true;
   }
-  baselinePicker.showModal();
+  for (const doc of docs) {
+    // No `dif` here: choosing the row IS the comparison in this dialog.
+    baselineRecents.appendChild(docRow(doc, { actions: ['pin', 'del'], focusable: true }));
+  }
+  return true;
 }
 
 compareBtn.addEventListener('click', () => void showBaselinePicker());
 
-baselineRecents.addEventListener('click', (event) => {
-  const option = (event.target as HTMLElement).closest<HTMLButtonElement>('.baseline-option');
-  if (!option?.dataset.id) return;
+baselineRecents.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
+  const row = target.closest<HTMLElement>('.doc-row');
+  if (!row?.dataset.id) return;
+  const id = row.dataset.id;
+  if (await runDocRowAction(target, id)) {
+    await renderRecents();
+    await renderBaselineList();
+    return;
+  }
   baselinePicker.close();
-  void compareRecent(option.dataset.id);
+  void compareRecent(id);
+});
+
+// The rows are divs so they can carry action buttons; Enter and Space still
+// pick one, the way the <button> they replaced did.
+baselineRecents.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const target = event.target as HTMLElement;
+  // An action button inside the row fires its own click natively; synthesising
+  // a second one on the row would pick the baseline as well as pin it.
+  if (target.closest('button')) return;
+  const row = target.closest<HTMLElement>('.doc-row');
+  if (!row) return;
+  event.preventDefault();
+  row.click();
 });
 
 async function compareBaselineFile(file: File): Promise<void> {
@@ -1285,7 +1530,7 @@ async function compareBaselineFile(file: File): Promise<void> {
     baselinePicker.close();
     await compareWith(payload.text, payload.title, null, payload.provenance);
   } catch (error) {
-    showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+    showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'bad');
   }
 }
 
@@ -1335,7 +1580,7 @@ async function openText(
   // a small compressed blob that inflates past the cap is caught too.
   if (text.length > MAX_DOC_BYTES) {
     if (keepCurrentOnFailure) {
-      showToast(`reload rejected: ${oversizeMessage(text.length)}`);
+      showToast(`reload rejected: ${oversizeMessage(text.length)}`, 'bad');
       return false;
     }
     showParseError({ ok: false, error: oversizeMessage(text.length), line: null, column: null, context: null });
@@ -1354,7 +1599,7 @@ async function openText(
       if (requestToken !== openRequestToken) return false;
       if (!decoded.ok) {
         if (keepCurrentOnFailure) {
-          showToast(`reload rejected: ${decoded.error.message}`);
+          showToast(`reload rejected: ${decoded.error.message}`, 'bad');
           return false;
         }
         showParseError({
@@ -1388,7 +1633,7 @@ async function openText(
   if (requestToken !== openRequestToken) return false;
   if (!res.ok) {
     if (keepCurrentOnFailure) {
-      showToast(`reload rejected: ${res.error}`);
+      showToast(`reload rejected: ${res.error}`, 'bad');
       return false;
     }
     landing.hidden = false;
@@ -1413,7 +1658,7 @@ async function openText(
     if (!keepCurrentOnFailure) {
       void store.touchDoc(existingId).then(renderRecents).catch((error) => {
         if (documentToken === currentDocumentToken) {
-          showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`);
+          showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
         }
       });
     }
@@ -1450,7 +1695,7 @@ async function openText(
   filterBtn.classList.remove('on');
   filterBtn.textContent = 'filter';
   tree.resetSelection();
-  crumb.textContent = '';
+  // showPane repaints the strip; with nothing selected that is the resting line.
   showPane('tree');
   // A document is open, so this visitor is now a user: any later return to the
   // landing ("+ new", "◂ back") gets the compact paste view, not the pitch, and
@@ -1548,7 +1793,7 @@ async function importFiles(
     try {
       payload = await readPayloadFile(file);
     } catch (error) {
-      showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+      showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'bad');
       continue;
     }
     if (i === entries.length - 1) {
@@ -1616,7 +1861,7 @@ reloadBtn.addEventListener('click', async () => {
       if (!stillCurrent()) return;
       if (!handle.requestPermission || (await handle.requestPermission({ mode: 'read' })) !== 'granted') {
         if (!stillCurrent()) return;
-        showToast('file permission denied');
+        showToast('file permission denied', 'bad');
         return;
       }
     }
@@ -1645,7 +1890,7 @@ reloadBtn.addEventListener('click', async () => {
     await autoDiffAfterReload(prevText, reloadedDocumentToken);
   } catch (error) {
     if (requestToken !== openRequestToken) return;
-    showToast(error instanceof Error ? error.message : 'could not read file (moved or deleted?)');
+    showToast(error instanceof Error ? error.message : 'could not read file (moved or deleted?)', 'bad');
   }
 });
 
@@ -1754,6 +1999,9 @@ function showCodec(): void {
 
 function setCodecTrace(text: string, state: 'ok' | 'bad' | null): void {
   codecTrace.textContent = text;
+  // It rides the output box's label row now, so a long trace ellipsizes there
+  // and keeps the whole of itself in the tooltip.
+  codecTrace.title = text;
   codecTrace.hidden = !text;
   codecTrace.classList.toggle('ok', state === 'ok');
   codecTrace.classList.toggle('bad', state === 'bad');
@@ -1778,6 +2026,18 @@ function showDecodedPayload(
   showToast(`decoded ${exactBytes(provenance.decodedBytes)}`);
 }
 
+// The trace names the failure; these four bytes name the input. "not a zstd
+// frame · first 4 bytes were 7b 22 6f 72" is the difference between a mystery
+// and "you pasted JSON" — and the bytes are already in hand at the failure.
+// Returns '' when there is nothing to show, which is its own answer.
+function firstBytesHex(input: string | ArrayBuffer, count = 4): string {
+  const bytes =
+    typeof input === 'string'
+      ? new TextEncoder().encode(input.slice(0, count)).subarray(0, count)
+      : new Uint8Array(input, 0, Math.min(count, input.byteLength));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join(' ');
+}
+
 async function decodeInPayloadTools(
   input: string | ArrayBuffer,
   sourceTitle: string,
@@ -1787,8 +2047,14 @@ async function decodeInPayloadTools(
     codecDecodedText = '';
     codecDecodedProvenance = null;
     codecOutD.value = '';
-    setCodecTrace(`${decoded.error.code} · ${decoded.error.message}`, 'bad');
-    showToast(decoded.error.message);
+    const bytes = firstBytesHex(input);
+    // Bytes lead, wordy message last: the trace ellipsizes at the label row's
+    // right edge, and the clue must survive the cut — the prose can go.
+    setCodecTrace(
+      `${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
+      'bad',
+    );
+    showToast(decoded.error.message, 'bad');
     return;
   }
   showDecodedPayload(
@@ -1813,7 +2079,7 @@ $('#zstd-btn').addEventListener('click', async () => {
   try {
     b64 = await compressToB64(source);
   } catch (err) {
-    showToast(`compress failed: ${String(err)}`);
+    showToast(`compress failed: ${String(err)}`, 'bad');
     return;
   }
   if (documentRevision !== currentDocumentRevision) return;
@@ -1839,7 +2105,7 @@ $('#codec-run-c').addEventListener('click', async () => {
     codecOutC.value = await compressToB64(src);
     showToast(`${fmtBytes(src.length)} → ${fmtBytes(codecOutC.value.length)} b64`);
   } catch (err) {
-    showToast(`compress failed: ${String(err)}`);
+    showToast(`compress failed: ${String(err)}`, 'bad');
   }
 });
 
@@ -1858,7 +2124,7 @@ $('#codec-use-current').addEventListener('click', async () => {
     codecOutC.value = encoded;
     showToast(`${fmtBytes(source.length)} → ${fmtBytes(encoded.length)} b64`);
   } catch (err) {
-    showToast(`compress failed: ${String(err)}`);
+    showToast(`compress failed: ${String(err)}`, 'bad');
   }
 });
 
@@ -1921,7 +2187,7 @@ payloadBadge.addEventListener('click', () => {
   codecOutD.value = '';
   codecOutD.placeholder = 'Current decoded document — use “open as document” to return to it.';
   setCodecTrace(
-    `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''}\n${provenanceTrace(currentProvenance)}`,
+    `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''} · ${provenanceTrace(currentProvenance)}`,
     'ok',
   );
 });
@@ -1933,7 +2199,7 @@ originalBtn.addEventListener('click', async () => {
   const sourceDocId = currentProvenance?.sourceDocId;
   if (!sourceDocId) return;
   if (await openStoredDoc(sourceDocId) === 'missing') {
-    showToast('original document is no longer in recents');
+    showToast('original document is no longer in recents', 'bad');
   }
 });
 
@@ -1951,13 +2217,13 @@ docTitleEl.addEventListener('click', async () => {
   await renderRecents();
 });
 
-$('#collapse-btn').addEventListener('click', async () => {
+collapseBtn.addEventListener('click', async () => {
   const r = await call<{ totalRows: number }>({ type: 'collapseAll' });
   tree.setTotal(r.totalRows);
   treeViewport.scrollTop = 0;
 });
 
-$('#fmt-btn').addEventListener('click', async () => {
+treeCopyBtn.addEventListener('click', async () => {
   const r = await call<{ text: string }>({ type: 'stringify', space: 2 });
   await copyText(r.text);
   showToast('pretty JSON copied');
@@ -1969,7 +2235,7 @@ $('#min-btn').addEventListener('click', async () => {
   showToast('minified JSON copied');
 });
 
-$('#dl-btn').addEventListener('click', () => {
+treeDownloadBtn.addEventListener('click', () => {
   const blob = new Blob([currentText], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -2016,12 +2282,34 @@ let codeEditor: CodeEditor | null = null;
 let codeBusy = false;
 let codeDirty = false;
 
-function setCodeStatus(kind: '' | 'dirty' | 'error' | 'saved', msg: string): void {
-  codeDirty = kind === 'dirty' || kind === 'error';
-  codeStatus.className = kind;
-  codeStatus.textContent = msg;
-  // The bar ellipsizes the status at narrow split widths; hover shows it all.
-  codeStatus.title = msg;
+// Mod-s is what code.ts binds; it is ⌘S on an Apple keyboard and Ctrl+S on
+// every other one, and the strip has to name the one the reader actually has.
+const APPLY_SHORTCUT = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+  ? '⌘S'
+  : 'Ctrl+S';
+const UNAPPLIED_HINT = `unapplied · ${APPLY_SHORTCUT} to apply`;
+
+// The editor's status is held here as well as painted, because the strip is
+// shared: leaving the pane hands the bottom edge to another view, and coming
+// back has to restore what the buffer was last saying (see paintStatusForPane).
+let codeStatusText = '';
+let codeStatusKind: StatusTone = '';
+// The caret, as the code pane's lead. Kept even while the tree owns the strip
+// in split, so switching to code alone answers "where am I" immediately.
+let caretLead = '';
+
+// The code pane's tenancy on the strip. Its note and its search count are only
+// true while the editor is on screen — and it can still dispatch transactions
+// while hidden (a theme change reconfigures it), so every publish asks first.
+function codeOwnsStatus(): boolean {
+  return activePane === 'code' || activePane === 'split';
+}
+
+function setCodeStatus(kind: StatusTone, msg: string): void {
+  codeDirty = kind === 'dirty' || kind === 'bulk' || kind === 'error';
+  codeStatusText = msg;
+  codeStatusKind = kind;
+  if (codeOwnsStatus()) setStatusNote(msg, kind);
 }
 
 function showCodeTooBig(): void {
@@ -2029,11 +2317,18 @@ function showCodeTooBig(): void {
     codeEditor.destroy();
     codeEditor = null;
   }
-  const div = document.createElement('div');
-  div.className = 'code-toobig';
-  div.textContent = `This document is ${fmtBytes(currentText.length)} — too large for the editable code view.\nUse the tree, or download the original.`;
-  codeHost.replaceChildren(div);
-  setCodeStatus('', '');
+  codeHost.replaceChildren(
+    emptyState(
+      'This document is too large to edit as text',
+      `${fmtBytes(currentText.length)} · use the tree, or download the original bytes.`,
+      { className: 'code-toobig' },
+    ),
+  );
+  // No editor means no caret, and a caret left over from the last document is
+  // worse than none. The strip keeps the fact instead.
+  caretLead = '';
+  setCodeStatus('', `too large to edit as text · ${fmtBytes(currentText.length)}`);
+  if (activePane === 'code') setStatusLead('');
 }
 
 async function ensureEditor(): Promise<void> {
@@ -2046,10 +2341,13 @@ async function ensureEditor(): Promise<void> {
     // A deploy replaced the hashed chunks this tab's bundle points at (Pages
     // keeps no old assets). vite:preloadError reloads once; this is the
     // fallback when that already ran or the failure is something else.
-    const div = document.createElement('div');
-    div.className = 'code-toobig';
-    div.textContent = 'jsonloupe was updated since this tab loaded.\nReload the page to open the code view.';
-    codeHost.replaceChildren(div);
+    codeHost.replaceChildren(
+      emptyState(
+        'jsonloupe was updated since this tab loaded',
+        'Reload the page to open the code view.',
+        { className: 'code-toobig' },
+      ),
+    );
     setCodeStatus('error', 'reload needed');
     return;
   }
@@ -2057,8 +2355,30 @@ async function ensureEditor(): Promise<void> {
   codeEditor = await CodeEditor.create({
     host: codeHost,
     theme: currentTheme(),
-    onChange: () => setCodeStatus('dirty', 'edited — ⌘S / Apply to re-parse'),
+    onChange: () => setCodeStatus('dirty', `edited — ${UNAPPLIED_HINT}`),
     onSave: () => void applyCode(),
+    onCaret: (line, column) => {
+      caretLead = `line ${line} · col ${column}`;
+      // In split the tree's path is the lead and this is only kept warm; the
+      // caret is the answer to "where am I" when code is the whole view.
+      if (activePane === 'code') setStatusLead(caretLead);
+    },
+    // 8a's count, delivered to the app's own strip instead of being drawn
+    // inside CodeMirror's panel. It is only ever live while that panel is.
+    onSearchCount: (label) => {
+      if (codeOwnsStatus()) setStatusCount(label ?? '');
+    },
+    // 8g: the sentence the interface never said. Tier 2 (rule 15) because a
+    // bulk rewrite you did not type is a change to notice before moving on —
+    // and it stands until Apply re-parses or the buffer is reloaded.
+    onReplaceAll: (count) => setCodeStatus('bulk', `${count} replaced · ${UNAPPLIED_HINT}`),
+    // Synchronous by necessity — it answers a click that is already happening.
+    // The app's two <dialog>s are bespoke surfaces; a third one for a gate that
+    // fires above 500 matches would be a third copy of the same shell.
+    confirmReplaceAll: (label) =>
+      window.confirm(
+        `Replace ${label}?\n\nThis rewrites the editor buffer immediately. The tree, table and queries only change when you apply.`,
+      ),
   });
 }
 
@@ -2241,10 +2561,11 @@ function renderHits(results: SearchHit[], header?: string): void {
     searchPanel.appendChild(h);
   }
   if (!results.length) {
-    const none = document.createElement('div');
-    none.className = 'hit none';
-    none.textContent = 'no matches';
-    searchPanel.appendChild(none);
+    searchPanel.appendChild(
+      emptyState('No matches', 'Try fewer characters, or wrap the text in slashes for a regex.', {
+        className: 'hit none',
+      }),
+    );
   }
   results.forEach((hit, i) => {
     const el = document.createElement('div');
@@ -2313,7 +2634,9 @@ searchBox.addEventListener('keydown', (e) => {
 
 searchPanel.addEventListener('click', async (e) => {
   const el = (e.target as HTMLElement).closest('.hit') as HTMLElement | null;
-  if (!el || el.classList.contains('none')) return;
+  // Only a real hit carries an index; the empty and error states share the
+  // class but reveal nothing, so gate on the index rather than on each of them.
+  if (!el || el.dataset.i === undefined) return;
   const r = await call<{ rowIndex: number; totalRows: number }>({ type: 'reveal', index: Number(el.dataset.i) });
   showPane('tree');
   tree.setTotal(r.totalRows);
@@ -2379,7 +2702,7 @@ async function compareRecent(otherId: string): Promise<void> {
   const text = await store.getText(otherId);
   if (documentRevision !== currentDocumentRevision) return;
   if (text === undefined) {
-    showToast('baseline body missing');
+    showToast('baseline body missing', 'bad');
     return;
   }
   if (text === currentText) {
@@ -2438,7 +2761,7 @@ async function runDiffWith(
     keys: diffKey.value,
   });
   if (!res.ok) {
-    showToast(res.error);
+    showToast(res.error, 'bad');
     return;
   }
   renderDiff(res);
@@ -2489,17 +2812,34 @@ function renderDiff(res: DiffResult): void {
     }
   }
   if (!any) {
-    const none = document.createElement('div');
-    none.className = 'diff-group same';
-    none.textContent = '✓ no differences' + (diffIgnore.value.trim() ? ' (with ignores applied)' : '');
-    diffBody.appendChild(none);
+    // A whole-document verdict, not a heading over a group of rows — so it is
+    // the empty state (contract rule 17), not a .diff-group that opts out of
+    // its own type.
+    diffBody.appendChild(
+      emptyState(
+        'Documents are identical',
+        diffIgnore.value.trim()
+          ? 'Nothing differs once the ignored keys are applied.'
+          : 'Every key and value matched.',
+        { pane: true },
+      ),
+    );
   }
   if (res.truncated) {
     const note = document.createElement('div');
-    note.className = 'diff-group trunc';
+    note.className = 'diff-note';
     note.textContent = 'output truncated at 2000 entries — add ignores to narrow it down';
     diffBody.appendChild(note);
   }
+  // The view's "where am I" for the strip (rule 19): its counts if it found
+  // anything, its verdict if it did not. The `+` is the same truncation mark
+  // the group heads carry.
+  const plus = res.truncated ? '+' : '';
+  setStatusLead(
+    any
+      ? `${res.changed.length}${plus} changed · ${res.added.length}${plus} added · ${res.removed.length}${plus} removed`
+      : 'no differences',
+  );
 }
 
 diffBody.addEventListener('click', async (e) => {
@@ -2539,20 +2879,17 @@ const semanticCompare = new SemanticCompareView(semViewport, semSpacer, semLayer
       if (activePane === 'semantic') semanticCompare.setTotal(r.totalRows);
     });
   },
+  // Compare had a second status strip of its own (28px, no ground, 12px inset,
+  // its own markup) saying the same kind of thing #crumb said 2px taller. There
+  // is one strip now (rule 19): the aligned path leads, the match detail is the
+  // note beside it.
   onSelect: (row) => {
-    semCrumb.replaceChildren();
-    const path = document.createElement('span');
-    path.className = 'crumb-path';
-    path.textContent = row.pathText;
-    semCrumb.appendChild(path);
-    const detail = document.createElement('span');
-    detail.className = 'sem-crumb-detail';
     const pair =
       row.leftIndex !== undefined && row.rightIndex !== undefined && row.leftIndex !== row.rightIndex
         ? ` · index ${row.leftIndex} → ${row.rightIndex}`
         : '';
-    detail.textContent = ` · ${row.status}${row.matchLabel ? ` · ${row.matchLabel}` : ''}${pair}`;
-    semCrumb.appendChild(detail);
+    setStatusLead(row.pathText, { path: true });
+    setStatusNote(`${row.status}${row.matchLabel ? ` · ${row.matchLabel}` : ''}${pair}`);
   },
 });
 
@@ -2590,7 +2927,7 @@ function renderSemanticSummary(res: CompareOk): void {
     identities ? `${identities} identity-aligned` : '',
     conservative ? `${conservative} need review` : '',
   ].filter(Boolean);
-  semPlanSummary.textContent = `alignment plan · ${bits.join(' · ')}`;
+  semPlanBtn.textContent = `alignment plan · ${bits.join(' · ')}`;
 
   const warnings: string[] = [];
   if (res.truncated) {
@@ -2619,10 +2956,11 @@ function renderSemanticPlan(plans: AlignmentPlan[]): void {
     else grouped.set(plan.path, [plan]);
   }
   if (grouped.size === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'sem-plan-empty';
-    empty.textContent = 'No arrays found — object keys are aligned by name.';
-    semPlanBody.appendChild(empty);
+    semPlanBody.appendChild(
+      emptyState('No arrays were aligned', 'Object keys are aligned by name instead.', {
+        className: 'sem-plan-empty',
+      }),
+    );
     return;
   }
 
@@ -2704,13 +3042,15 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   semTitle.textContent = 'aligning…';
   semLeftTitle.textContent = `${diffOtherTitle} · baseline`;
   semRightTitle.textContent = `${currentTitle} · current`;
-  semCrumb.textContent = 'Select an aligned row to inspect its match.';
   semWarning.hidden = true;
-  semPlan.open = false;
+  closeSemPlan();
   semanticCompare.reset();
   searchPanel.hidden = true;
   $('#ask-panel').hidden = true;
   showPane('semantic');
+  // showPane hands compare the bottom edge; this is its resting line until a
+  // row is picked.
+  setStatusLead('Select an aligned row to inspect its match.');
 
   const res = await call<CompareOk | CompareError>({
     type: 'compareInit',
@@ -2721,7 +3061,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   });
   if (token !== semanticOpenToken) return;
   if (!res.ok) {
-    showToast(res.error);
+    showToast(res.error, 'bad');
     showPane(failurePane);
     return;
   }
@@ -2733,6 +3073,45 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   semViewport.scrollTop = 0;
 }
 
+// The alignment plan is a popover (index.html, style.css rule 21): the browser
+// renders it in the top layer, so .sem-toolbar's overflow-x cannot clip it, and
+// light dismiss + Esc come with the attribute. What is left to us is placing it
+// under its own trigger — anchor positioning is not portable yet — and keeping
+// the button's aria-expanded honest.
+function positionSemPlan(): void {
+  const anchor = semPlanBtn.getBoundingClientRect();
+  const panel = semPlanBody.getBoundingClientRect();
+  const gap = 8;
+  // Prefer right-aligned under the trigger, as it hung before; clamp to the
+  // viewport so a narrow window slides it in rather than off.
+  const left = Math.max(gap, Math.min(anchor.right - panel.width, window.innerWidth - panel.width - gap));
+  semPlanBody.style.left = `${Math.round(left)}px`;
+  semPlanBody.style.top = `${Math.round(anchor.bottom + gap)}px`;
+}
+
+// Tracked rather than read back off the element: `hidePopover()` on a popover
+// that is not showing throws, and a browser without popover support would throw
+// on the :popover-open selector too. This stays false there, which is exactly
+// the degradation the stylesheet's display rules assume.
+let semPlanOpen = false;
+
+function closeSemPlan(): void {
+  if (semPlanOpen) semPlanBody.hidePopover();
+}
+
+// beforetoggle, not toggle: it fires synchronously inside the browser's show
+// algorithm, so a frame scheduled from here still lands before the popover's
+// first paint. `toggle` is queued as a task and can arrive after one, which is
+// a visible jump from wherever the unpositioned panel fell.
+semPlanBody.addEventListener('beforetoggle', (event) => {
+  semPlanOpen = (event as ToggleEvent).newState === 'open';
+  semPlanBtn.setAttribute('aria-expanded', String(semPlanOpen));
+  if (semPlanOpen) requestAnimationFrame(positionSemPlan);
+});
+window.addEventListener('resize', () => {
+  if (semPlanOpen) positionSemPlan();
+});
+
 semFilters.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-filter]');
   if (!button) return;
@@ -2741,7 +3120,7 @@ semFilters.addEventListener('click', (event) => {
   void call<CompareOk | CompareError>({ type: 'compareSetView', filter }).then((res) => {
     if (activePane !== 'semantic' || semanticFilter !== filter) return;
     if (!res.ok) {
-      showToast(res.error);
+      showToast(res.error, 'bad');
       return;
     }
     semanticCompare.setTotal(res.totalRows);
@@ -2779,6 +3158,8 @@ semCloseBtn.addEventListener('click', () => {
 
 // ---------- table view ----------
 
+// Must equal .trow's height in style.css (contract rule 8b: one row rhythm
+// across every scrolling list). Virtualized, so the two cannot drift apart.
 const TROW_H = 28;
 let tableCols: string[] = [];
 let tableTotal = 0;
@@ -2856,6 +3237,9 @@ async function openTable(id: number): Promise<void> {
   tableSpacer.style.height = `${tableTotal * TROW_H}px`;
   tableViewportEl.scrollTop = 0;
   showPane('table');
+  // The table's "where am I" is the array it was opened on (rule 19); its row
+  // count is already stated in the bar and does not need saying twice.
+  setStatusLead(currentTablePath, { path: true });
   void renderTable();
 }
 
@@ -2967,6 +3351,17 @@ function fmtNumber(v: number): string {
   return v.toLocaleString('en-IN', { maximumFractionDigits: 3 });
 }
 
+// Two of the result shapes offer the same export, so they build it the same way
+// — one label, one icon, one handler.
+function queryCsvButton(): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.title = 'Download this query result as CSV (RFC 4180)';
+  btn.append(icon('download'), 'CSV');
+  btn.addEventListener('click', () => void exportCsv('query', 'query'));
+  return btn;
+}
+
 // `preview` = live engine-only render while the user is editing the query
 // input; it is styled as provisional and omits the mutating/navigating actions
 // (filter/copy/CSV/reveal) so a half-typed query can't fire a side effect.
@@ -3020,12 +3415,7 @@ function renderAskResult(res: QueryResp, preview = false): void {
       more.textContent = `… +${res.groups.length - 50} more groups`;
       askResult.appendChild(more);
     }
-    if (!preview) {
-      const csvBtn = document.createElement('button');
-      csvBtn.textContent = '⤓ CSV';
-      csvBtn.addEventListener('click', () => void exportCsv('query', 'query'));
-      askResult.appendChild(csvBtn);
-    }
+    if (!preview) askResult.appendChild(queryCsvButton());
   } else if (res.kind === 'rows') {
     const label = document.createElement('div');
     label.className = 'ask-label';
@@ -3057,10 +3447,7 @@ function renderAskResult(res: QueryResp, preview = false): void {
         const objs = res.rows.map((r) => Object.fromEntries(res.cols.map((c, i) => [c, r[i]])));
         void copyText(JSON.stringify(objs, null, 2)).then(() => showToast(`${res.rows.length} rows copied`));
       });
-      const csvBtn = document.createElement('button');
-      csvBtn.textContent = '⤓ CSV';
-      csvBtn.addEventListener('click', () => void exportCsv('query', 'query'));
-      askResult.append(copyBtn, csvBtn);
+      askResult.append(copyBtn, queryCsvButton());
     }
   } else {
     const label = document.createElement('div');
@@ -3377,21 +3764,32 @@ window.addEventListener('keydown', async (e) => {
 
 // ---------- theme ----------
 
-const themeIc = $('#theme-ic');
-const themeLabel = $('#theme-label');
+// A two-state segmented switch, the same component the toolbar's mode switch
+// uses: both destinations on screen, the current one filled. The old control
+// spelled the state it was already in (`☾ Dark`) and said nothing about what
+// clicking it would do.
+const themeSwitch = $('#theme-switch');
 
-function paintThemeToggle(): void {
+function paintThemeSwitch(): void {
   const t = currentTheme();
-  themeIc.textContent = t === 'dark' ? '☾' : '☀';
-  themeLabel.textContent = t === 'dark' ? 'dark' : 'light';
+  for (const b of themeSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    const on = b.dataset.theme === t;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
 }
 
-$('#theme-btn').addEventListener('click', () => toggleTheme());
+themeSwitch.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-theme]');
+  const choice = btn?.dataset.theme;
+  if (choice !== 'dark' && choice !== 'light') return;
+  applyTheme(choice);
+});
 onThemeChange((t) => {
-  paintThemeToggle();
+  paintThemeSwitch();
   codeEditor?.setTheme(t);
 });
-paintThemeToggle();
+paintThemeSwitch();
 
 // ---------- sample ----------
 
@@ -3411,7 +3809,7 @@ $('#sample-btn').addEventListener('click', () => {
     embeddedPayload: '{"note":"strings that look like JSON get a {…} un-stringify badge"}',
   };
   openText(JSON.stringify(sample, null, 2), 'sample.json', null).catch((error) => {
-    showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`);
+    showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
   });
 });
 
