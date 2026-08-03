@@ -46,6 +46,37 @@ interface CreateOpts {
   theme: Theme;
   onChange: () => void;
   onSave: () => void;
+  /** Caret position, 1-based, for the app's status strip (style.css rule 19). */
+  onCaret: (line: number, column: number) => void;
+  /**
+   * Live occurrence count for the open search panel — already formatted
+   * ("3 matches", "999+ matches"), or null when there is nothing to report
+   * (panel closed, empty or invalid query). The label is built once here so
+   * the strip and the replace-all button cannot word the same number two ways.
+   */
+  onSearchCount: (label: string | null) => void;
+  /** A replace-all that ran; `count` is what it changed ("3", "999+"). */
+  onReplaceAll: (count: string) => void;
+  /**
+   * Gate for a replace-all above REPLACE_CONFIRM_ABOVE. Synchronous because it
+   * answers a click that is about to happen: false stops CodeMirror's handler.
+   */
+  confirmReplaceAll: (label: string) => boolean;
+}
+
+// Above this many matches a replace-all stops being something you can eyeball
+// afterwards — the editor holds one screen and the rest of the changes are off
+// it — so it asks first. Below it, the count on the button is the whole warning.
+const REPLACE_CONFIRM_ABOVE = 500;
+
+// The occurrence walk below stops at 999, so every reader of that number speaks
+// the same capped vocabulary.
+function countText(n: number): string {
+  return n > 999 ? '999+' : String(n);
+}
+
+function matchLabel(n: number): string {
+  return `${countText(n)} ${n === 1 ? 'match' : 'matches'}`;
 }
 
 export class CodeEditor {
@@ -83,33 +114,59 @@ export class CodeEditor {
     // Occurrence count for the search panel — CM6 ships find/replace with no
     // "N matches" readout. Debounced full-doc count, capped at 999 so a
     // one-letter query over a 37 MB document stops early instead of scanning.
+    //
+    // The number is DELIVERED, not drawn here: it used to be a span this file
+    // spliced into CodeMirror's panel and pinned to a magic offset off its
+    // close button. It now goes to the app's own status strip through
+    // onSearchCount, and to the replace-all button as a data attribute the
+    // stylesheet reads (rule 9 — their DOM and their behaviour, our look), so
+    // that button states its scope before it is pressed.
     let countTimer: ReturnType<typeof setTimeout> | undefined;
     let lastCountKey = '';
+    // What the panel last reported — the replace-all gate and its receipt read
+    // the same number the user is looking at.
+    let lastCount = 0;
+    const publishCount = (host: EditorView, n: number | null): void => {
+      lastCount = n ?? 0;
+      opts.onSearchCount(n === null ? null : matchLabel(n));
+      const replaceAllBtn = host.dom.querySelector<HTMLElement>(
+        '.cm-panel.cm-search button[name=replaceAll]',
+      );
+      if (!replaceAllBtn) return;
+      if (n === null) delete replaceAllBtn.dataset.count;
+      else replaceAllBtn.dataset.count = matchLabel(n);
+    };
     const searchCount = EditorView.updateListener.of((u) => {
-      if (!searchPanelOpen(u.state)) { lastCountKey = ''; return; }
+      if (!searchPanelOpen(u.state)) {
+        // Closing the panel retires its count: a number about a search nobody
+        // can see is the half of 8a that was never the panel's to keep.
+        if (lastCountKey !== '') publishCount(u.view, null);
+        lastCountKey = '';
+        return;
+      }
       const q = getSearchQuery(u.state);
       const key = `${q.search}\u0000${q.regexp}${q.caseSensitive}${q.wholeWord}\u0000${u.state.doc.length}`;
       if (key === lastCountKey) return;
       lastCountKey = key;
       clearTimeout(countTimer);
       countTimer = setTimeout(() => {
-        const panel = u.view.dom.querySelector('.cm-panel.cm-search');
-        if (!panel) return;
-        let el = panel.querySelector<HTMLElement>('.cm-search-count');
-        if (!el) {
-          el = document.createElement('span');
-          el.className = 'cm-search-count';
-          // In-flow, immediately left of the panel's close button.
-          panel.insertBefore(el, panel.querySelector('[name=close]'));
-        }
-        if (!q.search || !q.valid) { el.textContent = ''; return; }
+        if (!q.search || !q.valid) { publishCount(u.view, null); return; }
         let n = 0;
         try {
           const cur = q.getCursor(u.view.state.doc);
           while (n <= 999 && !cur.next().done) n++;
-        } catch { el.textContent = ''; return; }
-        el.textContent = n > 999 ? '999+ matches' : `${n} ${n === 1 ? 'match' : 'matches'}`;
+        } catch { publishCount(u.view, null); return; }
+        publishCount(u.view, n);
       }, 120);
+    });
+
+    // The caret is the code pane's answer to "where am I", reported to the same
+    // strip the tree reports its path to (style.css rule 19).
+    const caretReporter = EditorView.updateListener.of((u) => {
+      if (!u.selectionSet && !u.docChanged) return;
+      const head = u.state.selection.main.head;
+      const line = u.state.doc.lineAt(head);
+      opts.onCaret(line.number, head - line.from + 1);
     });
     const t = hl.tags;
 
@@ -146,13 +203,6 @@ export class CodeEditor {
           '.cm-panels.cm-panels-bottom': { borderTop: `1px solid ${p.border}` },
           '.cm-panel.cm-search input, .cm-panel.cm-search button, .cm-panel.cm-search label': {
             fontFamily: 'inherit', fontSize: '12px',
-          },
-          // Anchored to the panel corner so it hugs the close button (the panel
-          // is plain block flow — in-flow placement strands the count mid-row).
-          '.cm-panel.cm-search': { position: 'relative' },
-          '.cm-panel.cm-search .cm-search-count': {
-            position: 'absolute', bottom: '13px', right: '44px',
-            fontSize: '11.5px', color: p.dim, whiteSpace: 'nowrap',
           },
           '.cm-tooltip': { backgroundColor: p.gutterBg, border: `1px solid ${p.border}`, color: p.text },
         },
@@ -215,11 +265,42 @@ export class CodeEditor {
             if (u.docChanged && !u.transactions.some((tr) => tr.annotation(setDocA))) opts.onChange();
           }),
           searchCount,
+          caretReporter,
           EditorView.contentAttributes.of({ spellcheck: 'false', 'aria-label': 'JSON code editor' }),
         ],
       }),
     });
 
+    // Replace-all, the destructive half of the panel. CodeMirror owns the
+    // button and its command; these two listeners bracket that command.
+    //
+    // The GATE runs in the capture phase, before the button's own onclick, so
+    // declining actually stops the replacement. The RECEIPT runs on the way
+    // back up, after it: the replacement fires onChange, which writes its own
+    // note into the same status slot, and the last writer wins.
+    const isReplaceAll = (e: Event): boolean =>
+      !!(e.target as HTMLElement | null)?.closest('.cm-panel.cm-search button[name=replaceAll]');
+    // Held between the two phases of one click so the receipt reports the
+    // number the button was LABELLED with, not whatever the count settles on
+    // after the document changed underneath it.
+    let pendingReplaceCount = 0;
+    editor.dom.addEventListener('click', (e) => {
+      if (!isReplaceAll(e)) return;
+      pendingReplaceCount = lastCount;
+      if (pendingReplaceCount <= REPLACE_CONFIRM_ABOVE) return;
+      if (opts.confirmReplaceAll(matchLabel(pendingReplaceCount))) return;
+      pendingReplaceCount = 0;
+      // Stopping the event in capture keeps it from ever reaching the button's
+      // own handler, which is where CodeMirror runs the replacement.
+      e.stopPropagation();
+    }, true);
+    editor.dom.addEventListener('click', (e) => {
+      if (!isReplaceAll(e) || pendingReplaceCount === 0) return;
+      opts.onReplaceAll(countText(pendingReplaceCount));
+      pendingReplaceCount = 0;
+    });
+
+    opts.onCaret(1, 1);
     return new CodeEditor(editor, makeTheme, makeHl, themeComp, hlComp, setDocA);
   }
 

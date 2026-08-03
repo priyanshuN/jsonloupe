@@ -53,10 +53,23 @@ export class VirtualTree {
       if (t.closest('.btn-copy')) return cbs.onCopyValue(id);
       if (t.closest('.btn-table')) return cbs.onTable(id);
       if (t.closest('.btn-unpack')) return cbs.onUnpack(id, index);
-      this.selected = index;
-      cbs.onSelect(index);
+      this.select(index, { scroll: false });
       if (rowEl.dataset.children === '1') cbs.onToggle(id, index);
-      else this.schedule();
+    });
+    // Rows are focusable (they carry the actions, which used to be reachable
+    // only by pointer), and focus IS selection here — arriving by Tab must
+    // answer "where am I" the same way arriving by click does. Delegated,
+    // because the rows themselves are recycled on every render.
+    layer.addEventListener('focusin', (e) => {
+      const t = e.target as HTMLElement;
+      // Focus landing on a row ACTION is not a selection — clicking `copy` has
+      // never moved the selection and must not start now.
+      if (t.closest('button')) return;
+      const rowEl = t.closest('.row') as HTMLElement | null;
+      if (!rowEl) return;
+      const index = Number(rowEl.dataset.index);
+      if (index === this.selected) return;
+      this.select(index, { scroll: false });
     });
     // Double-click a primitive value → inline edit.
     layer.addEventListener('dblclick', (e) => {
@@ -122,16 +135,31 @@ export class VirtualTree {
     input.addEventListener('blur', () => void finish(true));
   }
 
-  select(i: number): void {
+  // `scroll:false` for selections that came from the row itself (a click, a
+  // focus): the row is already on screen, and repainting the class beats a
+  // re-render that would replace the very element holding focus.
+  select(i: number, o?: { scroll?: boolean }): void {
     if (this.total === 0) return;
     this.selected = Math.max(0, Math.min(this.total - 1, i));
-    const top = this.selected * ROW_H;
-    const st = this.viewport.scrollTop;
-    const h = this.viewport.clientHeight;
-    if (top < st) this.viewport.scrollTop = top;
-    else if (top + ROW_H > st + h) this.viewport.scrollTop = top + ROW_H - h;
-    this.schedule();
+    if (o?.scroll === false) {
+      this.paintSelection();
+    } else {
+      const top = this.selected * ROW_H;
+      const st = this.viewport.scrollTop;
+      const h = this.viewport.clientHeight;
+      if (top < st) this.viewport.scrollTop = top;
+      else if (top + ROW_H > st + h) this.viewport.scrollTop = top + ROW_H - h;
+      this.schedule();
+    }
     this.cbs.onSelect(this.selected);
+  }
+
+  // The selection marker is one class on one row, so moving it does not need a
+  // rebuild of the visible slice — and must not be one while a row has focus.
+  private paintSelection(): void {
+    for (const el of this.layer.children) {
+      el.classList.toggle('sel', Number((el as HTMLElement).dataset.index) === this.selected);
+    }
   }
 
   selectedIndex(): number {
@@ -192,19 +220,32 @@ export class VirtualTree {
     const rows = await this.cbs.fetchRows(start, count);
     if (ep !== this.epoch) return;
     this.lastRows = rows;
+    // Every row in this slice is about to be replaced, taking focus with it. A
+    // keyboard user is standing on the selected row, so hand it back to that
+    // row's replacement — enough for a recycled list without a roving index.
+    const hadFocus = this.layer.contains(document.activeElement);
     const frag = document.createDocumentFragment();
     for (const r of rows) frag.appendChild(this.rowEl(r));
     this.layer.replaceChildren(frag);
     this.layer.style.transform = `translateY(${start * ROW_H}px)`;
     this.flashIndex = -1;
+    if (hadFocus) {
+      this.layer
+        .querySelector<HTMLElement>(`.row[data-index="${this.selected}"]`)
+        ?.focus({ preventScroll: true });
+    }
   }
 
   private rowEl(r: Row): HTMLElement {
     const el = document.createElement('div');
-    el.className = `row${r.index === this.flashIndex ? ' flash' : ''}${r.index === this.selected ? ' sel' : ''}`;
+    // focus-ring is rule 5's one ring, carried to a widget that is not a button.
+    el.className = `row focus-ring${r.index === this.flashIndex ? ' flash' : ''}${r.index === this.selected ? ' sel' : ''}`;
     el.dataset.id = String(r.id);
     el.dataset.index = String(r.index);
     el.dataset.children = r.hasChildren ? '1' : '0';
+    // Reachable without a pointer: the row is the tab stop, and its actions
+    // appear on focus exactly as they do on hover (style.css rule 20).
+    el.tabIndex = 0;
 
     const num = document.createElement('span');
     num.className = 'rownum';
@@ -278,6 +319,10 @@ export class VirtualTree {
       el.appendChild(size);
     }
 
+    // The gutter these sit in is reserved on EVERY row (style.css rule 20), so
+    // arriving on a row cannot re-truncate the value already under the pointer.
+    // Two actions on most rows; `tbl` is the array-only third, and there is no
+    // per-row menu to move it into — it fades in with the other two.
     const actions = document.createElement('span');
     actions.className = 'actions';
     const btns: [string, string, string][] = [

@@ -30,12 +30,6 @@ export function applyTheme(t: Theme): void {
   for (const cb of listeners) cb(t);
 }
 
-export function toggleTheme(): Theme {
-  const next: Theme = current === 'dark' ? 'light' : 'dark';
-  applyTheme(next);
-  return next;
-}
-
 export function onThemeChange(cb: (t: Theme) => void): void {
   listeners.add(cb);
 }
