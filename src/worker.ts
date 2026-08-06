@@ -15,7 +15,8 @@ import type {
   CompareRow,
   CompareStatus,
 } from './protocol';
-import { runQuery, type PathSeg, type QueryResult } from './query';
+import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, type QueryResult } from './query';
+import { profileQuery } from './profile';
 import {
   compareSemantic,
   type SemanticCompareOptions,
@@ -151,6 +152,7 @@ function clearState(): void {
   lastQueryPaths = [];
   lastQueryValues = [];
   lastQueryResult = null;
+  lastQueryText = null;
   schemaCache = null;
   sizeCache.clear();
   // A reparse regenerates ids → the pre-filter expansion snapshot is stale; drop
@@ -1662,20 +1664,23 @@ function doDiff(otherText: string, ignoreSpec: string, keySpec: string): DiffRes
 
 let lastQueryPaths: PathSeg[][] = [];
 let lastQueryValues: unknown[] = [];
-// The full (cap-limited) result of the last query, kept so CSV export can build
-// off the true rows/groups rather than the panel-capped preview.
+// The full detail-window result of the last query, kept for the browser's
+// query panel/copy path. File export reruns the query through its lazy plan.
 let lastQueryResult: QueryResult | null = null;
+let lastQueryText: string | null = null;
 
 const QUERY_PANEL_CAP = 300;
 
-function doQuery(q: string): object {
+function doQuery(q: string, options?: QueryOptions): object {
   const root = nodes.get(rootId);
   if (!root) {
     lastQueryResult = null;
+    lastQueryText = null;
     return { ok: false, error: 'no document open', pos: 0 };
   }
-  const r: QueryResult = runQuery(root.value, q);
+  const r: QueryResult = runQuery(root.value, q, options);
   lastQueryResult = r.ok ? r : null;
+  lastQueryText = r.ok ? q : null;
   if (!r.ok) return r;
   if (r.kind === 'matches') {
     lastQueryPaths = r.matches.map((m) => m.path);
@@ -1684,6 +1689,8 @@ function doQuery(q: string): object {
       ok: true,
       kind: 'matches',
       total: r.total,
+      offset: r.offset,
+      complete: r.complete,
       truncated: r.truncated,
       matches: r.matches.slice(0, QUERY_PANEL_CAP).map((m, i) => ({
         i,
@@ -1793,17 +1800,16 @@ function buildSchema(path?: string): SchemaResult {
     if (schemaCache === null) schemaCache = renderSpec(specOf(root.value, 0), '').slice(0, 4000);
     return { text: schemaCache };
   }
-  const r = runQuery(root.value, path);
-  if (!r.ok) return r;
-  if (r.kind !== 'matches') {
-    return { ok: false, error: 'schema takes a path, not an aggregate pipe', pos: 0 };
-  }
-  if (r.matches.length === 0) return { ok: false, error: `no match for ${path}`, pos: 0 };
+  const scanned = scanQuery(root.value, path);
+  if (!scanned.ok) return scanned;
   let spec: Spec | null = null;
-  for (const m of r.matches.slice(0, SCHEMA_SAMPLE)) {
+  let sampled = 0;
+  for (const m of scanned.matches) {
     const s = specOf(m.value, 0);
     spec = spec ? mergeSpec(spec, s) : s;
+    if (++sampled >= SCHEMA_SAMPLE) break;
   }
+  if (!spec) return { ok: false, error: `no match for ${path}`, pos: 0 };
   return { text: renderSpec(spec!, '').slice(0, 4000) };
 }
 
@@ -1894,11 +1900,11 @@ function tableRows(start: number, count: number): { index: number; cells: string
   return out;
 }
 
-// ---------- CSV export (RFC 4180) ----------
+// ---------- complete query/table export ----------
 
 // Ceiling on the built string — refuse rather than materialize a >50M-char blob
 // (and never truncate silently: a half CSV is worse than none).
-const CSV_CAP = 50_000_000;
+const EXPORT_CAP = 50_000_000;
 
 // A CSV cell: LosslessNumber → exact digit string (unfloated), null/undefined →
 // empty, nested object/array → its JSON (llStringify) folded into one cell,
@@ -1929,25 +1935,62 @@ function csvField(s: string): string {
 }
 
 // Serialize header + rows with CRLF row endings, watching the running size so we
-// bail before crossing CSV_CAP instead of building the whole thing first.
+// bail before crossing EXPORT_CAP instead of building the whole thing first.
 function csvSerialize(
   cols: string[],
-  rows: string[][],
-): { ok: true; text: string } | { ok: false; error: string } {
+  rows: Iterable<unknown[]>,
+): { ok: true; text: string; rows: number } | { ok: false; error: string } {
   let size = 0;
+  let count = 0;
   const lines: string[] = [];
   const push = (fields: string[]): boolean => {
     const line = fields.map(csvField).join(',');
     size += line.length + 2; // + CRLF
-    if (size > CSV_CAP) return false;
+    if (size > EXPORT_CAP) return false;
     lines.push(line);
     return true;
   };
   if (!push(cols)) return { ok: false, error: 'too large for CSV' };
-  for (const r of rows) {
-    if (!push(r)) return { ok: false, error: 'too large for CSV' };
+  for (const row of rows) {
+    if (!push(row.map(csvCell))) return { ok: false, error: 'too large for CSV' };
+    count++;
   }
-  return { ok: true, text: lines.map((l) => l + '\r\n').join('') };
+  return { ok: true, text: lines.map((line) => line + '\r\n').join(''), rows: count };
+}
+
+function jsonlSerialize(values: Iterable<unknown>): { ok: true; text: string; rows: number } | { ok: false; error: string } {
+  let size = 0;
+  let rows = 0;
+  const lines: string[] = [];
+  for (const value of values) {
+    const line = llStringify(value) ?? 'null';
+    size += line.length + 1;
+    if (size > EXPORT_CAP) return { ok: false, error: 'too large for JSONL' };
+    lines.push(line);
+    rows++;
+  }
+  return { ok: true, text: lines.map((line) => line + '\n').join(''), rows };
+}
+
+function buildQueryExport(
+  query: string,
+  format: 'csv' | 'jsonl',
+): { ok: true; text: string; rows: number } | { ok: false; error: string } {
+  const root = nodes.get(rootId);
+  if (!root) return { ok: false, error: 'no document open' };
+  const plan = planQueryExport(root.value, query);
+  if (!plan.ok) return { ok: false, error: plan.error };
+  if (format === 'csv') {
+    if (plan.kind !== 'table') {
+      return { ok: false, error: 'CSV needs a table query; append | pluck(...), | group(...) or | distinct' };
+    }
+    return csvSerialize(plan.columns, plan.rows);
+  }
+  if (plan.kind === 'values') return jsonlSerialize(plan.values);
+  const values = (function* (): Generator<Record<string, unknown>> {
+    for (const row of plan.rows) yield Object.fromEntries(plan.columns.map((column, index) => [column, row[index]]));
+  })();
+  return jsonlSerialize(values);
 }
 
 // Build a CSV from either the open table view (respecting its sort order and
@@ -1956,16 +1999,12 @@ function csvSerialize(
 function buildCsv(source: string): { ok: true; text: string } | { ok: false; error: string } {
   if (source === 'table') {
     if (!tableArr) return { ok: false, error: 'no table open' };
-    const rows = tableIdx.map((orig) => tableCols.map((c) => csvCell(tableCell(orig, c))));
+    const rows = tableIdx.map((orig) => tableCols.map((c) => tableCell(orig, c)));
     return csvSerialize(tableCols, rows);
   }
   if (source === 'query') {
-    const r = lastQueryResult;
-    if (!r || !r.ok) return { ok: false, error: 'no query result to export' };
-    if (r.kind === 'rows') return csvSerialize(r.cols, r.rows.map((row) => row.map(csvCell)));
-    if (r.kind === 'groups')
-      return csvSerialize([r.label, 'count'], r.groups.map((g) => [csvCell(g.key), csvCell(g.count)]));
-    return { ok: false, error: 'this result is not a table' };
+    if (!lastQueryText) return { ok: false, error: 'no query result to export' };
+    return buildQueryExport(lastQueryText, 'csv');
   }
   return { ok: false, error: 'unknown csv source' };
 }
@@ -2027,8 +2066,24 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return { rows: tableRows(msg.start as number, msg.count as number) };
     case 'csv':
       return buildCsv(msg.source as string);
+    case 'exportQuery':
+      return buildQueryExport(msg.query as string, msg.format as 'csv' | 'jsonl');
     case 'query':
-      return doQuery(msg.q as string);
+      return doQuery(msg.q as string, {
+        offset: msg.offset as number | undefined,
+        limit: msg.limit as number | undefined,
+        cardinalityCap: msg.cardinalityCap as number | undefined,
+      });
+    case 'profile': {
+      const root = nodes.get(rootId);
+      if (!root) return { ok: false, error: 'no document open' };
+      return profileQuery(
+        root.value,
+        msg.query as string,
+        (msg.fields as string[] | undefined) ?? [],
+        msg.top as number | undefined,
+      );
+    }
     case 'queryReveal':
       return queryReveal(msg.i as number);
     case 'queryFilter':

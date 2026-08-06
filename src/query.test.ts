@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { LosslessNumber } from 'lossless-json';
 import { runQuery, type QueryResult } from './query';
 
 const doc = {
@@ -109,6 +110,16 @@ describe('predicates', () => {
   it('field vs field — overbooked slots', () => {
     expect(matches(runQuery(doc, '$.slots[?(@.capacity.used > @.capacity.max)]')).map((m) => (m.value as { id: string }).id)).toEqual(['S2']);
   });
+  it('compares int64 literals without matching their rounded neighbour', () => {
+    const ids = {
+      rows: [
+        { id: new LosslessNumber('9007199254740992') },
+        { id: new LosslessNumber('9007199254740993') },
+      ],
+    };
+    expect(value(runQuery(ids, '$.rows[?(@.id == 9007199254740993)] | count'))).toBe(1);
+    expect(value(runQuery(ids, '$.rows[?(@.id > 9007199254740992)] | count'))).toBe(1);
+  });
 });
 
 describe('pipes', () => {
@@ -164,6 +175,23 @@ describe('pipes', () => {
     expect(r.cols).toEqual(['id', 'loc.lat']);
     expect(r.rows[2]).toEqual([3, 8.1]);
   });
+  it('aggregates unsafe integers exactly', () => {
+    const ids = {
+      rows: [
+        { id: new LosslessNumber('9007199254740992') },
+        { id: new LosslessNumber('9007199254740993') },
+      ],
+    };
+    expect(value(runQuery(ids, '$.rows[*] | sum(@.id)'))).toBe('18014398509481985');
+    expect(value(runQuery(ids, '$.rows[*] | max(@.id)'))).toBe('9007199254740993');
+  });
+  it('returns exact totals while retaining only the requested detail window', () => {
+    const rows = Array.from({ length: 6001 }, (_, id) => ({ id }));
+    const result = runQuery({ rows }, '$.rows[*] | pluck(@.id)', { offset: 5990, limit: 5 });
+    if (!result.ok || result.kind !== 'rows') throw new Error('bad');
+    expect(result).toMatchObject({ total: 6001, offset: 5990, complete: true, truncated: true });
+    expect(result.rows).toEqual([[5990], [5991], [5992], [5993], [5994]]);
+  });
 });
 
 describe('errors', () => {
@@ -199,5 +227,10 @@ describe('scale sanity', () => {
     if (!g.ok || g.kind !== 'groups') throw new Error('bad');
     expect(g.groups[0].count).toBe(133333);
     expect(ms).toBeLessThan(2000);
+  });
+
+  it('counts beyond the former two-million-match materialization cap', () => {
+    const values = new Array(2_000_001).fill(0);
+    expect(value(runQuery(values, '$[*] | count'))).toBe(2_000_001);
   });
 });

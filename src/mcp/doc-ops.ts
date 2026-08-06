@@ -18,6 +18,7 @@ import {
   payloadSniffNeedsDecode,
 } from '../intake';
 import type { NodeType, Row } from '../protocol';
+import type { ProfileResult } from '../profile';
 import { QUERY_GRAMMAR, QUERY_PIPES } from '../query-grammar';
 import type { DocRequest } from './pool';
 
@@ -52,10 +53,10 @@ export interface QueryMatch {
 }
 
 export type QueryResultView =
-  | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: QueryMatch[] }
-  | { ok: true; kind: 'value'; label: string; value: string; note?: string }
-  | { ok: true; kind: 'groups'; label: string; groups: [string, number][]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean };
+  | { ok: true; kind: 'matches'; total: number; offset: number; complete: boolean; truncated: boolean; matches: QueryMatch[] }
+  | { ok: true; kind: 'value'; label: string; value: string; complete: boolean; note?: string }
+  | { ok: true; kind: 'groups'; label: string; total: number; offset: number; complete: boolean; groups: [string, number][]; truncated: boolean }
+  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; offset: number; complete: boolean; truncated: boolean };
 
 export interface SampleValue {
   path: string;
@@ -89,6 +90,7 @@ export interface DiffResultView {
 
 export interface CsvResult {
   ok: true;
+  format: 'csv' | 'jsonl';
   outPath: string;
   rows: number;
   bytes: number;
@@ -229,6 +231,8 @@ interface RawQueryResult {
   error?: string;
   pos?: number;
   total?: number;
+  offset?: number;
+  complete?: boolean;
   truncated?: boolean;
   matches?: { pathText: string; preview: string }[];
   label?: string;
@@ -239,8 +243,12 @@ interface RawQueryResult {
   rows?: unknown[][];
 }
 
-export function runQuery(engine: Engine, query: string): QueryResultView | OpError {
-  const r = engine({ type: 'query', q: query }) as RawQueryResult;
+export function runQuery(
+  engine: Engine,
+  query: string,
+  options: { offset?: number; limit?: number; cardinalityCap?: number } = {},
+): QueryResultView | OpError {
+  const r = engine({ type: 'query', q: query, ...options }) as RawQueryResult;
   if (!r.ok) return queryError(query, r.error ?? 'query failed', r.pos ?? 0);
   switch (r.kind) {
     case 'matches':
@@ -248,6 +256,8 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         ok: true,
         kind: 'matches',
         total: r.total ?? 0,
+        offset: r.offset ?? 0,
+        complete: r.complete !== false,
         truncated: r.truncated === true,
         matches: (r.matches ?? []).map((m) => ({ path: m.pathText, preview: clip(m.preview, CELL_CHARS) })),
       };
@@ -257,6 +267,7 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         kind: 'value',
         label: r.label ?? '',
         value: r.value === null || r.value === undefined ? 'null' : String(r.value),
+        complete: r.complete !== false,
         note: r.note,
       };
     case 'groups':
@@ -264,6 +275,9 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         ok: true,
         kind: 'groups',
         label: r.label ?? '',
+        total: r.total ?? (r.groups?.length ?? 0),
+        offset: r.offset ?? 0,
+        complete: r.complete !== false,
         truncated: r.truncated === true,
         groups: (r.groups ?? []).map((g) => [clip(g.key, CELL_CHARS), g.count] as [string, number]),
       };
@@ -273,12 +287,25 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         kind: 'rows',
         cols: r.cols ?? [],
         total: r.total ?? 0,
+        offset: r.offset ?? 0,
+        complete: r.complete !== false,
         truncated: r.truncated === true,
         rows: (r.rows ?? []).map((row) => row.map(cell)),
       };
     default:
       return fail(`unexpected query result '${r.kind}'`);
   }
+}
+
+export function profile(
+  engine: Engine,
+  query: string,
+  fields: string[],
+  top: number,
+): ProfileResult | OpError {
+  const result = engine({ type: 'profile', query, fields, top }) as ProfileResult | (OpError & { pos?: number });
+  if (!result.ok && typeof result.pos === 'number') return queryError(query, result.error, result.pos);
+  return result;
 }
 
 // ---------- sample ----------
@@ -411,19 +438,35 @@ export async function exportCsv(
   query: string,
   outPath: string,
 ): Promise<CsvResult | OpError> {
-  const r = engine({ type: 'query', q: query }) as RawQueryResult;
-  if (!r.ok) return queryError(query, r.error ?? 'query failed', r.pos ?? 0);
-  const rows = r.kind === 'rows' ? (r.rows?.length ?? 0) : r.kind === 'groups' ? (r.groups?.length ?? 0) : -1;
-  if (rows < 0) {
-    return fail(
-      `a ${r.kind} result has no table shape`,
-      'Project columns first: `| pluck(@.id, @.status)`, or aggregate with `| group(@.x)`.',
-    );
+  return exportResult(engine, query, outPath, 'csv');
+}
+
+export async function exportResult(
+  engine: Engine,
+  query: string,
+  outPath: string,
+  format: 'csv' | 'jsonl',
+): Promise<CsvResult | OpError> {
+  const exported = engine({ type: 'exportQuery', query, format }) as {
+    ok: boolean;
+    text?: string;
+    rows?: number;
+    error?: string;
+  };
+  if (!exported.ok || exported.text === undefined) {
+    const hint = format === 'csv'
+      ? 'Project columns first: `| pluck(@.id, @.status)`, or aggregate with `| group(@.x)`.'
+      : undefined;
+    return fail(exported.error ?? `${format.toUpperCase()} export failed`, hint);
   }
-  const csv = engine({ type: 'csv', source: 'query' }) as { ok: boolean; text?: string; error?: string };
-  if (!csv.ok || csv.text === undefined) return fail(csv.error ?? 'CSV export failed');
-  await writeFile(outPath, csv.text, 'utf8');
-  return { ok: true, outPath, rows, bytes: Buffer.byteLength(csv.text, 'utf8') };
+  await writeFile(outPath, exported.text, 'utf8');
+  return {
+    ok: true,
+    format,
+    outPath,
+    rows: exported.rows ?? 0,
+    bytes: Buffer.byteLength(exported.text, 'utf8'),
+  };
 }
 
 // ---------- the op table ----------
@@ -439,7 +482,18 @@ export async function runDocOp(engine: Engine, request: DocRequest): Promise<unk
     case 'schema':
       return getSchema(engine, request.path as string | undefined);
     case 'query':
-      return runQuery(engine, request.query as string);
+      return runQuery(engine, request.query as string, {
+        offset: request.offset as number | undefined,
+        limit: request.limit as number | undefined,
+        cardinalityCap: request.cardinalityCap as number | undefined,
+      });
+    case 'profile':
+      return profile(
+        engine,
+        request.query as string,
+        (request.fields as string[] | undefined) ?? [],
+        request.top as number,
+      );
     case 'sample':
       return sample(engine, request.path as string, request.n as number);
     case 'text':
@@ -448,6 +502,13 @@ export async function runDocOp(engine: Engine, request: DocRequest): Promise<unk
       return diffAgainst(engine, request.baselineText as string, request.keySpec as string);
     case 'csv':
       return exportCsv(engine, request.query as string, request.outPath as string);
+    case 'export':
+      return exportResult(
+        engine,
+        request.query as string,
+        request.outPath as string,
+        request.format as 'csv' | 'jsonl',
+      );
     default:
       return fail(`unknown document operation '${request.op}'`);
   }

@@ -58,14 +58,16 @@ function wideDoc(n: number): string {
 // ---------- the tool contract ----------
 
 describe('tool definitions', () => {
-  it('are exactly the six frozen names', () => {
+  it('are exactly the eight agent-facing names', () => {
     expect(TOOLS.map((t) => t.name)).toEqual([
       'load_doc',
       'get_schema',
       'run_query',
+      'profile',
       'sample',
       'diff_docs',
       'export_csv',
+      'export_result',
     ]);
   });
 
@@ -80,6 +82,23 @@ describe('tool definitions', () => {
     expect(description).toContain('| group(@.failureReason)');
     expect(description).toContain('| sum');
     expect(description).toContain("[?(!@.routeId)] | count");
+    expect(description).toContain('Only 10 detail rows return by default');
+    expect(description).toContain('For only a count');
+    expect(TOOLS.find((t) => t.name === 'profile')!.description).toContain('replaces ad-hoc Python loops');
+  });
+
+  it('tell MCP clients which calls are read-only and which write files', () => {
+    for (const tool of TOOLS.filter((item) => !item.name.startsWith('export_'))) {
+      expect(tool.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
+    }
+    for (const name of ['export_csv', 'export_result']) {
+      expect(TOOLS.find((item) => item.name === name)?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+    }
   });
 });
 
@@ -137,11 +156,29 @@ describe('multi-doc', () => {
 // ---------- the cap ----------
 
 describe('response cap', () => {
-  it('truncates a long result and says what to do about it', async () => {
+  it('returns a small detail window by default and supports summary-only queries', async () => {
     await load(wideDoc(400));
     const r = await call('run_query', { docId: 'd1', query: '$.tasks[*].orderId' });
+    expect(r.text).toContain('400 matches, showing 10 from offset 0');
+    expect(r.text.length).toBeLessThan(1000);
+
+    const summary = await call('run_query', { docId: 'd1', query: '$.tasks[*].orderId', limit: 0 });
+    expect(summary.text).toBe('400 matches, details omitted');
+  });
+
+  it('pages detail without rescanning in the model or dumping skipped rows', async () => {
+    await load(wideDoc(400));
+    const r = await call('run_query', { docId: 'd1', query: '$.tasks[*].orderId', offset: 395, limit: 3 });
+    expect(r.text).toContain('400 matches, showing 3 from offset 395');
+    expect(r.text).toContain('ORD-0000000395');
+    expect(r.text).not.toContain('ORD-0000000000');
+  });
+
+  it('still applies the hard response cap to explicitly requested large values', async () => {
+    await load(JSON.stringify({ values: Array.from({ length: 20 }, () => 'x'.repeat(2000)) }));
+    const r = await call('sample', { docId: 'd1', path: '$.values', n: 20 });
     expect(r.text.length).toBe(RESPONSE_CAP);
-    expect(r.text).toMatch(/\n…truncated \(showing \d+ of \d+ chars\)\. Narrow the query\.$/);
+    expect(r.text).toContain('…truncated');
   });
 
   it('applies to error payloads too', async () => {
@@ -183,6 +220,55 @@ describe('exact digits survive the whole pipeline', () => {
     // The rows themselves stay out of the response — only the file has them.
     expect(exported.text).not.toContain(INT64);
     expect(await readFile(outPath, 'utf8')).toBe(`id,status\r\n${INT64},FAILED\r\n9007199254740994,OK\r\n`);
+  });
+
+  it('filters and aggregates adjacent int64 values exactly', async () => {
+    await load('{"rows":[{"id":9007199254740992},{"id":9007199254740993}]}');
+    const count = await call('run_query', {
+      docId: 'd1',
+      query: '$.rows[?(@.id == 9007199254740993)] | count',
+    });
+    expect(count.text).toBe('count: 1');
+    const sum = await call('run_query', { docId: 'd1', query: '$.rows[*] | sum(@.id)' });
+    expect(sum.text).toContain('sum: 18014398509481985');
+  });
+
+  it('profiles several fields in one compact server-side scan', async () => {
+    await load('{"tasks":[{"status":"FAILED","reason":"NO_SLOT","weight":1},{"status":"FAILED","reason":null,"weight":2},{"status":"OK","weight":3}]}');
+    const profiled = await call('profile', {
+      docId: 'd1',
+      query: '$.tasks[*]',
+      fields: ['status', 'reason', 'weight'],
+      top: 3,
+    });
+    expect(profiled.text).toContain('matched: 3');
+    expect(profiled.text).toContain('reason: present 2, missing 1, null 1');
+    expect(profiled.text).toContain('numeric: 3, min 1, max 3, avg 2');
+    expect(profiled.text.length).toBeLessThan(1000);
+  });
+
+  it('exports every row past the display cap and supports nested JSONL matches', async () => {
+    await load(wideDoc(6001));
+    const csvPath = join(dir, 'all-ids.csv');
+    const csv = await call('export_result', {
+      docId: 'd1',
+      query: '$.tasks[*] | pluck(@.orderId)',
+      format: 'csv',
+      outPath: csvPath,
+    });
+    expect(csv.text).toContain('rows: 6001');
+    expect(csv.text).toContain('complete: true');
+    expect((await readFile(csvPath, 'utf8')).split('\r\n')).toHaveLength(6003);
+
+    const jsonlPath = join(dir, 'tail.jsonl');
+    const jsonl = await call('export_result', {
+      docId: 'd1',
+      query: '$.tasks[5999:]',
+      format: 'jsonl',
+      outPath: jsonlPath,
+    });
+    expect(jsonl.text).toContain('rows: 2');
+    expect((await readFile(jsonlPath, 'utf8')).split('\n').filter(Boolean)).toHaveLength(2);
   });
 
   it('diffs two loaded documents in A → B order', async () => {

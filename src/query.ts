@@ -15,15 +15,14 @@
 //   pipe    := '|' fn ('(' '@'tail (',' '@'tail)* ')')?
 //   fn      := count sum avg min max distinct group pluck
 
-import { isLosslessNumber } from 'lossless-json';
-
-// Unfloat a LosslessNumber for numeric comparison/aggregation. Ordering and
-// sums on an int64 ID are inherently lossy (and semantically odd) — but the
-// value stays a LosslessNumber everywhere it's displayed/copied, so fidelity is
-// only surrendered at the point of arithmetic, never on the way out.
-function numify(v: unknown): unknown {
-  return isLosslessNumber(v) ? parseFloat(v.toString()) : v;
-}
+import { isLosslessNumber, LosslessNumber, stringify as llStringify } from 'lossless-json';
+import {
+  canonicalExactNumeric,
+  compareExactNumeric,
+  ExactNumericStats,
+  exactNumericText,
+  isExactNumeric,
+} from './exact-number';
 
 export type PathSeg = string | number;
 
@@ -53,16 +52,25 @@ interface Query { segs: Seg[]; pipe: Pipe | null }
 export interface Match { path: PathSeg[]; value: unknown }
 
 export type QueryResult =
-  | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: Match[] }
-  | { ok: true; kind: 'value'; label: string; value: number | string | null; note?: string }
-  | { ok: true; kind: 'groups'; label: string; groups: { key: string; count: number }[]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: unknown[][]; total: number; truncated: boolean }
+  | { ok: true; kind: 'matches'; total: number; offset: number; complete: boolean; truncated: boolean; matches: Match[] }
+  | { ok: true; kind: 'value'; label: string; value: number | string | null; complete: boolean; note?: string }
+  | { ok: true; kind: 'groups'; label: string; total: number; offset: number; complete: boolean; groups: { key: string; count: number }[]; truncated: boolean }
+  | { ok: true; kind: 'rows'; cols: string[]; rows: unknown[][]; total: number; offset: number; complete: boolean; truncated: boolean }
   | { ok: false; error: string; pos: number };
 
+export interface QueryOptions {
+  /** Detail rows to skip after the query is evaluated. Aggregates always scan all matches. */
+  offset?: number;
+  /** Detail rows to retain. Aggregates always scan all matches. */
+  limit?: number;
+  /** Defensive ceiling for distinct/group state, not for the number of scanned matches. */
+  cardinalityCap?: number;
+}
+
 const MATCH_CAP = 5000;
-const HARD_CAP = 2_000_000;
 const GROUP_CAP = 1000;
 const ROW_CAP = 5000;
+const CARDINALITY_CAP = 100_000;
 
 // ---------- lexer ----------
 
@@ -418,7 +426,7 @@ class Parser {
       for (;;) {
         const lt = this.next();
         if (lt.t === 'str') list.push(lt.v);
-        else if (lt.t === 'num') list.push(lt.n!);
+        else if (lt.t === 'num') list.push(new LosslessNumber(lt.v));
         else if (lt.t === 'ident' && ['true', 'false', 'null'].includes(lt.v)) {
           list.push(lt.v === 'true' ? true : lt.v === 'false' ? false : null);
         } else throw new QErr('expected literal in list', lt.pos);
@@ -452,7 +460,7 @@ class Parser {
     }
     if (t.t === 'num') {
       this.next();
-      return { kind: 'lit', value: t.n! };
+      return { kind: 'lit', value: new LosslessNumber(t.v) };
     }
     if (t.t === 'ident' && ['true', 'false', 'null'].includes(t.v)) {
       this.next();
@@ -491,7 +499,8 @@ function operandValue(o: Operand, cur: unknown): unknown {
 
 function eq(a: unknown, b: unknown): boolean {
   if (a === undefined || b === undefined) return false;
-  if (isLosslessNumber(a) || isLosslessNumber(b)) return numify(a) === numify(b);
+  const numeric = compareExactNumeric(a, b);
+  if (numeric !== null) return numeric === 0;
   return a === b;
 }
 
@@ -527,11 +536,9 @@ function evalExpr(e: Expr, cur: unknown): boolean {
         case '>=':
         case '<':
         case '<=': {
-          const na = numify(a);
-          const nb = numify(b);
-          if (typeof na === 'number' && typeof nb === 'number') {
-            return e.op === '>' ? na > nb : e.op === '>=' ? na >= nb : e.op === '<' ? na < nb : na <= nb;
-          }
+          const numeric = compareExactNumeric(a, b);
+          if (numeric !== null)
+            return e.op === '>' ? numeric > 0 : e.op === '>=' ? numeric >= 0 : e.op === '<' ? numeric < 0 : numeric <= 0;
           if (typeof a === 'string' && typeof b === 'string') {
             return e.op === '>' ? a > b : e.op === '>=' ? a >= b : e.op === '<' ? a < b : a <= b;
           }
@@ -553,87 +560,72 @@ function evalExpr(e: Expr, cur: unknown): boolean {
   }
 }
 
-function children(v: unknown): [PathSeg, unknown][] {
-  if (Array.isArray(v)) return v.map((x, i) => [i, x]);
-  if (isObj(v)) return Object.keys(v).map((k) => [k, v[k]]);
-  return [];
+/** Yield children without first materializing an entry tuple for every item. */
+function* children(v: unknown): Generator<[PathSeg, unknown]> {
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) yield [i, v[i]];
+    return;
+  }
+  if (isObj(v)) {
+    for (const key of Object.keys(v)) yield [key, v[key]];
+  }
 }
 
-function walk(root: unknown, segs: Seg[]): { matches: Match[]; truncated: boolean } {
-  let frontier: Match[] = [{ path: [], value: root }];
-  let truncated = false;
-
-  for (const seg of segs) {
-    const next: Match[] = [];
-    const push = (path: PathSeg[], value: unknown): boolean => {
-      if (next.length >= HARD_CAP) {
-        truncated = true;
-        return false;
+/** Depth-first matching keeps memory proportional to query depth, not result count. */
+function* walk(root: unknown, segs: Seg[]): Generator<Match> {
+  function* at(value: unknown, path: PathSeg[], index: number): Generator<Match> {
+    if (index === segs.length) {
+      yield { path, value };
+      return;
+    }
+    const seg = segs[index];
+    switch (seg.kind) {
+      case 'key':
+        if (isObj(value) && seg.name in value) yield* at(value[seg.name], [...path, seg.name], index + 1);
+        return;
+      case 'index': {
+        if (!Array.isArray(value)) return;
+        const i = seg.i < 0 ? value.length + seg.i : seg.i;
+        if (i >= 0 && i < value.length) yield* at(value[i], [...path, i], index + 1);
+        return;
       }
-      next.push({ path, value });
-      return true;
-    };
-
-    outer: for (const f of frontier) {
-      const v = f.value;
-      switch (seg.kind) {
-        case 'key':
-          if (isObj(v) && seg.name in v) {
-            if (!push([...f.path, seg.name], v[seg.name])) break outer;
-          }
-          break;
-        case 'index': {
-          if (!Array.isArray(v)) break;
-          const i = seg.i < 0 ? v.length + seg.i : seg.i;
-          if (i >= 0 && i < v.length) {
-            if (!push([...f.path, i], v[i])) break outer;
-          }
-          break;
+      case 'slice': {
+        if (!Array.isArray(value)) return;
+        const n = value.length;
+        const norm = (x: number): number => (x < 0 ? Math.max(0, n + x) : Math.min(x, n));
+        const start = seg.start === null ? 0 : norm(seg.start);
+        const end = seg.end === null ? n : norm(seg.end);
+        for (let i = start; i < end; i++) yield* at(value[i], [...path, i], index + 1);
+        return;
+      }
+      case 'wild':
+        for (const [key, child] of children(value)) yield* at(child, [...path, key], index + 1);
+        return;
+      case 'pred':
+        for (const [key, child] of children(value)) {
+          if (evalExpr(seg.expr, child)) yield* at(child, [...path, key], index + 1);
         }
-        case 'slice': {
-          if (!Array.isArray(v)) break;
-          const n = v.length;
-          const norm = (x: number): number => (x < 0 ? Math.max(0, n + x) : Math.min(x, n));
-          const s = seg.start === null ? 0 : norm(seg.start);
-          const e = seg.end === null ? n : norm(seg.end);
-          for (let i = s; i < e; i++) {
-            if (!push([...f.path, i], v[i])) break outer;
+        return;
+      case 'recur': {
+        const stack: { iterator: Iterator<[PathSeg, unknown]>; path: PathSeg[] }[] = [
+          { iterator: children(value), path },
+        ];
+        while (stack.length) {
+          const parent = stack[stack.length - 1];
+          const next = parent.iterator.next();
+          if (next.done) {
+            stack.pop();
+            continue;
           }
-          break;
-        }
-        case 'wild':
-          for (const [k, c] of children(v)) {
-            if (!push([...f.path, k], c)) break outer;
-          }
-          break;
-        case 'pred':
-          for (const [k, c] of children(v)) {
-            if (evalExpr(seg.expr, c)) {
-              if (!push([...f.path, k], c)) break outer;
-            }
-          }
-          break;
-        case 'recur': {
-          const stack: Match[] = [f];
-          while (stack.length) {
-            const cur = stack.pop()!;
-            const kids = children(cur.value);
-            for (let i = kids.length - 1; i >= 0; i--) {
-              const [k, c] = kids[i];
-              stack.push({ path: [...cur.path, k], value: c });
-              if (seg.name === null || k === seg.name) {
-                if (!push([...cur.path, k], c)) break outer;
-              }
-            }
-          }
-          break;
+          const [key, child] = next.value;
+          const childPath = [...parent.path, key];
+          if (seg.name === null || key === seg.name) yield* at(child, childPath, index + 1);
+          stack.push({ iterator: children(child), path: childPath });
         }
       }
     }
-    frontier = next;
-    if (truncated) break;
   }
-  return { matches: frontier, truncated };
+  yield* at(root, [], 0);
 }
 
 // ---------- pipes ----------
@@ -643,90 +635,148 @@ function tailLabel(tail: Tail[]): string {
   return tail.map((s) => (s.kind === 'key' ? s.name : `[${s.i}]`)).join('.');
 }
 
-function keyOf(v: unknown): string {
-  if (v === undefined) return '(absent)';
-  if (v === null) return 'null';
-  if (typeof v === 'object') {
-    const s = JSON.stringify(v);
-    return s.length > 120 ? s.slice(0, 120) + '…' : s;
-  }
-  return String(v);
+interface BucketValue {
+  id: string;
+  label: string;
+  value: unknown;
 }
 
-function applyPipe(pipe: Pipe, matches: Match[], total: number, truncated: boolean): QueryResult {
+function bucketOf(value: unknown): BucketValue {
+  if (value === undefined) return { id: 'u:', label: '(absent)', value: '(absent)' };
+  if (value === null) return { id: 'l:', label: 'null', value: null };
+  if (isExactNumeric(value)) {
+    const text = canonicalExactNumeric(value);
+    return { id: `n:${text}`, label: exactNumericText(value), value };
+  }
+  if (typeof value === 'string') return { id: `s:${value}`, label: value, value };
+  if (typeof value === 'boolean') return { id: `b:${value}`, label: String(value), value };
+  const text = llStringify(value) ?? String(value);
+  return { id: `j:${text}`, label: text.length > 120 ? text.slice(0, 120) + '…' : text, value };
+}
+
+function window(options: QueryOptions | undefined, fallbackLimit: number): { offset: number; limit: number } {
+  const offset = Number.isFinite(options?.offset) ? Math.max(0, Math.floor(options!.offset!)) : 0;
+  const limit = Number.isFinite(options?.limit) ? Math.max(0, Math.floor(options!.limit!)) : fallbackLimit;
+  return { offset, limit };
+}
+
+function windowIsTruncated(total: number, offset: number, shown: number, complete: boolean): boolean {
+  return !complete || offset > 0 || offset + shown < total;
+}
+
+function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOptions): QueryResult {
   const arg = pipe.args[0] ?? [];
   const pick = (m: Match): unknown => (arg.length ? resolveTail(m.value, arg) : m.value);
 
   switch (pipe.fn) {
-    case 'count':
-      return { ok: true, kind: 'value', label: 'count', value: total, note: truncated ? 'input truncated' : undefined };
+    case 'count': {
+      let total = 0;
+      for (const _ of walk(root, segs)) total++;
+      return { ok: true, kind: 'value', label: 'count', value: total, complete: true };
+    }
     case 'sum':
     case 'avg':
     case 'min':
     case 'max': {
-      let sum = 0;
-      let n = 0;
-      let min = Infinity;
-      let max = -Infinity;
-      for (const m of matches) {
-        const v = numify(pick(m));
-        if (typeof v === 'number' && Number.isFinite(v)) {
-          sum += v;
-          n++;
-          if (v < min) min = v;
-          if (v > max) max = v;
-        }
+      let total = 0;
+      const stats = new ExactNumericStats();
+      for (const match of walk(root, segs)) {
+        total++;
+        stats.add(pick(match));
       }
-      const skipped = matches.length - n;
-      const note = `${n} numeric value${n === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped` : ''}${truncated ? ', input truncated' : ''}`;
-      if (n === 0) return { ok: true, kind: 'value', label: pipe.fn, value: null, note };
-      const value = pipe.fn === 'sum' ? sum : pipe.fn === 'avg' ? sum / n : pipe.fn === 'min' ? min : max;
-      return { ok: true, kind: 'value', label: pipe.fn, value, note };
+      const summary = stats.summary();
+      const skipped = total - summary.count;
+      const notes = [
+        `${summary.count} numeric value${summary.count === 1 ? '' : 's'}${skipped ? `, ${skipped} skipped` : ''}`,
+      ];
+      if (summary.unsupported) notes.push(`${summary.unsupported} extreme exponent value${summary.unsupported === 1 ? '' : 's'} could not be aggregated exactly`);
+      if (pipe.fn === 'avg' && summary.averageRounded) notes.push('average rounded to 18 decimal places');
+      const value =
+        pipe.fn === 'sum' ? summary.sum : pipe.fn === 'avg' ? summary.avg : pipe.fn === 'min' ? summary.min : summary.max;
+      return { ok: true, kind: 'value', label: pipe.fn, value, complete: summary.unsupported === 0, note: notes.join('; ') };
     }
     case 'distinct': {
-      const seen = new Set<string>();
-      const rows: unknown[][] = [];
-      let trunc = truncated;
-      for (const m of matches) {
-        const v = pick(m);
-        const k = keyOf(v);
-        if (seen.has(k)) continue;
-        seen.add(k);
-        if (rows.length >= ROW_CAP) {
-          trunc = true;
-          break;
-        }
-        rows.push([typeof v === 'object' && v !== null ? k : v]);
-      }
-      return { ok: true, kind: 'rows', cols: [tailLabel(arg)], rows, total: rows.length, truncated: trunc };
-    }
-    case 'group': {
-      const map = new Map<string, number>();
-      let trunc = truncated;
-      for (const m of matches) {
-        const k = keyOf(pick(m));
-        if (!map.has(k) && map.size >= GROUP_CAP) {
-          trunc = true;
+      const cap = Math.max(1, options?.cardinalityCap ?? CARDINALITY_CAP);
+      const seen = new Map<string, BucketValue>();
+      let complete = true;
+      for (const match of walk(root, segs)) {
+        const bucket = bucketOf(pick(match));
+        if (seen.has(bucket.id)) continue;
+        if (seen.size >= cap) {
+          complete = false;
           continue;
         }
-        map.set(k, (map.get(k) ?? 0) + 1);
+        seen.set(bucket.id, bucket);
       }
-      const groups = [...map.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count);
-      return { ok: true, kind: 'groups', label: tailLabel(arg), groups, truncated: trunc };
+      const detail = window(options, ROW_CAP);
+      const values = [...seen.values()];
+      const rows = values.slice(detail.offset, detail.offset + detail.limit).map((entry) => [entry.value]);
+      return {
+        ok: true,
+        kind: 'rows',
+        cols: [tailLabel(arg)],
+        rows,
+        total: seen.size,
+        offset: detail.offset,
+        complete,
+        truncated: windowIsTruncated(seen.size, detail.offset, rows.length, complete),
+      };
+    }
+    case 'group': {
+      const cap = Math.max(1, options?.cardinalityCap ?? CARDINALITY_CAP);
+      const groups = new Map<string, { label: string; count: number }>();
+      let complete = true;
+      for (const match of walk(root, segs)) {
+        const bucket = bucketOf(pick(match));
+        const existing = groups.get(bucket.id);
+        if (existing) {
+          existing.count++;
+          continue;
+        }
+        if (groups.size >= cap) {
+          complete = false;
+          continue;
+        }
+        groups.set(bucket.id, { label: bucket.label, count: 1 });
+      }
+      const sorted = [...groups.values()]
+        .map(({ label, count }) => ({ key: label, count }))
+        .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+      const detail = window(options, GROUP_CAP);
+      const shown = sorted.slice(detail.offset, detail.offset + detail.limit);
+      return {
+        ok: true,
+        kind: 'groups',
+        label: tailLabel(arg),
+        total: sorted.length,
+        offset: detail.offset,
+        complete,
+        groups: shown,
+        truncated: windowIsTruncated(sorted.length, detail.offset, shown.length, complete),
+      };
     }
     case 'pluck': {
       if (!pipe.args.length) return { ok: false, error: 'pluck needs at least one @path argument', pos: 0 };
       const cols = pipe.args.map(tailLabel);
+      const detail = window(options, ROW_CAP);
       const rows: unknown[][] = [];
-      let trunc = truncated;
-      for (const m of matches) {
-        if (rows.length >= ROW_CAP) {
-          trunc = true;
-          break;
+      let total = 0;
+      for (const match of walk(root, segs)) {
+        if (total >= detail.offset && rows.length < detail.limit) {
+          rows.push(pipe.args.map((field) => resolveTail(match.value, field)));
         }
-        rows.push(pipe.args.map((a) => resolveTail(m.value, a)));
+        total++;
       }
-      return { ok: true, kind: 'rows', cols, rows, total, truncated: trunc };
+      return {
+        ok: true,
+        kind: 'rows',
+        cols,
+        rows,
+        total,
+        offset: detail.offset,
+        complete: true,
+        truncated: windowIsTruncated(total, detail.offset, rows.length, true),
+      };
     }
     default:
       return { ok: false, error: `unknown pipe function '${pipe.fn}' (count, sum, avg, min, max, distinct, group, pluck)`, pos: 0 };
@@ -735,7 +785,7 @@ function applyPipe(pipe: Pipe, matches: Match[], total: number, truncated: boole
 
 // ---------- entry ----------
 
-export function runQuery(root: unknown, src: string): QueryResult {
+export function runQuery(root: unknown, src: string, options?: QueryOptions): QueryResult {
   let q: Query;
   try {
     q = new Parser(lex(src)).parseQuery();
@@ -743,13 +793,108 @@ export function runQuery(root: unknown, src: string): QueryResult {
     if (e instanceof QErr) return { ok: false, error: e.message, pos: e.pos };
     return { ok: false, error: String(e), pos: 0 };
   }
-  const { matches, truncated } = walk(root, q.segs);
-  if (q.pipe) return applyPipe(q.pipe, matches, matches.length, truncated);
+  if (q.pipe) return applyPipe(root, q.segs, q.pipe, options);
+  const detail = window(options, MATCH_CAP);
+  const matches: Match[] = [];
+  let total = 0;
+  for (const match of walk(root, q.segs)) {
+    if (total >= detail.offset && matches.length < detail.limit) matches.push(match);
+    total++;
+  }
   return {
     ok: true,
     kind: 'matches',
-    total: matches.length,
-    truncated: truncated || matches.length > MATCH_CAP,
-    matches: matches.slice(0, MATCH_CAP),
+    total,
+    offset: detail.offset,
+    complete: true,
+    truncated: windowIsTruncated(total, detail.offset, matches.length, true),
+    matches,
+  };
+}
+
+export type QueryScan = { ok: true; matches: Iterable<Match> } | { ok: false; error: string; pos: number };
+
+/** Parse a path/predicate query once, then stream every match for profiles and file exports. */
+export function scanQuery(root: unknown, src: string): QueryScan {
+  let query: Query;
+  try {
+    query = new Parser(lex(src)).parseQuery();
+  } catch (error) {
+    if (error instanceof QErr) return { ok: false, error: error.message, pos: error.pos };
+    return { ok: false, error: String(error), pos: 0 };
+  }
+  if (query.pipe) return { ok: false, error: 'this operation takes a path/predicate query, not an aggregate pipe', pos: 0 };
+  return { ok: true, matches: walk(root, query.segs) };
+}
+
+export type QueryExportPlan =
+  | { ok: true; kind: 'values'; values: Iterable<unknown> }
+  | { ok: true; kind: 'table'; columns: string[]; rows: Iterable<unknown[]> }
+  | { ok: false; error: string; pos: number };
+
+/**
+ * Build a lazy, complete export plan. Pluck and bare-match exports stream, so
+ * their memory is bounded by the serialized file rather than the match count.
+ */
+export function planQueryExport(root: unknown, src: string): QueryExportPlan {
+  let query: Query;
+  try {
+    query = new Parser(lex(src)).parseQuery();
+  } catch (error) {
+    if (error instanceof QErr) return { ok: false, error: error.message, pos: error.pos };
+    return { ok: false, error: String(error), pos: 0 };
+  }
+
+  if (!query.pipe) {
+    return {
+      ok: true,
+      kind: 'values',
+      values: (function* (): Generator<unknown> {
+        for (const match of walk(root, query.segs)) yield match.value;
+      })(),
+    };
+  }
+  if (query.pipe.fn === 'pluck') {
+    if (!query.pipe.args.length) return { ok: false, error: 'pluck needs at least one @path argument', pos: 0 };
+    const fields = query.pipe.args;
+    return {
+      ok: true,
+      kind: 'table',
+      columns: fields.map(tailLabel),
+      rows: (function* (): Generator<unknown[]> {
+        for (const match of walk(root, query.segs)) yield fields.map((field) => resolveTail(match.value, field));
+      })(),
+    };
+  }
+  if (query.pipe.fn === 'group' || query.pipe.fn === 'distinct') {
+    const result = applyPipe(root, query.segs, query.pipe, {
+      offset: 0,
+      limit: CARDINALITY_CAP,
+      cardinalityCap: CARDINALITY_CAP,
+    });
+    if (!result.ok) return result;
+    if (!result.complete) {
+      return {
+        ok: false,
+        error: `export has more than ${CARDINALITY_CAP} distinct values; narrow the query first`,
+        pos: 0,
+      };
+    }
+    if (result.kind === 'groups') {
+      return {
+        ok: true,
+        kind: 'table',
+        columns: [result.label, 'count'],
+        rows: result.groups.map((group) => [group.key, group.count]),
+      };
+    }
+    if (result.kind === 'rows') {
+      return { ok: true, kind: 'table', columns: result.cols, rows: result.rows };
+    }
+  }
+  return {
+    ok: false,
+    error: `a ${query.pipe.fn} result is a scalar, not an exportable collection`,
+    pos: 0,
   };
 }

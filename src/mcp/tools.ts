@@ -1,4 +1,4 @@
-// The tool surface. Six verbs, chosen so a client can run the whole
+// The tool surface. Eight bounded verbs, chosen so a client can run the whole
 // schema → query → refine → answer loop itself: the document stays here, only
 // its shape and capped results ever reach the model.
 //
@@ -8,13 +8,21 @@
 
 import { MAX_DOCS, type DocEntry, type DocPool } from './pool';
 import type { DiffResultView, CsvResult, LoadResult, OpError, QueryResultView, SampleResult } from './doc-ops';
+import type { ProfileResult } from '../profile';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from '../query-grammar';
-import { cap, renderCsv, renderDiff, renderError, renderLoad, renderQuery, renderSample } from './render';
+import { cap, renderCsv, renderDiff, renderError, renderLoad, renderProfile, renderQuery, renderSample } from './render';
 
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
+  annotations: {
+    title: string;
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+    idempotentHint: boolean;
+    openWorldHint: false;
+  };
 }
 
 export interface ToolResponse {
@@ -25,15 +33,37 @@ export interface ToolResponse {
 const DEFAULT_SAMPLE = 5;
 /** More specimens than this cannot fit under the response cap anyway. */
 const MAX_SAMPLE = 50;
+const DEFAULT_QUERY_LIMIT = 10;
+const MAX_QUERY_LIMIT = 100;
+const DEFAULT_PROFILE_TOP = 10;
+const MAX_PROFILE_TOP = 50;
+const MAX_PROFILE_FIELDS = 20;
+
+const readOnly = (title: string): ToolDefinition['annotations'] => ({
+  title,
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+});
+
+const fileWrite = (title: string): ToolDefinition['annotations'] => ({
+  title,
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+});
 
 export const TOOLS: ToolDefinition[] = [
   {
     name: 'load_doc',
+    annotations: readOnly('Load JSON document'),
     description:
       'Open a JSON document and return its size and top-level shape. Accepts a file path or inline text, ' +
       'and transparently decodes Zstd, Base64-Zstd and PostgreSQL bytea (\\x…) payloads. Malformed JSON is ' +
       'auto-repaired and flagged. Returns a docId (d1, d2, …) that every other tool takes. The document ' +
-      'itself is never returned — query it instead.',
+      'itself is never returned — query it instead. Prefer path for an existing or large document.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -44,10 +74,12 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'get_schema',
+    annotations: readOnly('Inspect JSON schema'),
     description:
       'Field names and types of the document — never values. With no path, describes the whole document; ' +
       'with a path, describes just what it selects, merged across matches (so $.tasks[*] describes an ' +
-      'element, not the first element). Start here: it is how you learn which paths run_query can use.',
+      'element, not the first element). Array shapes are inferred from up to 30 elements; use profile for ' +
+      'exact coverage/counts. Start here: it is how you learn which paths run_query can use.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -59,21 +91,62 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'run_query',
+    annotations: readOnly('Query JSON document'),
     description:
       `Run a query and return matches or an aggregate, capped. Grammar (a JSONPath subset with aggregation pipes):\n\n${QUERY_GRAMMAR}\n\nExamples:\n${QUERY_EXAMPLES}\n\n` +
       'Matches come back as path + preview; use `| pluck(@.a, @.b)` to project real fields into rows, or ' +
-      'the sample tool for whole values. Numbers keep their exact digits — int64 ids are never floated.',
+      'the sample tool for whole values. Only 10 detail rows return by default; set limit=0 for a count-only ' +
+      'summary or page with offset+limit. Aggregates always scan every match. Numeric predicates and aggregates ' +
+      'keep int64 and decimal digits exact. For only a count, append `| count`; the response is one scalar.',
     inputSchema: {
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
         query: { type: 'string', description: "A query, e.g. $.tasks[?(@.status == 'FAILED')] | count" },
+        offset: { type: 'integer', description: 'Detail rows to skip (default 0).', minimum: 0 },
+        limit: {
+          type: 'integer',
+          description: `Maximum detail rows returned (default ${DEFAULT_QUERY_LIMIT}, 0 for summary only, max ${MAX_QUERY_LIMIT}).`,
+          minimum: 0,
+          maximum: MAX_QUERY_LIMIT,
+        },
+      },
+      required: ['docId', 'query'],
+    },
+  },
+  {
+    name: 'profile',
+    annotations: readOnly('Profile JSON fields'),
+    description:
+      'Profile one or more fields across every record selected by a path/predicate query in one scan. Returns ' +
+      'present/missing/null counts, type counts, distinct count, exact numeric min/max/average, and top values. ' +
+      'Use fields like "status" or "capacity.used" relative to each selected record; omit fields to profile ' +
+      'selected scalar values themselves (container values return types only). This replaces ad-hoc Python loops ' +
+      'for unfamiliar JSON.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        query: { type: 'string', description: 'Path/predicate selecting records, e.g. $.tasks[*]. Do not append a pipe.' },
+        fields: {
+          type: 'array',
+          items: { type: 'string' },
+          maxItems: MAX_PROFILE_FIELDS,
+          description: 'Optional relative fields to profile together, e.g. ["status", "failureReason", "weightKg"].',
+        },
+        top: {
+          type: 'integer',
+          description: `Top values per field (default ${DEFAULT_PROFILE_TOP}, max ${MAX_PROFILE_TOP}).`,
+          minimum: 0,
+          maximum: MAX_PROFILE_TOP,
+        },
       },
       required: ['docId', 'query'],
     },
   },
   {
     name: 'sample',
+    annotations: readOnly('Sample JSON values'),
     description:
       'Read n real values at a path, exactly as they were parsed (int64 and decimal digits intact). A path ' +
       'that selects one container samples its children; a path that selects many nodes samples those nodes.',
@@ -94,6 +167,7 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'diff_docs',
+    annotations: readOnly('Compare JSON documents'),
     description:
       'Compare two loaded documents and return change counts plus the first changes. docIdA is the older ' +
       'side: additions and removals read A → B. Give keySpec to align arrays by identity (e.g. "id,orderId") ' +
@@ -113,8 +187,9 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'export_csv',
+    annotations: fileWrite('Export query to CSV'),
     description:
-      'Run a query and write its table to a CSV file (RFC 4180, exact digits, formula-injection safe). ' +
+      'Run a query and write its complete table to a CSV file (RFC 4180, exact digits, formula-injection safe). ' +
       'Returns only the path, row count and byte size — the rows themselves never enter the conversation. ' +
       'The query must produce a table: use `| pluck(…)`, `| group(…)` or `| distinct`.',
     inputSchema: {
@@ -125,6 +200,25 @@ export const TOOLS: ToolDefinition[] = [
         outPath: { type: 'string', description: 'Where to write the CSV file.' },
       },
       required: ['docId', 'query', 'outPath'],
+    },
+  },
+  {
+    name: 'export_result',
+    annotations: fileWrite('Export complete query result'),
+    description:
+      'Write every query match to a local file without sending the data through the conversation. JSONL accepts ' +
+      'bare filtered matches and preserves nested values; CSV requires `| pluck(…)`, `| group(…)` or `| distinct`. ' +
+      'The response contains only format, path, exact row count, byte size and complete=true. Exports refuse rather ' +
+      'than silently truncate when the 50 MB output safety limit would be exceeded.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        query: { type: 'string', description: 'A path/predicate query, optionally with a table-producing pipe.' },
+        format: { type: 'string', enum: ['csv', 'jsonl'], description: 'Output format.' },
+        outPath: { type: 'string', description: 'Where to write the result file.' },
+      },
+      required: ['docId', 'query', 'format', 'outPath'],
     },
   },
 ];
@@ -158,8 +252,20 @@ export class ToolRouter {
         return this.onDoc(args, async (doc) => {
           const query = str(args.query);
           if (!query) return { ok: false, error: 'run_query needs a query' };
-          const r = (await doc.host.send({ op: 'query', query })) as QueryResultView | OpError;
+          const offset = integer(args.offset, 0, Number.MAX_SAFE_INTEGER, 0);
+          const limit = integer(args.limit, 0, MAX_QUERY_LIMIT, DEFAULT_QUERY_LIMIT);
+          const r = (await doc.host.send({ op: 'query', query, offset, limit })) as QueryResultView | OpError;
           return r.ok ? { ok: true, text: renderQuery(r) } : r;
+        });
+      case 'profile':
+        return this.onDoc(args, async (doc) => {
+          const query = str(args.query);
+          if (!query) return { ok: false, error: 'profile needs a query' };
+          const fields = strings(args.fields, MAX_PROFILE_FIELDS);
+          if (!fields.ok) return fields;
+          const top = integer(args.top, 0, MAX_PROFILE_TOP, DEFAULT_PROFILE_TOP);
+          const r = (await doc.host.send({ op: 'profile', query, fields: fields.values, top })) as ProfileResult | OpError;
+          return r.ok ? { ok: true, text: renderProfile(r) } : r;
         });
       case 'sample':
         return this.onDoc(args, async (doc) => {
@@ -180,6 +286,17 @@ export class ToolRouter {
           const outPath = str(args.outPath);
           if (!query || !outPath) return { ok: false, error: 'export_csv needs a query and an outPath' };
           const r = (await doc.host.send({ op: 'csv', query, outPath })) as CsvResult | OpError;
+          return r.ok ? { ok: true, text: renderCsv(r) } : r;
+        });
+      case 'export_result':
+        return this.onDoc(args, async (doc) => {
+          const query = str(args.query);
+          const outPath = str(args.outPath);
+          const format = args.format === 'csv' || args.format === 'jsonl' ? args.format : undefined;
+          if (!query || !outPath || !format) {
+            return { ok: false, error: 'export_result needs a query, format (csv or jsonl), and an outPath' };
+          }
+          const r = (await doc.host.send({ op: 'export', query, outPath, format })) as CsvResult | OpError;
           return r.ok ? { ok: true, text: renderCsv(r) } : r;
         });
       default:
@@ -258,4 +375,19 @@ export class ToolRouter {
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+function integer(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(min, Math.min(max, Math.floor(value)))
+    : fallback;
+}
+
+function strings(value: unknown, max: number): { ok: true; values: string[] } | OpError {
+  if (value === undefined) return { ok: true, values: [] };
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.length === 0)) {
+    return { ok: false, error: 'profile fields must be an array of non-empty strings' };
+  }
+  if (value.length > max) return { ok: false, error: `profile accepts at most ${max} fields per scan` };
+  return { ok: true, values: value as string[] };
 }

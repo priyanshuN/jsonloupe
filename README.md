@@ -58,7 +58,8 @@ auditable server in [bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and
   drown you in false changes. Ignore noisy fields by key or path prefix.
 - **A real query language.** A JSONPath subset with predicates and aggregation
   pipes (`$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)`), executed
-  locally with live preview as you type.
+  locally with live preview as you type. Numeric literals, predicates, sums,
+  averages, minima, and maxima remain exact for int64 and precise decimals.
 
 ## Quick start
 
@@ -110,23 +111,30 @@ have to be decoded first, int64 and decimal digits that must survive the whole
 pipeline exactly, identity-keyed semantic diff between two documents, and MCP
 hosts that have no shell to run jq in.
 
-Six tools: `load_doc`, `get_schema`, `run_query`, `sample`, `diff_docs`,
-`export_csv`. The document is opened once and stays in the server; only shapes
-and capped results (10,000 characters, always) travel back. A typical run over a
-37 MB routing payload:
+Eight tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
+`diff_docs`, `export_csv`, `export_result`. The document is opened once and
+stays in the server. Query details default to 10 rows (use `limit=0` for summary
+only, or `offset` + `limit` to page), and every response remains under a hard
+10,000-character cap. A typical run over a 37 MB routing payload:
 
 ```
 load_doc  path=payload.json     → docId: d1 · 39,401,637 bytes · object · keys: generatedAt, tasks
 get_schema d1                   → tasks: array(70000) of { id: number, status: string, … }
+profile d1 "$.tasks[*]" fields=status,failureReason,weightKg
+                                → coverage, null/missing/type counts, distincts, exact stats, top values
 run_query d1 "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)"
                                 → ADDRESS_NOT_FOUND 5834 · CUSTOMER_UNAVAILABLE 5833 · …
 sample    d1 "$.tasks[0]"       → the whole element, id 9007199254740993 intact
-export_csv d1 "…| pluck(@.id, @.failureReason)" out=failed.csv
-                                → outPath, rows, bytes — the rows never enter the transcript
+export_result d1 "…| pluck(@.id, @.failureReason)" format=csv out=failed.csv
+                                → complete, rows, bytes — every row stays out of the transcript
 ```
 
-That whole session costs the agent about 12 KB of context. The server makes no
-network calls of any kind and reads only the paths it is handed; a bad query
+The common schema → profile → query loop is deliberately cheaper than loading
+JSON or writing a one-off Python script: counts and aggregates stream over every
+match without materializing the result list, multiple fields profile in one
+scan, and complete CSV/JSONL exports go straight to disk. The server makes no
+network calls of any kind and accesses only explicitly provided input/output
+paths; a bad query
 comes back with the grammar and a suggestion rather than an empty result.
 
 ## Privacy & security

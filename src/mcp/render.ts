@@ -12,6 +12,7 @@ import type {
   SampleResult,
   CsvResult,
 } from './doc-ops';
+import type { ProfileResult } from '../profile';
 
 export const RESPONSE_CAP = 10_000;
 
@@ -56,23 +57,55 @@ export function renderQuery(r: QueryResultView): string {
   switch (r.kind) {
     case 'matches':
       return lines(
-        `${r.total} match${r.total === 1 ? '' : 'es'}${r.truncated ? ' (truncated)' : ''}, showing ${r.matches.length}`,
+        detailHeader(r.total, 'match', r.offset, r.matches.length, r.complete),
         ...r.matches.map((m) => `${m.path}\t${m.preview}`),
       );
     case 'value':
-      return lines(`${r.label}: ${r.value}`, r.note && `(${r.note})`);
+      return lines(`${r.label}: ${r.value}${r.complete ? '' : ' (incomplete)'}`, r.note && `(${r.note})`);
     case 'groups':
       return lines(
-        `${r.groups.length} group${r.groups.length === 1 ? '' : 's'} by ${r.label}${r.truncated ? ' (truncated)' : ''}`,
+        `${detailHeader(r.total, 'group', r.offset, r.groups.length, r.complete)} by ${r.label}`,
         ...r.groups.map(([key, count]) => `${key}\t${count}`),
       );
     case 'rows':
       return lines(
-        `${r.total} row${r.total === 1 ? '' : 's'}${r.truncated ? ' (truncated)' : ''}, showing ${r.rows.length}`,
+        detailHeader(r.total, 'row', r.offset, r.rows.length, r.complete),
         r.cols.join('\t'),
         ...r.rows.map((row) => row.join('\t')),
       );
   }
+}
+
+export function renderProfile(r: ProfileResult): string {
+  const output = [`matched: ${r.matched}`, `complete: ${r.complete}`];
+  for (const field of r.fields) {
+    const types = Object.entries(field.types).map(([type, count]) => `${type}:${count}`).join(', ') || 'none';
+    const distinct = field.distinctComplete
+      ? String(field.distinct)
+      : field.containerValuesOmitted === field.present
+        ? `not computed (${field.containerValuesOmitted} container values; select scalar fields)`
+        : `>=${field.distinct}${field.containerValuesOmitted ? ` (${field.containerValuesOmitted} container values omitted)` : ''}`;
+    output.push(
+      '',
+      `${field.field}: present ${field.present}, missing ${field.missing}, null ${field.nulls}`,
+      `types: ${types}`,
+      `distinct: ${distinct}`,
+    );
+    if (field.numericCount) {
+      output.push(
+        `numeric: ${field.numericCount}, min ${field.min}, max ${field.max}, avg ${field.avg}${field.averageRounded ? ' (rounded)' : ''}`,
+      );
+    }
+    if (field.top.length) output.push(`top: ${field.top.map((entry) => `${entry.value} (${entry.count})`).join(' · ')}`);
+  }
+  return output.join('\n');
+}
+
+function detailHeader(total: number, noun: string, offset: number, shown: number, complete: boolean): string {
+  const plural = noun.endsWith('ch') ? `${noun}es` : `${noun}s`;
+  const totalText = `${complete ? total : `>=${total}`} ${total === 1 ? noun : plural}`;
+  if (shown === 0) return `${totalText}, details omitted`;
+  return `${totalText}, showing ${shown} from offset ${offset}`;
 }
 
 export function renderSample(r: SampleResult): string {
@@ -94,5 +127,5 @@ export function renderDiff(a: string, b: string, r: DiffResultView): string {
 }
 
 export function renderCsv(r: CsvResult): string {
-  return lines(`outPath: ${r.outPath}`, `rows: ${r.rows}`, `bytes: ${r.bytes}`);
+  return lines(`format: ${r.format}`, `outPath: ${r.outPath}`, `rows: ${r.rows}`, `bytes: ${r.bytes}`, 'complete: true');
 }

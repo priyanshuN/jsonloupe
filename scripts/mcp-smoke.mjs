@@ -10,7 +10,7 @@
 //   node scripts/mcp-smoke.mjs
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -136,7 +136,7 @@ try {
   const names = (list.result?.tools ?? []).map((t) => t.name);
   check(
     'tools/list is the frozen contract',
-    ['load_doc', 'get_schema', 'run_query', 'sample', 'diff_docs', 'export_csv'].every((n) => names.includes(n)),
+    ['load_doc', 'get_schema', 'run_query', 'profile', 'sample', 'diff_docs', 'export_csv', 'export_result'].every((n) => names.includes(n)),
     names.join(','),
   );
   check('reserved names are not squatted', !names.some((n) => ['inspect', 'convert', 'draft_spec'].includes(n)));
@@ -155,6 +155,9 @@ try {
   const grouped = text(await call('run_query', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)" }));
   check('run_query groups by reason', /ADDRESS_NOT_FOUND/.test(grouped), grouped.slice(0, 200));
 
+  const profiled = text(await call('profile', { docId: 'd1', query: '$.tasks[*]', fields: ['status', 'failureReason', 'weightKg'] }));
+  check('profile replaces several local loops with one compact scan', /matched: 70000/.test(profiled) && /missing 0/.test(profiled), profiled.slice(0, 300));
+
   const sampled = text(await call('sample', { docId: 'd1', path: '$.tasks', n: 2 }));
   check(`sample keeps the int64 exact (${INT64})`, sampled.includes(INT64), sampled.slice(0, 300));
 
@@ -170,10 +173,12 @@ try {
   const diffed = text(await call('diff_docs', { docIdA: 'd2', docIdB: 'd1', keySpec: 'id' }));
   check('diff_docs compares the two loads', /d2 → d1: \d+ changed/.test(diffed), diffed.slice(0, 200));
 
-  const csv = text(await call('export_csv', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | pluck(@.id, @.failureReason)", outPath: csvOut }));
-  check('export_csv writes a file and returns only its size', csv.includes(csvOut) && !csv.includes('ADDRESS_NOT_FOUND'), csv);
+  const csv = text(await call('export_result', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | pluck(@.id, @.failureReason)", format: 'csv', outPath: csvOut }));
+  check('export_result writes every row but returns only metadata', csv.includes(`rows: ${TASKS / 4}`) && csv.includes('complete: true') && !csv.includes('ADDRESS_NOT_FOUND'), csv);
   const csvBytes = (await stat(csvOut)).size;
   check('the CSV on disk is real', csvBytes > 10_000, `${csvBytes} bytes`);
+  const csvRows = (await readFile(csvOut, 'utf8')).split('\r\n').filter(Boolean).length - 1;
+  check('the CSV is complete beyond the old 5,000-row display cap', csvRows === TASKS / 4, `${csvRows} rows`);
 
   // Compressed intake: a document handed over as a Base64-Zstd blob, the way it
   // comes out of a database column. (Zstd in node:zlib is Node 22.15+; older
