@@ -85,6 +85,19 @@ describe('predicates', () => {
   it('exists', () => {
     expect(matches(runQuery(doc, '$.tasks[?(@.routeId)]')).length).toBe(1);
   });
+  it('distinguishes explicit presence, missing and null from truthiness', () => {
+    const flags = { rows: [{ active: false }, { active: null }, {}] };
+    expect(value(runQuery(flags, '$.rows[?(@.active present)] | count'))).toBe(2);
+    expect(value(runQuery(flags, '$.rows[?(@.active missing)] | count'))).toBe(1);
+    expect(value(runQuery(flags, '$.rows[?(@.active isNull)] | count'))).toBe(1);
+    expect(value(runQuery(flags, '$.rows[?(@.active)] | count'))).toBe(0);
+  });
+  it('still permits operator words as ordinary dotted field names', () => {
+    const rows = { rows: [{ missing: 2, present: false, contains: 3 }, { missing: 4 }] };
+    expect(value(runQuery(rows, '$.rows[*].missing | sum'))).toBe(6);
+    expect(value(runQuery(rows, '$.rows[?(@.present present)] | count'))).toBe(1);
+    expect(value(runQuery(rows, '$.rows[*].contains | sum'))).toBe(3);
+  });
   it('not exists — the unrouted-tasks query', () => {
     expect(matches(runQuery(doc, '$.tasks[?(!@.routeId)]')).length).toBe(5);
   });
@@ -106,6 +119,12 @@ describe('predicates', () => {
   });
   it('regex', () => {
     expect(matches(runQuery(doc, '$.tasks[?(@.tags contains \'hub-1\' || @.status =~ /^pend/i)]')).length).toBe(3);
+  });
+  it('rejects stateful or potentially catastrophic regexes', () => {
+    const stateful = runQuery(doc, '$.tasks[?(@.status =~ /FAIL/g)]');
+    const nested = runQuery(doc, '$.tasks[?(@.status =~ /^(a+)+$/)]');
+    expect(stateful).toMatchObject({ ok: false, error: expect.stringContaining('flags') });
+    expect(nested).toMatchObject({ ok: false, error: expect.stringContaining('nested unbounded') });
   });
   it('field vs field — overbooked slots', () => {
     expect(matches(runQuery(doc, '$.slots[?(@.capacity.used > @.capacity.max)]')).map((m) => (m.value as { id: string }).id)).toEqual(['S2']);
@@ -159,6 +178,36 @@ describe('pipes', () => {
     const r = runQuery(doc, '$.tasks[*] | group(@.routeId)');
     if (!r.ok || r.kind !== 'groups') throw new Error('bad');
     expect(r.groups.find((g) => g.key === '(absent)')?.count).toBe(5);
+  });
+  it('groups by several fields without flattening composite identities', () => {
+    const result = runQuery(doc, '$.tasks[*] | group(@.status, @.failureReason)');
+    if (!result.ok || result.kind !== 'groups') throw new Error('bad');
+    expect(result.label).toBe('status, failureReason');
+    expect(result.groups).toContainEqual({ key: '["FAILED","NO_SLOT"]', count: 2 });
+    expect(result.groups).toContainEqual({ key: '["FAILED","CAPACITY"]', count: 1 });
+  });
+  it('returns bounded top and bottom projections with exact numeric ordering', () => {
+    const ranked = {
+      rows: [
+        { id: 'a', score: new LosslessNumber('9007199254740992') },
+        { id: 'b', score: new LosslessNumber('9007199254740994') },
+        { id: 'c', score: new LosslessNumber('9007199254740993') },
+        { id: 'missing' },
+      ],
+    };
+    const top = runQuery(ranked, '$.rows[*] | top(@.score, @.id)', { limit: 2 });
+    const bottom = runQuery(ranked, '$.rows[*] | bottom(@.score, @.id)', { offset: 1, limit: 1 });
+    if (!top.ok || top.kind !== 'rows' || !bottom.ok || bottom.kind !== 'rows') throw new Error('bad');
+    expect(top.rows.map((row) => row[1])).toEqual(['b', 'c']);
+    expect(top.note).toContain('1 unrankable');
+    expect(bottom.rows).toEqual([[new LosslessNumber('9007199254740993'), 'c']]);
+  });
+  it('defaults ranking to ten rows outside MCP too', () => {
+    const ranked = { rows: Array.from({ length: 20 }, (_, score) => ({ score })) };
+    const result = runQuery(ranked, '$.rows[*] | top(@.score)');
+    if (!result.ok || result.kind !== 'rows') throw new Error('bad');
+    expect(result.rows).toHaveLength(10);
+    expect(result.rows[0]).toEqual([19]);
   });
   it('pluck', () => {
     const r = runQuery(doc, "$.tasks[?(@.failureReason == 'NO_SLOT')] | pluck(@.id, @.eta, @.failureReason)");

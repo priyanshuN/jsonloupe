@@ -17,6 +17,7 @@ import type {
 } from './protocol';
 import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, type QueryResult } from './query';
 import { profileQuery } from './profile';
+import { EXPORT_CHUNK_BYTES, MAX_EXPORT_BYTES } from './export-policy';
 import {
   compareSemantic,
   type SemanticCompareOptions,
@@ -127,6 +128,24 @@ interface SemanticWorkerState {
 // the UI must explicitly initialize a fresh comparison against its baseline.
 let semanticCompare: SemanticWorkerState | null = null;
 
+interface QueryExportLine {
+  text: string;
+  row: boolean;
+}
+
+interface QueryExportSession {
+  iterator: Iterator<QueryExportLine>;
+  rows: number;
+  bytes: number;
+  pending?: QueryExportLine;
+  pendingOffset: number;
+}
+
+// MCP exports are pulled in bounded chunks. Keeping the iterator here means the
+// parsed values and LosslessNumbers never have to cross the document thread.
+const queryExportSessions = new Map<string, QueryExportSession>();
+let nextQueryExportId = 0;
+
 function clearCompareState(): void {
   semanticCompare = null;
 }
@@ -138,6 +157,7 @@ const post = (d: unknown) => (self as unknown as Worker).postMessage(d);
 // code-view Apply).
 function clearState(): void {
   clearCompareState();
+  queryExportSessions.clear();
   nodes = new Map();
   children = new Map();
   expanded = new Set();
@@ -1902,10 +1922,6 @@ function tableRows(start: number, count: number): { index: number; cells: string
 
 // ---------- complete query/table export ----------
 
-// Ceiling on the built string — refuse rather than materialize a >50M-char blob
-// (and never truncate silently: a half CSV is worse than none).
-const EXPORT_CAP = 50_000_000;
-
 // A CSV cell: LosslessNumber → exact digit string (unfloated), null/undefined →
 // empty, nested object/array → its JSON (llStringify) folded into one cell,
 // everything else (string/number/boolean) stringified as-is.
@@ -1934,48 +1950,25 @@ function csvField(s: string): string {
   return /[",\r\n]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe;
 }
 
-// Serialize header + rows with CRLF row endings, watching the running size so we
-// bail before crossing EXPORT_CAP instead of building the whole thing first.
-function csvSerialize(
-  cols: string[],
-  rows: Iterable<unknown[]>,
-): { ok: true; text: string; rows: number } | { ok: false; error: string } {
-  let size = 0;
-  let count = 0;
-  const lines: string[] = [];
-  const push = (fields: string[]): boolean => {
-    const line = fields.map(csvField).join(',');
-    size += line.length + 2; // + CRLF
-    if (size > EXPORT_CAP) return false;
-    lines.push(line);
-    return true;
-  };
-  if (!push(cols)) return { ok: false, error: 'too large for CSV' };
+function* csvLines(cols: string[], rows: Iterable<unknown[]>): Generator<QueryExportLine> {
+  yield { text: cols.map(csvField).join(',') + '\r\n', row: false };
   for (const row of rows) {
-    if (!push(row.map(csvCell))) return { ok: false, error: 'too large for CSV' };
-    count++;
+    yield { text: row.map(csvCell).map(csvField).join(',') + '\r\n', row: true };
   }
-  return { ok: true, text: lines.map((line) => line + '\r\n').join(''), rows: count };
 }
 
-function jsonlSerialize(values: Iterable<unknown>): { ok: true; text: string; rows: number } | { ok: false; error: string } {
-  let size = 0;
-  let rows = 0;
-  const lines: string[] = [];
-  for (const value of values) {
-    const line = llStringify(value) ?? 'null';
-    size += line.length + 1;
-    if (size > EXPORT_CAP) return { ok: false, error: 'too large for JSONL' };
-    lines.push(line);
-    rows++;
-  }
-  return { ok: true, text: lines.map((line) => line + '\n').join(''), rows };
+function* jsonlLines(values: Iterable<unknown>): Generator<QueryExportLine> {
+  for (const value of values) yield { text: (llStringify(value) ?? 'null') + '\n', row: true };
 }
 
-function buildQueryExport(
+type QueryExportLines =
+  | { ok: true; lines: Iterable<QueryExportLine> }
+  | { ok: false; error: string };
+
+function queryExportLines(
   query: string,
   format: 'csv' | 'jsonl',
-): { ok: true; text: string; rows: number } | { ok: false; error: string } {
+): QueryExportLines {
   const root = nodes.get(rootId);
   if (!root) return { ok: false, error: 'no document open' };
   const plan = planQueryExport(root.value, query);
@@ -1984,13 +1977,111 @@ function buildQueryExport(
     if (plan.kind !== 'table') {
       return { ok: false, error: 'CSV needs a table query; append | pluck(...), | group(...) or | distinct' };
     }
-    return csvSerialize(plan.columns, plan.rows);
+    return { ok: true, lines: csvLines(plan.columns, plan.rows) };
   }
-  if (plan.kind === 'values') return jsonlSerialize(plan.values);
-  const values = (function* (): Generator<Record<string, unknown>> {
+  if (plan.kind === 'values') return { ok: true, lines: jsonlLines(plan.values) };
+  const objects = (function* (): Generator<Record<string, unknown>> {
     for (const row of plan.rows) yield Object.fromEntries(plan.columns.map((column, index) => [column, row[index]]));
   })();
-  return jsonlSerialize(values);
+  return { ok: true, lines: jsonlLines(objects) };
+}
+
+const utf8 = new TextEncoder();
+
+/** Browser export still needs one string; enforce the same exact byte ceiling. */
+function collectExport(lines: Iterable<QueryExportLine>, format: 'CSV' | 'JSONL'):
+  { ok: true; text: string; rows: number } | { ok: false; error: string } {
+  let bytes = 0;
+  let rows = 0;
+  const chunks: string[] = [];
+  for (const line of lines) {
+    bytes += utf8.encode(line.text).byteLength;
+    if (bytes > MAX_EXPORT_BYTES) return { ok: false, error: `too large for ${format}` };
+    chunks.push(line.text);
+    if (line.row) rows++;
+  }
+  return { ok: true, text: chunks.join(''), rows };
+}
+
+function buildQueryExport(
+  query: string,
+  format: 'csv' | 'jsonl',
+): { ok: true; text: string; rows: number } | { ok: false; error: string } {
+  const prepared = queryExportLines(query, format);
+  return prepared.ok ? collectExport(prepared.lines, format === 'csv' ? 'CSV' : 'JSONL') : prepared;
+}
+
+function startQueryExport(
+  query: string,
+  format: 'csv' | 'jsonl',
+): { ok: true; exportId: string } | { ok: false; error: string } {
+  const prepared = queryExportLines(query, format);
+  if (!prepared.ok) return prepared;
+  const exportId = `e${++nextQueryExportId}`;
+  queryExportSessions.set(exportId, {
+    iterator: prepared.lines[Symbol.iterator](),
+    rows: 0,
+    bytes: 0,
+    pendingOffset: 0,
+  });
+  return { ok: true, exportId };
+}
+
+function nextQueryExport(exportId: string):
+  | { ok: true; text: string; rows: number; bytes: number; done: boolean }
+  | { ok: false; error: string } {
+  const session = queryExportSessions.get(exportId);
+  if (!session) return { ok: false, error: `unknown or expired export '${exportId}'` };
+  const chunks: string[] = [];
+  let chunkBytes = 0;
+  try {
+    while (chunkBytes < EXPORT_CHUNK_BYTES) {
+      if (!session.pending) {
+        const next = session.iterator.next();
+        if (next.done) {
+          queryExportSessions.delete(exportId);
+          return { ok: true, text: chunks.join(''), rows: session.rows, bytes: session.bytes, done: true };
+        }
+        session.pending = next.value;
+        session.pendingOffset = 0;
+      }
+
+      const part = utf8Prefix(session.pending.text, session.pendingOffset, EXPORT_CHUNK_BYTES - chunkBytes);
+      if (!part.text) break; // the next multi-byte code point belongs in the next chunk
+      if (session.bytes + part.bytes > MAX_EXPORT_BYTES) {
+        queryExportSessions.delete(exportId);
+        return { ok: false, error: `too large for export (${MAX_EXPORT_BYTES} byte limit)` };
+      }
+      chunks.push(part.text);
+      chunkBytes += part.bytes;
+      session.bytes += part.bytes;
+      session.pendingOffset = part.end;
+      if (session.pendingOffset === session.pending.text.length) {
+        if (session.pending.row) session.rows++;
+        session.pending = undefined;
+      }
+    }
+    return { ok: true, text: chunks.join(''), rows: session.rows, bytes: session.bytes, done: false };
+  } catch (error) {
+    queryExportSessions.delete(exportId);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Take a byte-bounded prefix without splitting a UTF-16 surrogate pair. */
+function utf8Prefix(text: string, start: number, maxBytes: number): { text: string; end: number; bytes: number } {
+  let end = start;
+  let bytes = 0;
+  while (end < text.length) {
+    const first = text.charCodeAt(end);
+    const pair = first >= 0xd800 && first <= 0xdbff && end + 1 < text.length &&
+      text.charCodeAt(end + 1) >= 0xdc00 && text.charCodeAt(end + 1) <= 0xdfff;
+    const width = pair ? 4 : first < 0x80 ? 1 : first < 0x800 ? 2 : 3;
+    if (bytes + width > maxBytes) break;
+    bytes += width;
+    end += pair ? 2 : 1;
+  }
+  return { text: text.slice(start, end), end, bytes };
 }
 
 // Build a CSV from either the open table view (respecting its sort order and
@@ -2000,7 +2091,7 @@ function buildCsv(source: string): { ok: true; text: string } | { ok: false; err
   if (source === 'table') {
     if (!tableArr) return { ok: false, error: 'no table open' };
     const rows = tableIdx.map((orig) => tableCols.map((c) => tableCell(orig, c)));
-    return csvSerialize(tableCols, rows);
+    return collectExport(csvLines(tableCols, rows), 'CSV');
   }
   if (source === 'query') {
     if (!lastQueryText) return { ok: false, error: 'no query result to export' };
@@ -2068,6 +2159,12 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return buildCsv(msg.source as string);
     case 'exportQuery':
       return buildQueryExport(msg.query as string, msg.format as 'csv' | 'jsonl');
+    case 'exportStart':
+      return startQueryExport(msg.query as string, msg.format as 'csv' | 'jsonl');
+    case 'exportNext':
+      return nextQueryExport(msg.exportId as string);
+    case 'exportAbort':
+      return { ok: queryExportSessions.delete(msg.exportId as string) };
     case 'query':
       return doQuery(msg.q as string, {
         offset: msg.offset as number | undefined,

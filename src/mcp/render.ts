@@ -1,8 +1,9 @@
-// Every tool answers in plain text under one flat cap. The cap is the whole
-// point of the server: the caller asked about a 200 MB document precisely so it
-// would not have to hold one, and a result that quietly grew to a megabyte would
-// break that bargain in the one place it matters. Truncation says so out loud
-// and says what to do about it.
+// Every tool has a human-readable text view under one flat cap; the router
+// applies the same policy independently to structuredContent. The cap is the
+// whole point of the server: the caller asked about a 200 MB document precisely
+// so it would not have to hold one, and a result that quietly grew to a megabyte
+// would break that bargain in the one place it matters. Truncation says so out
+// loud and says what to do about it.
 
 import type {
   DiffResultView,
@@ -70,6 +71,7 @@ export function renderQuery(r: QueryResultView): string {
     case 'rows':
       return lines(
         detailHeader(r.total, 'row', r.offset, r.rows.length, r.complete),
+        r.note && `(${r.note})`,
         r.cols.join('\t'),
         ...r.rows.map((row) => row.join('\t')),
       );
@@ -77,7 +79,11 @@ export function renderQuery(r: QueryResultView): string {
 }
 
 export function renderProfile(r: ProfileResult): string {
-  const output = [`matched: ${r.matched}`, `complete: ${r.complete}`];
+  const output = [
+    `matched: ${r.matched}`,
+    `complete: ${r.complete}`,
+    r.autoFields ? `fields: auto (${r.fields.length}${r.fieldDiscoveryComplete ? '' : '+'})` : '',
+  ].filter(Boolean);
   for (const field of r.fields) {
     const types = Object.entries(field.types).map(([type, count]) => `${type}:${count}`).join(', ') || 'none';
     const distinct = field.distinctComplete
@@ -93,8 +99,11 @@ export function renderProfile(r: ProfileResult): string {
     );
     if (field.numericCount) {
       output.push(
-        `numeric: ${field.numericCount}, min ${field.min}, max ${field.max}, avg ${field.avg}${field.averageRounded ? ' (rounded)' : ''}`,
+        `numeric: ${field.numericCount}, sum ${field.sum}, min ${field.min}, max ${field.max}, avg ${field.avg}${field.averageRounded ? ' (rounded)' : ''}`,
       );
+    }
+    if (field.lengthCount) {
+      output.push(`length: ${field.lengthCount}, min ${field.minLength}, max ${field.maxLength}, avg ${field.avgLength}`);
     }
     if (field.top.length) output.push(`top: ${field.top.map((entry) => `${entry.value} (${entry.count})`).join(' · ')}`);
   }
@@ -127,5 +136,12 @@ export function renderDiff(a: string, b: string, r: DiffResultView): string {
 }
 
 export function renderCsv(r: CsvResult): string {
-  return lines(`format: ${r.format}`, `outPath: ${r.outPath}`, `rows: ${r.rows}`, `bytes: ${r.bytes}`, 'complete: true');
+  return lines(
+    `format: ${r.format}`,
+    `outPath: ${r.outPath}`,
+    `rows: ${r.rows}`,
+    `bytes: ${r.bytes}`,
+    'complete: true',
+    'atomic: true',
+  );
 }

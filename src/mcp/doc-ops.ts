@@ -7,9 +7,12 @@
 // No MCP concepts appear in this file, and no engine logic either. It is the
 // glue that turns "sample 5 values at $.tasks" into reveal → rows → nodeValue.
 
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { link, lstat, open, readFile, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { basename, dirname, join, resolve } from 'node:path';
 import { stringify as llStringify } from 'lossless-json';
 import { decodeJsonPayload, sniffPayloadText } from '../codec';
+import { MAX_EXPORT_BYTES } from '../export-policy';
 import {
   MAX_DOC_BYTES,
   fmtBytes,
@@ -56,7 +59,7 @@ export type QueryResultView =
   | { ok: true; kind: 'matches'; total: number; offset: number; complete: boolean; truncated: boolean; matches: QueryMatch[] }
   | { ok: true; kind: 'value'; label: string; value: string; complete: boolean; note?: string }
   | { ok: true; kind: 'groups'; label: string; total: number; offset: number; complete: boolean; groups: [string, number][]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; offset: number; complete: boolean; truncated: boolean };
+  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; offset: number; complete: boolean; truncated: boolean; note?: string };
 
 export interface SampleValue {
   path: string;
@@ -94,6 +97,7 @@ export interface CsvResult {
   outPath: string;
   rows: number;
   bytes: number;
+  atomic: true;
 }
 
 /** Top-level keys are a fingerprint, not a listing: enough to aim the next call. */
@@ -290,6 +294,7 @@ export function runQuery(
         offset: r.offset ?? 0,
         complete: r.complete !== false,
         truncated: r.truncated === true,
+        note: r.note,
         rows: (r.rows ?? []).map((row) => row.map(cell)),
       };
     default:
@@ -437,8 +442,9 @@ export async function exportCsv(
   engine: Engine,
   query: string,
   outPath: string,
+  overwrite = false,
 ): Promise<CsvResult | OpError> {
-  return exportResult(engine, query, outPath, 'csv');
+  return exportResult(engine, query, outPath, 'csv', overwrite);
 }
 
 export async function exportResult(
@@ -446,27 +452,122 @@ export async function exportResult(
   query: string,
   outPath: string,
   format: 'csv' | 'jsonl',
+  overwrite = false,
 ): Promise<CsvResult | OpError> {
-  const exported = engine({ type: 'exportQuery', query, format }) as {
+  const target = resolve(outPath);
+  try {
+    if (!overwrite && await pathExists(target)) {
+      return fail(`refusing to overwrite existing path '${target}'`, 'Choose a new outPath or set overwrite=true explicitly.');
+    }
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+
+  let started: {
     ok: boolean;
-    text?: string;
-    rows?: number;
+    exportId?: string;
     error?: string;
   };
-  if (!exported.ok || exported.text === undefined) {
+  try {
+    started = engine({ type: 'exportStart', query, format }) as typeof started;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+  if (!started.ok || !started.exportId) {
     const hint = format === 'csv'
       ? 'Project columns first: `| pluck(@.id, @.status)`, or aggregate with `| group(@.x)`.'
       : undefined;
-    return fail(exported.error ?? `${format.toUpperCase()} export failed`, hint);
+    return fail(started.error ?? `${format.toUpperCase()} export failed`, hint);
   }
-  await writeFile(outPath, exported.text, 'utf8');
-  return {
-    ok: true,
-    format,
-    outPath,
-    rows: exported.rows ?? 0,
-    bytes: Buffer.byteLength(exported.text, 'utf8'),
-  };
+
+  const exportId = started.exportId;
+  const temp = join(dirname(target), `.${basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+  let file: FileHandle | undefined;
+  let tempExists = false;
+  let rows = 0;
+  let bytes = 0;
+
+  try {
+    file = await open(temp, 'wx', 0o600);
+    tempExists = true;
+
+    for (;;) {
+      const next = engine({ type: 'exportNext', exportId }) as {
+        ok: boolean;
+        text?: string;
+        rows?: number;
+        bytes?: number;
+        done?: boolean;
+        error?: string;
+      };
+      if (!next.ok || next.text === undefined) throw new ExportFailure(next.error ?? `${format.toUpperCase()} export failed`);
+      const chunkBytes = Buffer.byteLength(next.text, 'utf8');
+      if (bytes + chunkBytes > MAX_EXPORT_BYTES) {
+        throw new ExportFailure(`too large for export (${MAX_EXPORT_BYTES} byte limit)`);
+      }
+      if (next.text) await file.writeFile(next.text, { encoding: 'utf8' });
+      bytes += chunkBytes;
+      rows = next.rows ?? rows;
+      if (next.done) break;
+    }
+
+    await file.sync();
+    await file.close();
+    file = undefined;
+
+    if (overwrite) {
+      await rename(temp, target);
+      tempExists = false;
+    } else {
+      try {
+        // link() is the atomic no-replace primitive: unlike rename(), it cannot
+        // clobber a path created after the optimistic existence check above.
+        await link(temp, target);
+      } catch (error) {
+        if (hasCode(error, 'EEXIST')) {
+          throw new ExportFailure(`refusing to overwrite existing path '${target}'`);
+        }
+        throw error;
+      }
+      // The target now names the complete inode. Removing the temporary name is
+      // cleanup only; a retry in finally covers an interrupted unlink.
+      await unlink(temp).catch(() => undefined);
+      tempExists = await pathExists(temp);
+    }
+
+    return { ok: true, format, outPath: target, rows, bytes, atomic: true };
+  } catch (error) {
+    return fail(
+      error instanceof Error ? error.message : String(error),
+      error instanceof ExportFailure && error.message.includes('overwrite')
+        ? 'Choose a new outPath or set overwrite=true explicitly.'
+        : undefined,
+    );
+  } finally {
+    try {
+      engine({ type: 'exportAbort', exportId });
+    } catch {
+      // File cleanup still has to run when an engine has died mid-export.
+    }
+    if (file) await file.close().catch(() => undefined);
+    if (tempExists) await unlink(temp).catch(() => undefined);
+  }
+}
+
+class ExportFailure extends Error {}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === code;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return false;
+    throw error;
+  }
 }
 
 // ---------- the op table ----------
@@ -501,13 +602,14 @@ export async function runDocOp(engine: Engine, request: DocRequest): Promise<unk
     case 'diff':
       return diffAgainst(engine, request.baselineText as string, request.keySpec as string);
     case 'csv':
-      return exportCsv(engine, request.query as string, request.outPath as string);
+      return exportCsv(engine, request.query as string, request.outPath as string, request.overwrite === true);
     case 'export':
       return exportResult(
         engine,
         request.query as string,
         request.outPath as string,
         request.format as 'csv' | 'jsonl',
+        request.overwrite === true,
       );
     default:
       return fail(`unknown document operation '${request.op}'`);

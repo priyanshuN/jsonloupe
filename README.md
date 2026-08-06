@@ -112,30 +112,48 @@ pipeline exactly, identity-keyed semantic diff between two documents, and MCP
 hosts that have no shell to run jq in.
 
 Eight tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
-`diff_docs`, `export_csv`, `export_result`. The document is opened once and
-stays in the server. Query details default to 10 rows (use `limit=0` for summary
-only, or `offset` + `limit` to page), and every response remains under a hard
-10,000-character cap. A typical run over a 37 MB routing payload:
+`diff_docs`, `export_csv`, `export_result`. For one question, pass `filePath`
+straight to a tool; it opens the document and returns a reusable `docId` in the
+same call. For a sequence of questions, call `load_doc` once and reuse that
+`docId`. Query details default to 10 rows (use `limit=0` for summary only, or
+`offset` + `limit` to page), and text and structured MCP results are both
+bounded. A typical run over a 37 MB routing payload:
 
 ```
-load_doc  path=payload.json     → docId: d1 · 39,401,637 bytes · object · keys: generatedAt, tasks
-get_schema d1                   → tasks: array(70000) of { id: number, status: string, … }
-profile d1 "$.tasks[*]" fields=status,failureReason,weightKg
-                                → coverage, null/missing/type counts, distincts, exact stats, top values
-run_query d1 "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)"
-                                → ADDRESS_NOT_FOUND 5834 · CUSTOMER_UNAVAILABLE 5833 · …
-sample    d1 "$.tasks[0]"       → the whole element, id 9007199254740993 intact
+run_query filePath=payload.json "$.tasks[?(@.status == 'FAILED')] | count"
+                                  → docId: d1 · count: 17500
+profile d1 "$.tasks[*]"          → auto-discovered field coverage, null/missing/types,
+                                    exact sums/stats, lengths, distincts and top values
+run_query d1 "$.tasks[?(@.status == 'FAILED')] | group(@.region, @.failureReason)"
+                                  → composite breakdown, exact complete counts
+run_query d1 "$.tasks[*] | top(@.delayMinutes, @.id, @.status)" limit=5
+                                  → only the five highest rows; the full array never enters context
+sample d1 "$.tasks[0]"           → the whole element, id 9007199254740993 intact
 export_result d1 "…| pluck(@.id, @.failureReason)" format=csv out=failed.csv
-                                → complete, rows, bytes — every row stays out of the transcript
+                                  → complete, atomic, rows + UTF-8 bytes only
 ```
 
 The common schema → profile → query loop is deliberately cheaper than loading
 JSON or writing a one-off Python script: counts and aggregates stream over every
-match without materializing the result list, multiple fields profile in one
-scan, and complete CSV/JSONL exports go straight to disk. The server makes no
-network calls of any kind and accesses only explicitly provided input/output
-paths; a bad query
-comes back with the grammar and a suggestion rather than an empty result.
+match without materializing the result list; `present`, `missing`, and `isNull`
+keep false/null/absent distinct; composite grouping and bounded `top`/`bottom`
+replace local sort scripts; and profiles inspect multiple or automatically
+discovered fields in one scan. Complete CSV/JSONL exports stream to a temporary
+file and publish atomically. Existing paths are refused unless the agent passes
+`overwrite=true` explicitly.
+
+The server makes no network calls and accesses only explicitly supplied
+input/output paths. A bad query returns the grammar and a suggestion rather than
+an empty result. The reproducible [agent-choice evaluation](docs/agent-choice-eval.md)
+measures whether an agent selects these operations when Python is also available.
+
+If an agent knows the MCP is installed but still writes one-off scripts, put
+this routing rule in its project instructions (for example `AGENTS.md` or
+`CLAUDE.md`):
+
+> For small plain JSON, use jq when it is already the shortest safe option.
+> Otherwise prefer the JsonLoupe MCP over ad-hoc Python whenever it supports the
+> operation; use custom shell code only when JsonLoupe cannot answer it.
 
 ## Privacy & security
 
@@ -162,6 +180,7 @@ visitor adds their own key.
 npm test           # vitest — query engine, worker, MCP dispatch, NL translation suites
 npm run build      # tsc --noEmit + vite build + the MCP bundle
 npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture
+npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
 ```
 
 Design and internals are documented in [SPEC.md](SPEC.md).

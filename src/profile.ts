@@ -22,10 +22,15 @@ export interface FieldProfile {
   distinctComplete: boolean;
   containerValuesOmitted: number;
   numericCount: number;
+  sum: number | string | null;
   min: number | string | null;
   max: number | string | null;
   avg: number | string | null;
   averageRounded: boolean;
+  lengthCount: number;
+  minLength: number | null;
+  maxLength: number | null;
+  avgLength: number | null;
   top: ValueFrequency[];
 }
 
@@ -33,6 +38,8 @@ export interface ProfileResult {
   ok: true;
   matched: number;
   complete: boolean;
+  autoFields: boolean;
+  fieldDiscoveryComplete: boolean;
   fields: FieldProfile[];
 }
 
@@ -57,11 +64,29 @@ interface FieldState {
   distinctComplete: boolean;
   containerValuesOmitted: number;
   numbers: ExactNumericStats;
+  lengths: { count: number; sum: number; min: number; max: number };
 }
 
 const DEFAULT_TOP = 10;
 const MAX_TOP = 50;
 const DEFAULT_CARDINALITY_CAP = 100_000;
+const MAX_AUTO_FIELDS = 20;
+const AUTO_FIELD_DEPTH = 2;
+
+function fieldState(field: RelativeField, priorMissing = 0): FieldState {
+  return {
+    field,
+    present: 0,
+    missing: priorMissing,
+    nulls: 0,
+    types: new Map(),
+    frequencies: new Map(),
+    distinctComplete: true,
+    containerValuesOmitted: 0,
+    numbers: new ExactNumericStats(),
+    lengths: { count: 0, sum: 0, min: Infinity, max: -Infinity },
+  };
+}
 
 /** Profile several relative fields in one scan of the selected records. */
 export function profileQuery(
@@ -74,34 +99,55 @@ export function profileQuery(
   const scanned = scanQuery(root, query);
   if (!scanned.ok) return scanned;
 
+  const explicitFields = fieldNames.length > 0;
   const parsed: RelativeField[] = [];
-  for (const name of fieldNames.length ? fieldNames : ['@']) {
+  for (const name of fieldNames) {
     const field = parseRelativeField(name);
     if (!field.ok) return field;
     parsed.push(field.field);
   }
-  const states: FieldState[] = parsed.map((field) => ({
-    field,
-    present: 0,
-    missing: 0,
-    nulls: 0,
-    types: new Map(),
-    frequencies: new Map(),
-    distinctComplete: true,
-    containerValuesOmitted: 0,
-    numbers: new ExactNumericStats(),
-  }));
+  const states: FieldState[] = parsed.map((field) => fieldState(field));
+  const stateIds = new Set(states.map((state) => JSON.stringify(state.field.segments)));
+  const fallback = fieldState({ label: 'value', segments: [] });
   const safeTop = Math.max(0, Math.min(MAX_TOP, Math.floor(top)));
   const safeCardinalityCap = Math.max(1, Math.floor(cardinalityCap));
 
   let matched = 0;
+  let autoRecordMode: boolean | null = null;
+  let fieldDiscoveryComplete = true;
   for (const match of scanned.matches) {
     matched++;
+    if (explicitFields) {
+      for (const state of states) profileValue(state, resolve(match.value, state.field.segments), safeCardinalityCap);
+      continue;
+    }
+
+    profileValue(fallback, match.value, safeCardinalityCap);
+    if (!isRecord(match.value)) {
+      autoRecordMode ??= false;
+      for (const state of states) profileValue(state, undefined, safeCardinalityCap);
+      continue;
+    }
+    autoRecordMode = true;
+    if (fieldDiscoveryComplete) {
+      for (const field of discoverFields(match.value)) {
+        const id = JSON.stringify(field.segments);
+        if (stateIds.has(id)) continue;
+        if (states.length >= MAX_AUTO_FIELDS) {
+          fieldDiscoveryComplete = false;
+          break;
+        }
+        stateIds.add(id);
+        states.push(fieldState(field, matched - 1));
+      }
+    }
     for (const state of states) profileValue(state, resolve(match.value, state.field.segments), safeCardinalityCap);
   }
 
+  const selectedStates = explicitFields || (autoRecordMode && states.length) ? states : [fallback];
   let complete = true;
-  const fields = states.map((state): FieldProfile => {
+  if (!fieldDiscoveryComplete) complete = false;
+  const fields = selectedStates.map((state): FieldProfile => {
     const numeric = state.numbers.summary();
     if (!state.distinctComplete || numeric.unsupported > 0) complete = false;
     return {
@@ -114,16 +160,28 @@ export function profileQuery(
       distinctComplete: state.distinctComplete,
       containerValuesOmitted: state.containerValuesOmitted,
       numericCount: numeric.count,
+      sum: numeric.sum,
       min: numeric.min,
       max: numeric.max,
       avg: numeric.avg,
       averageRounded: numeric.averageRounded,
+      lengthCount: state.lengths.count,
+      minLength: state.lengths.count ? state.lengths.min : null,
+      maxLength: state.lengths.count ? state.lengths.max : null,
+      avgLength: state.lengths.count ? state.lengths.sum / state.lengths.count : null,
       top: [...state.frequencies.values()]
         .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
         .slice(0, safeTop),
     };
   });
-  return { ok: true, matched, complete, fields };
+  return {
+    ok: true,
+    matched,
+    complete,
+    autoFields: !explicitFields && autoRecordMode === true && states.length > 0,
+    fieldDiscoveryComplete,
+    fields,
+  };
 }
 
 function profileValue(state: FieldState, value: unknown, cardinalityCap: number): void {
@@ -136,6 +194,13 @@ function profileValue(state: FieldState, value: unknown, cardinalityCap: number)
   state.types.set(type, (state.types.get(type) ?? 0) + 1);
   if (value === null) state.nulls++;
   state.numbers.add(value);
+  const length = lengthOf(value);
+  if (length !== null) {
+    state.lengths.count++;
+    state.lengths.sum += length;
+    state.lengths.min = Math.min(state.lengths.min, length);
+    state.lengths.max = Math.max(state.lengths.max, length);
+  }
 
   // Top/distinct are useful for scalar fields. Serializing whole selected
   // records here would turn an otherwise bounded profile into a second copy of
@@ -155,6 +220,32 @@ function profileValue(state: FieldState, value: unknown, cardinalityCap: number)
   } else {
     state.distinctComplete = false;
   }
+}
+
+function* discoverFields(value: Record<string, unknown>): Generator<RelativeField> {
+  function* visit(record: Record<string, unknown>, segments: string[], depth: number): Generator<RelativeField> {
+    for (const key of Object.keys(record)) {
+      const next = [...segments, key];
+      const child = record[key];
+      if (isRecord(child) && depth < AUTO_FIELD_DEPTH - 1) yield* visit(child, next, depth + 1);
+      else yield { label: relativeLabel(next), segments: next };
+    }
+  }
+  yield* visit(value, [], 0);
+}
+
+function relativeLabel(segments: string[]): string {
+  return segments.map((segment, index) =>
+    /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)
+      ? `${index ? '.' : ''}${segment}`
+      : `[${JSON.stringify(segment)}]`,
+  ).join('');
+}
+
+function lengthOf(value: unknown): number | null {
+  if (typeof value === 'string' || Array.isArray(value)) return value.length;
+  if (isRecord(value)) return Object.keys(value).length;
+  return null;
 }
 
 function resolve(value: unknown, segments: (string | number)[]): unknown {
@@ -186,9 +277,19 @@ function parseRelativeField(source: string): { ok: true; field: RelativeField } 
       text = text.slice(ident[0].length);
       continue;
     }
-    const bracket = text.match(/^\[(?:'([^']*)'|"([^"]*)"|(-?\d+))\]/);
+    const jsonBracket = text.match(/^\[((?:"(?:\\.|[^"\\])*"))\]/);
+    if (jsonBracket) {
+      try {
+        segments.push(JSON.parse(jsonBracket[1]) as string);
+      } catch {
+        return { ok: false, error: `bad profile field '${source}' near '${text}'` };
+      }
+      text = text.slice(jsonBracket[0].length);
+      continue;
+    }
+    const bracket = text.match(/^\[(?:'([^']*)'|(-?\d+))\]/);
     if (bracket) {
-      segments.push(bracket[1] ?? bracket[2] ?? Number(bracket[3]));
+      segments.push(bracket[1] ?? Number(bracket[2]));
       text = text.slice(bracket[0].length);
       continue;
     }

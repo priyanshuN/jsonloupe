@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { handle } from './worker';
 import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';
 import type { CompareRow } from './protocol';
+import { EXPORT_CHUNK_BYTES } from './export-policy';
 
 // Drive the worker exactly as the UI thread does — real protocol messages through
 // the exported dispatch seam, over the module's own state. Each test re-parses,
@@ -900,6 +901,33 @@ describe('CSV export (U2)', () => {
     expect(csv('query').text).toBe('s,count\r\nA,2\r\nB,1\r\n');
   });
 
+  it('streaming query export keeps every chunk byte-bounded without corrupting Unicode', () => {
+    const value = 'x'.repeat(EXPORT_CHUNK_BYTES - 5) + '😀tail';
+    parse(JSON.stringify({ rows: [{ value }] }));
+    const started = h<{ ok: true; exportId: string }>({
+      type: 'exportStart',
+      query: '$.rows[*] | pluck(@.value)',
+      format: 'csv',
+    });
+    expect(started.ok).toBe(true);
+
+    let text = '';
+    let finalRows = 0;
+    for (;;) {
+      const next = h<{ ok: boolean; text: string; rows: number; bytes: number; done: boolean }>({
+        type: 'exportNext',
+        exportId: started.exportId,
+      });
+      expect(next.ok).toBe(true);
+      expect(new TextEncoder().encode(next.text).byteLength).toBeLessThanOrEqual(EXPORT_CHUNK_BYTES);
+      text += next.text;
+      finalRows = next.rows;
+      if (next.done) break;
+    }
+    expect(text).toBe(`value\r\n${value}\r\n`);
+    expect(finalRows).toBe(1);
+  });
+
   it('query export: non-tabular results (value / bare matches) are refused', () => {
     parse('{"tasks":[{"eta":50},{"eta":60}]}');
     query('$.tasks[*] | count'); // kind 'value'
@@ -908,7 +936,7 @@ describe('CSV export (U2)', () => {
     expect(csv('query').ok).toBe(false);
   });
 
-  it('export refuses when the built CSV would exceed the 50M-char cap', () => {
+  it('export refuses when the built CSV would exceed the 50 MB cap', () => {
     // Fan one ~1.1M cell across 50 columns → ~55M of output from ~1.1M of input,
     // so the shared cap fires without parsing a 50M-char document.
     const big = 'x'.repeat(1_100_000);

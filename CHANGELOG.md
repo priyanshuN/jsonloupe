@@ -7,15 +7,24 @@ Notable changes to jsonloupe. Dates are UTC.
 - **The MCP is now the shortest path, not a Python fallback.** Query responses
   return only 10 details by default and support summary-only (`limit=0`) plus
   `offset`/`limit` paging; counts and projected totals stream past the old
-  two-million-match materialization ceiling. The new `profile` tool computes
-  coverage, missing/null/type counts, distinct count, exact numeric statistics,
-  and top values for up to 20 fields in one scan.
+  two-million-match materialization ceiling. `run_query` adds composite groups,
+  bounded `top`/`bottom`, and explicit present/missing/null predicates. The new
+  `profile` tool auto-discovers up to 20 fields and computes coverage,
+  missing/null/type counts, lengths, distinct count, exact numeric statistics,
+  and top values in one scan. One-off calls accept `filePath` directly and return
+  a reusable `docId`, so analysis no longer requires a separate load round trip.
 - **Agent analysis is lossless and complete.** Numeric query literals,
   equality/order predicates, sums, averages, minima, and maxima no longer pass
-  unsafe integers or precise decimals through a float. `export_result` writes
-  every filtered match as CSV or JSONL directly to disk and reports exact rows,
-  bytes, and `complete: true`; `export_csv` now uses the same complete path
-  instead of silently stopping at the 5,000-row display cap.
+  unsafe integers or precise decimals through a float. MCP results now include
+  bounded `structuredContent` as well as text. `export_result` streams every
+  filtered match as CSV or JSONL to a same-directory temporary file, reports
+  exact rows/UTF-8 bytes, and publishes atomically; existing output is refused
+  unless `overwrite=true`. `export_csv` uses the same complete path instead of
+  silently stopping at the 5,000-row display cap.
+- **Tool choice is measurable.** `npm run eval:agent` runs Claude or Codex against
+  a generated 12,000-record fixture with MCP and ad-hoc code both available,
+  scores exact answers and tool selection, and separates silent discovery,
+  neutral MCP disclosure, and forced capability checks.
 - **Operations live on the pane they act on.** The tree pane gained its own bar
   (`collapse · copy · download`), the same idiom the code view always had — so
   every while-reading operation is one click, and the `⋯` menu shrank to true

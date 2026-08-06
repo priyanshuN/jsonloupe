@@ -15,9 +15,10 @@ feature sends field names and types only, never values.
 
 The npm package also exposes `jsonloupe-mcp` for local AI agents. It keeps the
 document outside model context, returns ten query details by default, profiles
-multiple fields in one scan, compares and aggregates int64/decimals exactly,
-and writes complete filtered results directly to CSV or JSONL. The MCP server
-makes no network calls.
+multiple or auto-discovered fields in one scan, compares and aggregates
+int64/decimals exactly, and streams complete filtered results atomically to CSV
+or JSONL. One-off analysis tools accept a file path directly and return a
+reusable document id. The MCP server makes no network calls.
 
 ## Docs
 
@@ -31,7 +32,7 @@ makes no network calls.
 
 ## Code
 
-- [Source repository](https://github.com/priyanshuN/jsonloupe): MIT, 313 tests
+- [Source repository](https://github.com/priyanshuN/jsonloupe): MIT, 300+ tests
 - [npm package](https://www.npmjs.com/package/jsonloupe): `npx jsonloupe` runs the
   identical app fully offline from a zero-dependency local server
 

@@ -15,7 +15,9 @@ const VERSION = '1.1.0';
 const INSTRUCTIONS = `jsonloupe holds large or lossless JSON documents outside your context and answers
 questions about them. Before writing Python for counts, field coverage,
 distributions, filtering, projection, sampling, or export, use these tools.
-Load a document once with load_doc, then work from its
+For one question, pass filePath straight to get_schema, run_query, profile,
+sample, or an export tool; it opens the document and returns a reusable docId
+in the same call. For several questions, load once with load_doc, then work from its
 docId: get_schema to learn the shape, profile to get field coverage/statistics,
 run_query to count/filter/group with small paged results, sample to read real
 values, diff_docs to compare two loads, and export_result to write complete CSV
@@ -36,11 +38,11 @@ export async function main(): Promise<void> {
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: TOOLS }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { text, isError } = await router.call(
+    const { text, isError, structuredContent } = await router.call(
       request.params.name,
       (request.params.arguments ?? {}) as Record<string, unknown>,
     );
-    return { content: [{ type: 'text' as const, text }], isError };
+    return { content: [{ type: 'text' as const, text }], structuredContent, isError };
   });
 
   const shutdown = (): void => {

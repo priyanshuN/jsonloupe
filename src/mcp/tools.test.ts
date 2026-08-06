@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocPool, MAX_DOCS, type DocHost, type DocRequest } from './pool';
@@ -100,11 +100,71 @@ describe('tool definitions', () => {
       });
     }
   });
+
+  it('makes destructive replacement an explicit export argument', () => {
+    for (const name of ['export_csv', 'export_result']) {
+      const properties = TOOLS.find((item) => item.name === name)!.inputSchema.properties;
+      expect(properties.overwrite).toMatchObject({ type: 'boolean' });
+      expect(TOOLS.find((item) => item.name === name)!.description).toContain('overwrite=true');
+    }
+  });
+
+  it('lets single-document tools open a file directly without adding more top-level tools', () => {
+    for (const name of ['get_schema', 'run_query', 'profile', 'sample', 'export_csv', 'export_result']) {
+      const schema = TOOLS.find((item) => item.name === name)!.inputSchema;
+      expect(schema.properties.filePath).toMatchObject({ type: 'string' });
+      expect(schema.anyOf).toEqual([{ required: ['docId'] }, { required: ['filePath'] }]);
+    }
+    expect(TOOLS.find((item) => item.name === 'run_query')!.inputSchema.required).toEqual(['query']);
+  });
+
+  it('publishes an output schema and returns machine-readable results', async () => {
+    for (const tool of TOOLS) expect(tool.outputSchema.required).toEqual(['ok', 'tool']);
+    await load(DOC);
+    const counted = await call('run_query', { docId: 'd1', query: '$.tasks[*] | count' });
+    expect(counted.structuredContent).toMatchObject({
+      ok: true,
+      tool: 'run_query',
+      kind: 'value',
+      label: 'count',
+      value: '2',
+      complete: true,
+    });
+  });
 });
 
 // ---------- documents are independent ----------
 
 describe('multi-doc', () => {
+  it('answers a file-path query in one call and returns a reusable docId', async () => {
+    const filePath = join(dir, 'one-shot.json');
+    await writeFile(filePath, DOC);
+    const counted = await call('run_query', {
+      filePath,
+      query: "$.tasks[?(@.status == 'FAILED')] | count",
+    });
+    expect(counted.text).toBe('docId: d1\ncount: 1');
+    expect(counted.structuredContent).toMatchObject({
+      ok: true,
+      tool: 'run_query',
+      docId: 'd1',
+      kind: 'value',
+      value: '1',
+    });
+    expect((await call('run_query', { docId: 'd1', query: '$.tasks[*] | count' })).text).toBe('count: 2');
+  });
+
+  it('rejects an ambiguous document reference and closes a failed one-shot load', async () => {
+    const filePath = join(dir, 'one-shot-failure.json');
+    await writeFile(filePath, DOC);
+    const ambiguous = await call('run_query', { docId: 'd1', filePath, query: '$ | count' });
+    expect(ambiguous).toMatchObject({ isError: true, text: 'error: pass either docId or filePath, not both' });
+
+    const failed = await call('run_query', { filePath, query: '$.tasks | nope' });
+    expect(failed.isError).toBe(true);
+    expect(pool.list()).toHaveLength(0);
+  });
+
   it('hands out d1, d2, … and never lets one document disturb another', async () => {
     expect((await load(DOC)).text).toContain('docId: d1');
     expect((await load('{"tasks":[{"id":1}]}')).text).toContain('docId: d2');
@@ -188,6 +248,8 @@ describe('response cap', () => {
     expect(r.isError).toBe(true);
     expect(r.text.length).toBe(RESPONSE_CAP);
     expect(r.text).toContain('…truncated');
+    expect(JSON.stringify(r.structuredContent).length).toBeLessThanOrEqual(RESPONSE_CAP);
+    expect(r.structuredContent).toMatchObject({ structuredTruncated: true });
   });
 
   it('leaves a result that fits completely alone', async () => {
@@ -243,7 +305,7 @@ describe('exact digits survive the whole pipeline', () => {
     });
     expect(profiled.text).toContain('matched: 3');
     expect(profiled.text).toContain('reason: present 2, missing 1, null 1');
-    expect(profiled.text).toContain('numeric: 3, min 1, max 3, avg 2');
+    expect(profiled.text).toContain('numeric: 3, sum 6, min 1, max 3, avg 2');
     expect(profiled.text.length).toBeLessThan(1000);
   });
 
@@ -283,23 +345,64 @@ describe('exact digits survive the whole pipeline', () => {
 // ---------- failure is never fatal ----------
 
 describe('failures stay inside the tool call', () => {
+  it('closes a document host when loading throws before a docId can be returned', async () => {
+    const close = vi.fn(async () => undefined);
+    pool = new DocPool(() => ({
+      send: () => Promise.reject(new Error('load transport failed')),
+      close,
+    }));
+    router = new ToolRouter(pool);
+
+    const r = await call('load_doc', { text: '{}' });
+    expect(r).toMatchObject({ isError: true, text: 'error: load transport failed' });
+    expect(pool.list()).toHaveLength(0);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('closes an auto-opened document when its one-shot operation throws', async () => {
+    const close = vi.fn(async () => undefined);
+    pool = new DocPool(() => ({
+      send: async (request) => {
+        if (request.op === 'load') {
+          return { ok: true, bytes: 2, rootType: 'object', keys: [], parseMs: 0, repaired: false, jsonl: false };
+        }
+        throw new Error('query transport failed');
+      },
+      close,
+    }));
+    router = new ToolRouter(pool);
+
+    const r = await call('run_query', { filePath: '/tmp/unused.json', query: '$ | count' });
+    expect(r).toMatchObject({ isError: true, text: 'error: query transport failed' });
+    expect(pool.list()).toHaveLength(0);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('reports a dead document host instead of throwing', async () => {
     await load(DOC);
     const doc = pool.get('d1')!;
     doc.host.send = () => Promise.reject(new Error('document thread exited with code 1'));
     const r = await call('run_query', { docId: 'd1', query: '$' });
-    expect(r).toEqual({ text: 'error: document thread exited with code 1', isError: true });
+    expect(r).toMatchObject({
+      text: 'error: document thread exited with code 1',
+      isError: true,
+      structuredContent: { ok: false, tool: 'run_query', error: 'document thread exited with code 1' },
+    });
   });
 
   it('rejects an unknown tool name', async () => {
     const r = await call('summarise_everything', {});
-    expect(r).toEqual({ text: "error: unknown tool 'summarise_everything'", isError: true });
+    expect(r).toMatchObject({
+      text: "error: unknown tool 'summarise_everything'",
+      isError: true,
+      structuredContent: { ok: false, tool: 'summarise_everything', error: "unknown tool 'summarise_everything'" },
+    });
   });
 
   it('asks for the arguments it needs', async () => {
     expect((await call('load_doc', {})).text).toBe('error: load_doc needs a path or text');
     await load(DOC);
     expect((await call('run_query', { docId: 'd1' })).text).toBe('error: run_query needs a query');
-    expect((await call('sample', { path: '$' })).text).toContain('needs a docId');
+    expect((await call('sample', { path: '$' })).text).toContain('needs either docId or filePath');
   });
 });

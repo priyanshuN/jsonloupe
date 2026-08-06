@@ -9,11 +9,11 @@
 //            | '['int']' | '['int?':'int?']' | '['string']' | '[*]' | '[?(' expr ')]'
 //   expr    := or; or := and ('||' and)*; and := unary ('&&' unary)*
 //   unary   := '!'unary | '('or')' | cmp
-//   cmp     := operand (op operand | 'in' array | '=~' /regex/)?
+//   cmp     := operand (op operand | 'in' array | '=~' /regex/ | present | missing | isNull)?
 //   op      := == != >= <= > < contains startsWith endsWith
 //   operand := '@'tail | literal        tail := ('.'ident | '['int|string']')*
 //   pipe    := '|' fn ('(' '@'tail (',' '@'tail)* ')')?
-//   fn      := count sum avg min max distinct group pluck
+//   fn      := count sum avg min max distinct group top bottom pluck
 
 import { isLosslessNumber, LosslessNumber, stringify as llStringify } from 'lossless-json';
 import {
@@ -44,6 +44,9 @@ type Expr =
   | { kind: 'cmp'; op: string; l: Operand; r: Operand }
   | { kind: 'in'; l: Operand; list: unknown[] }
   | { kind: 'match'; l: Operand; re: RegExp }
+  | { kind: 'present'; o: Operand }
+  | { kind: 'missing'; o: Operand }
+  | { kind: 'null'; o: Operand }
   | { kind: 'exists'; o: Operand };
 
 interface Pipe { fn: string; args: Tail[][] }
@@ -55,7 +58,7 @@ export type QueryResult =
   | { ok: true; kind: 'matches'; total: number; offset: number; complete: boolean; truncated: boolean; matches: Match[] }
   | { ok: true; kind: 'value'; label: string; value: number | string | null; complete: boolean; note?: string }
   | { ok: true; kind: 'groups'; label: string; total: number; offset: number; complete: boolean; groups: { key: string; count: number }[]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: unknown[][]; total: number; offset: number; complete: boolean; truncated: boolean }
+  | { ok: true; kind: 'rows'; cols: string[]; rows: unknown[][]; total: number; offset: number; complete: boolean; truncated: boolean; note?: string }
   | { ok: false; error: string; pos: number };
 
 export interface QueryOptions {
@@ -71,6 +74,8 @@ const MATCH_CAP = 5000;
 const GROUP_CAP = 1000;
 const ROW_CAP = 5000;
 const CARDINALITY_CAP = 100_000;
+const RANK_CAP = 5000;
+const RANK_DEFAULT = 10;
 
 // ---------- lexer ----------
 
@@ -82,7 +87,22 @@ class QErr extends Error {
   }
 }
 
-const WORD_OPS = new Set(['in', 'contains', 'startsWith', 'endsWith']);
+const WORD_OPS = new Set(['in', 'contains', 'startsWith', 'endsWith', 'present', 'missing', 'isNull']);
+const MAX_REGEX_CHARS = 256;
+const SAFE_REGEX_FLAGS = /^[imsu]*$/;
+
+function regexSafetyError(body: string, flags: string): string | null {
+  if (body.length > MAX_REGEX_CHARS) return `regex is longer than ${MAX_REGEX_CHARS} characters`;
+  if (!SAFE_REGEX_FLAGS.test(flags)) return 'regex flags are limited to i, m, s and u';
+  if (/\\[1-9]/.test(body)) return 'regex backreferences are not supported';
+  // Native JavaScript regexes have no timeout. Reject the most common
+  // catastrophic-backtracking shape: a quantified group containing another
+  // unbounded quantifier, e.g. `(a+)+` or `(.*)*`.
+  if (/\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)\s*(?:[+*]|\{)/.test(body)) {
+    return 'regex contains nested unbounded quantifiers';
+  }
+  return null;
+}
 
 function lex(src: string): Tok[] {
   const toks: Tok[] = [];
@@ -160,6 +180,8 @@ function lex(src: string): Tok[] {
         j++;
         let flags = '';
         while (j < src.length && /[a-z]/i.test(src[j])) flags += src[j++];
+        const unsafe = regexSafetyError(body, flags);
+        if (unsafe) throw new QErr(unsafe, i);
         let re: RegExp;
         try {
           re = new RegExp(body, flags);
@@ -236,6 +258,10 @@ function lex(src: string): Tok[] {
   return toks;
 }
 
+function isKeyToken(token: Tok): boolean {
+  return token.t === 'ident' || (token.t === 'op' && WORD_OPS.has(token.v));
+}
+
 // ---------- parser ----------
 
 class Parser {
@@ -268,7 +294,7 @@ class Parser {
           segs.push({ kind: 'wild' });
         } else {
           const t = this.next();
-          if (t.t !== 'ident') throw new QErr('expected key after .', t.pos);
+          if (!isKeyToken(t)) throw new QErr('expected key after .', t.pos);
           segs.push({ kind: 'key', name: t.v });
         }
       } else if (this.isPunct('..')) {
@@ -278,7 +304,7 @@ class Parser {
           segs.push({ kind: 'recur', name: null });
         } else {
           const t = this.next();
-          if (t.t !== 'ident') throw new QErr('expected key after ..', t.pos);
+          if (!isKeyToken(t)) throw new QErr('expected key after ..', t.pos);
           segs.push({ kind: 'recur', name: t.v });
         }
       } else if (this.isPunct('[')) {
@@ -364,7 +390,7 @@ class Parser {
       if (this.isPunct('.')) {
         this.next();
         const t = this.next();
-        if (t.t !== 'ident') throw new QErr('expected key after .', t.pos);
+        if (!isKeyToken(t)) throw new QErr('expected key after .', t.pos);
         tail.push({ kind: 'key', name: t.v });
       } else if (this.isPunct('[')) {
         this.next();
@@ -414,6 +440,14 @@ class Parser {
   private parseCmp(): Expr {
     const l = this.parseOperand();
     const t = this.peek();
+    if (t.t === 'op' && ['present', 'missing', 'isNull'].includes(t.v)) {
+      this.next();
+      return t.v === 'present'
+        ? { kind: 'present', o: l }
+        : t.v === 'missing'
+          ? { kind: 'missing', o: l }
+          : { kind: 'null', o: l };
+    }
     if (t.t === 'op' && ['==', '!=', '>', '>=', '<', '<=', 'contains', 'startsWith', 'endsWith'].includes(t.v)) {
       this.next();
       const r = this.parseOperand();
@@ -516,6 +550,12 @@ function evalExpr(e: Expr, cur: unknown): boolean {
       const v = operandValue(e.o, cur);
       return v !== undefined && v !== null && v !== false;
     }
+    case 'present':
+      return operandValue(e.o, cur) !== undefined;
+    case 'missing':
+      return operandValue(e.o, cur) === undefined;
+    case 'null':
+      return operandValue(e.o, cur) === null;
     case 'in': {
       const v = operandValue(e.l, cur);
       return e.list.some((x) => eq(x, v));
@@ -641,6 +681,14 @@ interface BucketValue {
   value: unknown;
 }
 
+type RankKind = 'number' | 'string';
+
+interface RankedValue {
+  key: unknown;
+  values: unknown[];
+  sequence: number;
+}
+
 function bucketOf(value: unknown): BucketValue {
   if (value === undefined) return { id: 'u:', label: '(absent)', value: '(absent)' };
   if (value === null) return { id: 'l:', label: 'null', value: null };
@@ -652,6 +700,57 @@ function bucketOf(value: unknown): BucketValue {
   if (typeof value === 'boolean') return { id: `b:${value}`, label: String(value), value };
   const text = llStringify(value) ?? String(value);
   return { id: `j:${text}`, label: text.length > 120 ? text.slice(0, 120) + '…' : text, value };
+}
+
+function rankKind(value: unknown): RankKind | null {
+  if (isExactNumeric(value)) return 'number';
+  return typeof value === 'string' ? 'string' : null;
+}
+
+function compareRankKeys(a: unknown, b: unknown, kind: RankKind): number {
+  if (kind === 'number') return compareExactNumeric(a, b) ?? 0;
+  return (a as string) < (b as string) ? -1 : (a as string) > (b as string) ? 1 : 0;
+}
+
+/** Negative means a belongs before b in the final ranked result. */
+function compareRanked(a: RankedValue, b: RankedValue, kind: RankKind, top: boolean): number {
+  const compared = compareRankKeys(a.key, b.key, kind);
+  if (compared !== 0) return top ? -compared : compared;
+  return a.sequence - b.sequence;
+}
+
+/** Keep the worst retained item at index 0, so a better candidate replaces it in O(log k). */
+function retainRanked(
+  heap: RankedValue[],
+  candidate: RankedValue,
+  capacity: number,
+  compare: (a: RankedValue, b: RankedValue) => number,
+): void {
+  if (capacity === 0) return;
+  if (heap.length < capacity) {
+    heap.push(candidate);
+    let child = heap.length - 1;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (compare(heap[parent], heap[child]) >= 0) break;
+      [heap[parent], heap[child]] = [heap[child], heap[parent]];
+      child = parent;
+    }
+    return;
+  }
+  if (compare(candidate, heap[0]) >= 0) return;
+  heap[0] = candidate;
+  let parent = 0;
+  for (;;) {
+    const left = parent * 2 + 1;
+    const right = left + 1;
+    let worst = parent;
+    if (left < heap.length && compare(heap[left], heap[worst]) > 0) worst = left;
+    if (right < heap.length && compare(heap[right], heap[worst]) > 0) worst = right;
+    if (worst === parent) break;
+    [heap[parent], heap[worst]] = [heap[worst], heap[parent]];
+    parent = worst;
+  }
 }
 
 function window(options: QueryOptions | undefined, fallbackLimit: number): { offset: number; limit: number } {
@@ -670,6 +769,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
 
   switch (pipe.fn) {
     case 'count': {
+      if (pipe.args.length) return { ok: false, error: 'count does not take a field argument; put the field in the path', pos: 0 };
       let total = 0;
       for (const _ of walk(root, segs)) total++;
       return { ok: true, kind: 'value', label: 'count', value: total, complete: true };
@@ -678,6 +778,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
     case 'avg':
     case 'min':
     case 'max': {
+      if (pipe.args.length > 1) return { ok: false, error: `${pipe.fn} accepts at most one @path argument`, pos: 0 };
       let total = 0;
       const stats = new ExactNumericStats();
       for (const match of walk(root, segs)) {
@@ -725,10 +826,15 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
     case 'group': {
       const cap = Math.max(1, options?.cardinalityCap ?? CARDINALITY_CAP);
       const groups = new Map<string, { label: string; count: number }>();
+      const fields = pipe.args.length ? pipe.args : [[]];
       let complete = true;
       for (const match of walk(root, segs)) {
-        const bucket = bucketOf(pick(match));
-        const existing = groups.get(bucket.id);
+        const buckets = fields.map((field) => bucketOf(field.length ? resolveTail(match.value, field) : match.value));
+        const id = JSON.stringify(buckets.map((bucket) => bucket.id));
+        const label = buckets.length === 1
+          ? buckets[0].label
+          : (llStringify(buckets.map((bucket) => bucket.value)) ?? buckets.map((bucket) => bucket.label).join(' | '));
+        const existing = groups.get(id);
         if (existing) {
           existing.count++;
           continue;
@@ -737,7 +843,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
           complete = false;
           continue;
         }
-        groups.set(bucket.id, { label: bucket.label, count: 1 });
+        groups.set(id, { label, count: 1 });
       }
       const sorted = [...groups.values()]
         .map(({ label, count }) => ({ key: label, count }))
@@ -747,12 +853,60 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       return {
         ok: true,
         kind: 'groups',
-        label: tailLabel(arg),
+        label: fields.map(tailLabel).join(', '),
         total: sorted.length,
         offset: detail.offset,
         complete,
         groups: shown,
         truncated: windowIsTruncated(sorted.length, detail.offset, shown.length, complete),
+      };
+    }
+    case 'top':
+    case 'bottom': {
+      const fields = pipe.args.length ? pipe.args : [[]];
+      const detail = window(options, RANK_DEFAULT);
+      if (detail.limit > 0 && detail.offset + detail.limit > RANK_CAP) {
+        return { ok: false, error: `top/bottom retain at most ${RANK_CAP} ranked rows; narrow the query or export first`, pos: 0 };
+      }
+      const capacity = detail.limit === 0 ? 0 : detail.offset + detail.limit;
+      const retained: RankedValue[] = [];
+      let kind: RankKind | null = null;
+      let total = 0;
+      let skipped = 0;
+      let sequence = 0;
+      for (const match of walk(root, segs)) {
+        const key = fields[0].length ? resolveTail(match.value, fields[0]) : match.value;
+        const candidateKind = rankKind(key);
+        if (candidateKind === null || (kind !== null && candidateKind !== kind)) {
+          skipped++;
+          continue;
+        }
+        kind ??= candidateKind;
+        const candidate: RankedValue = {
+          key,
+          values: fields.map((field) => field.length ? resolveTail(match.value, field) : match.value),
+          sequence: sequence++,
+        };
+        total++;
+        retainRanked(
+          retained,
+          candidate,
+          capacity,
+          (a, b) => compareRanked(a, b, kind!, pipe.fn === 'top'),
+        );
+      }
+      if (kind) retained.sort((a, b) => compareRanked(a, b, kind!, pipe.fn === 'top'));
+      const rows = retained.slice(detail.offset, detail.offset + detail.limit).map((entry) => entry.values);
+      return {
+        ok: true,
+        kind: 'rows',
+        cols: fields.map(tailLabel),
+        rows,
+        total,
+        offset: detail.offset,
+        complete: true,
+        truncated: windowIsTruncated(total, detail.offset, rows.length, true),
+        note: skipped ? `${skipped} unrankable or type-mismatched value${skipped === 1 ? '' : 's'} skipped` : undefined,
       };
     }
     case 'pluck': {
@@ -779,7 +933,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       };
     }
     default:
-      return { ok: false, error: `unknown pipe function '${pipe.fn}' (count, sum, avg, min, max, distinct, group, pluck)`, pos: 0 };
+      return { ok: false, error: `unknown pipe function '${pipe.fn}' (count, sum, avg, min, max, distinct, group, top, bottom, pluck)`, pos: 0 };
   }
 }
 

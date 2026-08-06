@@ -10,12 +10,18 @@ import { MAX_DOCS, type DocEntry, type DocPool } from './pool';
 import type { DiffResultView, CsvResult, LoadResult, OpError, QueryResultView, SampleResult } from './doc-ops';
 import type { ProfileResult } from '../profile';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from '../query-grammar';
-import { cap, renderCsv, renderDiff, renderError, renderLoad, renderProfile, renderQuery, renderSample } from './render';
+import { cap, RESPONSE_CAP, renderCsv, renderDiff, renderError, renderLoad, renderProfile, renderQuery, renderSample } from './render';
 
 export interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: { type: 'object'; properties: Record<string, unknown>; required?: string[] };
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+    anyOf?: { required: string[] }[];
+  };
+  outputSchema: { type: 'object'; properties: Record<string, unknown>; required: string[]; additionalProperties: true };
   annotations: {
     title: string;
     readOnlyHint: boolean;
@@ -28,6 +34,7 @@ export interface ToolDefinition {
 export interface ToolResponse {
   text: string;
   isError: boolean;
+  structuredContent: Record<string, unknown>;
 }
 
 const DEFAULT_SAMPLE = 5;
@@ -38,6 +45,20 @@ const MAX_QUERY_LIMIT = 100;
 const DEFAULT_PROFILE_TOP = 10;
 const MAX_PROFILE_TOP = 50;
 const MAX_PROFILE_FIELDS = 20;
+
+const TOOL_OUTPUT_SCHEMA: ToolDefinition['outputSchema'] = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean' },
+    tool: { type: 'string' },
+    error: { type: 'string' },
+    hint: { type: 'string' },
+    evicted: { type: 'array', items: { type: 'string' } },
+    structuredTruncated: { type: 'boolean' },
+  },
+  required: ['ok', 'tool'],
+  additionalProperties: true,
+};
 
 const readOnly = (title: string): ToolDefinition['annotations'] => ({
   title,
@@ -58,7 +79,8 @@ const fileWrite = (title: string): ToolDefinition['annotations'] => ({
 export const TOOLS: ToolDefinition[] = [
   {
     name: 'load_doc',
-    annotations: readOnly('Load JSON document'),
+    outputSchema: TOOL_OUTPUT_SCHEMA,
+    annotations: readOnly('Open JSON once for agent analysis'),
     description:
       'Open a JSON document and return its size and top-level shape. Accepts a file path or inline text, ' +
       'and transparently decodes Zstd, Base64-Zstd and PostgreSQL bytea (\\x…) payloads. Malformed JSON is ' +
@@ -74,26 +96,33 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'get_schema',
-    annotations: readOnly('Inspect JSON schema'),
+    outputSchema: TOOL_OUTPUT_SCHEMA,
+    annotations: readOnly('Discover JSON fields and types'),
     description:
       'Field names and types of the document — never values. With no path, describes the whole document; ' +
       'with a path, describes just what it selects, merged across matches (so $.tasks[*] describes an ' +
       'element, not the first element). Array shapes are inferred from up to 30 elements; use profile for ' +
-      'exact coverage/counts. Start here: it is how you learn which paths run_query can use.',
+      'exact coverage/counts. Start here: it is how you learn which paths run_query can use. For one question, ' +
+      'pass filePath directly; it opens the file and returns a reusable docId in the same call.',
     inputSchema: {
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        filePath: { type: 'string', description: 'File to open now instead of supplying docId.' },
         path: { type: 'string', description: 'Optional query selecting the subtree to describe, e.g. $.tasks[*].' },
       },
-      required: ['docId'],
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
   {
     name: 'run_query',
-    annotations: readOnly('Query JSON document'),
+    outputSchema: TOOL_OUTPUT_SCHEMA,
+    annotations: readOnly('Count, group, rank, or aggregate JSON'),
     description:
-      `Run a query and return matches or an aggregate, capped. Grammar (a JSONPath subset with aggregation pipes):\n\n${QUERY_GRAMMAR}\n\nExamples:\n${QUERY_EXAMPLES}\n\n` +
+      `Use this instead of ad-hoc Python for JSON counts, filtered exact sums/averages/min/max, composite groups, ` +
+      `distinct values, top/bottom ranking, and field projection. It scans server-side and returns only the bounded answer. Pass filePath ` +
+      `for a one-call answer, or docId to reuse an open document. Run a query and return matches or an aggregate, capped. ` +
+      `Grammar (a JSONPath subset with aggregation pipes):\n\n${QUERY_GRAMMAR}\n\nExamples:\n${QUERY_EXAMPLES}\n\n` +
       'Matches come back as path + preview; use `| pluck(@.a, @.b)` to project real fields into rows, or ' +
       'the sample tool for whole values. Only 10 detail rows return by default; set limit=0 for a count-only ' +
       'summary or page with offset+limit. Aggregates always scan every match. Numeric predicates and aggregates ' +
@@ -102,7 +131,13 @@ export const TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
-        query: { type: 'string', description: "A query, e.g. $.tasks[?(@.status == 'FAILED')] | count" },
+        filePath: { type: 'string', description: 'File to open and query now instead of supplying docId.' },
+        query: {
+          type: 'string',
+          description:
+            "A query, e.g. $.tasks[?(@.status == 'FAILED')] | count; " +
+            '$.tasks[*] | group(@.region, @.status); $.tasks[*] | top(@.delay, @.id)',
+        },
         offset: { type: 'integer', description: 'Detail rows to skip (default 0).', minimum: 0 },
         limit: {
           type: 'integer',
@@ -111,22 +146,26 @@ export const TOOLS: ToolDefinition[] = [
           maximum: MAX_QUERY_LIMIT,
         },
       },
-      required: ['docId', 'query'],
+      required: ['query'],
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
   {
     name: 'profile',
-    annotations: readOnly('Profile JSON fields'),
+    outputSchema: TOOL_OUTPUT_SCHEMA,
+    annotations: readOnly('Profile unfamiliar JSON without code'),
     description:
-      'Profile one or more fields across every record selected by a path/predicate query in one scan. Returns ' +
-      'present/missing/null counts, type counts, distinct count, exact numeric min/max/average, and top values. ' +
-      'Use fields like "status" or "capacity.used" relative to each selected record; omit fields to profile ' +
-      'selected scalar values themselves (container values return types only). This replaces ad-hoc Python loops ' +
+      'Use this instead of writing Python loops to discover or summarize unfamiliar JSON fields. It profiles one or more fields ' +
+      'across every selected record in one server-side scan. Pass filePath for a one-call answer, or docId to reuse an open document. Returns ' +
+      'present/missing/null counts, type counts, distinct count, exact numeric sum/min/max/average, lengths, and top values. ' +
+      'Use fields like "status" or "capacity.used" relative to each selected record; omit fields to auto-discover ' +
+      'up to 20 fields on selected records or profile selected scalar values. This replaces ad-hoc Python loops ' +
       'for unfamiliar JSON.',
     inputSchema: {
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        filePath: { type: 'string', description: 'File to open and profile now instead of supplying docId.' },
         query: { type: 'string', description: 'Path/predicate selecting records, e.g. $.tasks[*]. Do not append a pipe.' },
         fields: {
           type: 'array',
@@ -141,19 +180,23 @@ export const TOOLS: ToolDefinition[] = [
           maximum: MAX_PROFILE_TOP,
         },
       },
-      required: ['docId', 'query'],
+      required: ['query'],
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
   {
     name: 'sample',
+    outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: readOnly('Sample JSON values'),
     description:
       'Read n real values at a path, exactly as they were parsed (int64 and decimal digits intact). A path ' +
-      'that selects one container samples its children; a path that selects many nodes samples those nodes.',
+      'that selects one container samples its children; a path that selects many nodes samples those nodes. ' +
+      'Pass filePath for a one-call sample, or docId to reuse an open document.',
     inputSchema: {
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        filePath: { type: 'string', description: 'File to open and sample now instead of supplying docId.' },
         path: { type: 'string', description: 'A query selecting what to sample, e.g. $.tasks or $.tasks[*].id' },
         n: {
           type: 'integer',
@@ -162,11 +205,13 @@ export const TOOLS: ToolDefinition[] = [
           maximum: MAX_SAMPLE,
         },
       },
-      required: ['docId', 'path'],
+      required: ['path'],
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
   {
     name: 'diff_docs',
+    outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: readOnly('Compare JSON documents'),
     description:
       'Compare two loaded documents and return change counts plus the first changes. docIdA is the older ' +
@@ -187,46 +232,62 @@ export const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'export_csv',
+    outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: fileWrite('Export query to CSV'),
     description:
       'Run a query and write its complete table to a CSV file (RFC 4180, exact digits, formula-injection safe). ' +
       'Returns only the path, row count and byte size — the rows themselves never enter the conversation. ' +
-      'The query must produce a table: use `| pluck(…)`, `| group(…)` or `| distinct`.',
+      'The query must produce a table: use `| pluck(…)`, `| group(…)` or `| distinct`. The file is streamed ' +
+      'and published atomically; an existing path is refused unless overwrite=true. Pass filePath to open ' +
+      'and export an input file in one call, or docId to reuse an open document.',
     inputSchema: {
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        filePath: { type: 'string', description: 'Input file to open now instead of supplying docId.' },
         query: { type: 'string', description: 'A query producing rows or groups.' },
         outPath: { type: 'string', description: 'Where to write the CSV file.' },
+        overwrite: { type: 'boolean', description: 'Replace an existing path atomically (default false).' },
       },
-      required: ['docId', 'query', 'outPath'],
+      required: ['query', 'outPath'],
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
   {
     name: 'export_result',
+    outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: fileWrite('Export complete query result'),
     description:
       'Write every query match to a local file without sending the data through the conversation. JSONL accepts ' +
       'bare filtered matches and preserves nested values; CSV requires `| pluck(…)`, `| group(…)` or `| distinct`. ' +
       'The response contains only format, path, exact row count, byte size and complete=true. Exports refuse rather ' +
-      'than silently truncate when the 50 MB output safety limit would be exceeded.',
+      'than silently truncate when the 50 MB output safety limit would be exceeded. Output is streamed to a ' +
+      'temporary file and published atomically; an existing path is refused unless overwrite=true. Pass filePath ' +
+      'to open and export an input file in one call, or docId to reuse an open document.',
     inputSchema: {
       type: 'object',
       properties: {
         docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        filePath: { type: 'string', description: 'Input file to open now instead of supplying docId.' },
         query: { type: 'string', description: 'A path/predicate query, optionally with a table-producing pipe.' },
         format: { type: 'string', enum: ['csv', 'jsonl'], description: 'Output format.' },
         outPath: { type: 'string', description: 'Where to write the result file.' },
+        overwrite: { type: 'boolean', description: 'Replace an existing path atomically (default false).' },
       },
-      required: ['docId', 'query', 'format', 'outPath'],
+      required: ['query', 'format', 'outPath'],
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
 ];
 
 type Args = Record<string, unknown>;
 
-/** What a tool produced before the cap: rendered text, or a reason it failed. */
-type Rendered = { ok: true; text: string } | OpError;
+/** What a tool produced before the text/structured response caps. */
+type Rendered = { ok: true; text: string; data: Record<string, unknown> } | OpError;
+
+function success(text: string, data: object): Rendered {
+  return { ok: true, text, data: data as Record<string, unknown> };
+}
 
 /** Routes one tool call to one document, and every response through the cap. */
 export class ToolRouter {
@@ -234,11 +295,11 @@ export class ToolRouter {
 
   async call(name: string, args: Args): Promise<ToolResponse> {
     try {
-      return this.finish(await this.dispatch(name, args ?? {}));
+      return this.finish(name, await this.dispatch(name, args ?? {}));
     } catch (err) {
       // A dead thread, an unreadable file, a bug: the tool call fails, the
       // server does not. The caller gets the reason and can try another doc.
-      return this.finish({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      return this.finish(name, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -247,7 +308,10 @@ export class ToolRouter {
       case 'load_doc':
         return this.loadDoc(args);
       case 'get_schema':
-        return this.onDoc(args, (doc) => doc.host.send({ op: 'schema', path: str(args.path) }) as Promise<Rendered>);
+        return this.onDoc(args, async (doc) => {
+          const r = (await doc.host.send({ op: 'schema', path: str(args.path) })) as { ok: true; text: string } | OpError;
+          return r.ok ? success(r.text, { ok: true, schema: r.text }) : r;
+        });
       case 'run_query':
         return this.onDoc(args, async (doc) => {
           const query = str(args.query);
@@ -255,7 +319,7 @@ export class ToolRouter {
           const offset = integer(args.offset, 0, Number.MAX_SAFE_INTEGER, 0);
           const limit = integer(args.limit, 0, MAX_QUERY_LIMIT, DEFAULT_QUERY_LIMIT);
           const r = (await doc.host.send({ op: 'query', query, offset, limit })) as QueryResultView | OpError;
-          return r.ok ? { ok: true, text: renderQuery(r) } : r;
+          return r.ok ? success(renderQuery(r), r) : r;
         });
       case 'profile':
         return this.onDoc(args, async (doc) => {
@@ -265,7 +329,7 @@ export class ToolRouter {
           if (!fields.ok) return fields;
           const top = integer(args.top, 0, MAX_PROFILE_TOP, DEFAULT_PROFILE_TOP);
           const r = (await doc.host.send({ op: 'profile', query, fields: fields.values, top })) as ProfileResult | OpError;
-          return r.ok ? { ok: true, text: renderProfile(r) } : r;
+          return r.ok ? success(renderProfile(r), r) : r;
         });
       case 'sample':
         return this.onDoc(args, async (doc) => {
@@ -276,7 +340,7 @@ export class ToolRouter {
               ? Math.min(Math.floor(args.n), MAX_SAMPLE)
               : DEFAULT_SAMPLE;
           const r = (await doc.host.send({ op: 'sample', path, n })) as SampleResult | OpError;
-          return r.ok ? { ok: true, text: renderSample(r) } : r;
+          return r.ok ? success(renderSample(r), r) : r;
         });
       case 'diff_docs':
         return this.diffDocs(args);
@@ -285,8 +349,8 @@ export class ToolRouter {
           const query = str(args.query);
           const outPath = str(args.outPath);
           if (!query || !outPath) return { ok: false, error: 'export_csv needs a query and an outPath' };
-          const r = (await doc.host.send({ op: 'csv', query, outPath })) as CsvResult | OpError;
-          return r.ok ? { ok: true, text: renderCsv(r) } : r;
+          const r = (await doc.host.send({ op: 'csv', query, outPath, overwrite: args.overwrite === true })) as CsvResult | OpError;
+          return r.ok ? success(renderCsv(r), { ...r, complete: true }) : r;
         });
       case 'export_result':
         return this.onDoc(args, async (doc) => {
@@ -296,8 +360,8 @@ export class ToolRouter {
           if (!query || !outPath || !format) {
             return { ok: false, error: 'export_result needs a query, format (csv or jsonl), and an outPath' };
           }
-          const r = (await doc.host.send({ op: 'export', query, outPath, format })) as CsvResult | OpError;
-          return r.ok ? { ok: true, text: renderCsv(r) } : r;
+          const r = (await doc.host.send({ op: 'export', query, outPath, format, overwrite: args.overwrite === true })) as CsvResult | OpError;
+          return r.ok ? success(renderCsv(r), { ...r, complete: true }) : r;
         });
       default:
         return { ok: false, error: `unknown tool '${name}'` };
@@ -308,15 +372,29 @@ export class ToolRouter {
     const path = str(args.path);
     const text = str(args.text);
     if (!path && !text) return { ok: false, error: 'load_doc needs a path or text' };
+    const opened = await this.openDoc(path, text);
+    if (!opened.ok) return opened;
+    return success(renderLoad(opened.doc.id, opened.load), { ...opened.load, docId: opened.doc.id });
+  }
+
+  private async openDoc(path: string | undefined, text?: string): Promise<
+    { ok: true; doc: DocEntry; load: LoadResult } | OpError
+  > {
     const doc = this.pool.open(path ?? '<text>');
-    const r = (await doc.host.send({ op: 'load', path, text })) as LoadResult | OpError;
+    let r: LoadResult | OpError;
+    try {
+      r = (await doc.host.send({ op: 'load', path, text })) as LoadResult | OpError;
+    } catch (error) {
+      await this.pool.close(doc.id);
+      throw error;
+    }
     if (!r.ok) {
       // A document that never parsed is not a document: drop its thread rather
       // than leave an empty docId the caller could address.
       await this.pool.close(doc.id);
       return r;
     }
-    return { ok: true, text: renderLoad(doc.id, r) };
+    return { ok: true, doc, load: r };
   }
 
   private async diffDocs(args: Args): Promise<Rendered> {
@@ -333,15 +411,39 @@ export class ToolRouter {
       baselineText: baseline.text,
       keySpec: str(args.keySpec) ?? '',
     })) as DiffResultView | OpError;
-    return r.ok ? { ok: true, text: renderDiff(idA, idB, r) } : r;
+    return r.ok ? success(renderDiff(idA, idB, r), { ...r, docIdA: idA, docIdB: idB }) : r;
   }
 
   private async onDoc(args: Args, run: (doc: DocEntry) => Promise<Rendered>): Promise<Rendered> {
     const id = str(args.docId);
-    if (!id) return { ok: false, error: 'this tool needs a docId from load_doc' };
-    const found = this.resolve(id);
-    if ('error' in found) return found;
-    return run(found.doc);
+    const filePath = str(args.filePath);
+    if (id && filePath) return { ok: false, error: 'pass either docId or filePath, not both' };
+    if (id) {
+      const found = this.resolve(id);
+      if ('error' in found) return found;
+      return run(found.doc);
+    }
+    if (!filePath) return { ok: false, error: 'this tool needs either docId or filePath' };
+
+    const opened = await this.openDoc(filePath);
+    if (!opened.ok) return opened;
+    let result: Rendered;
+    try {
+      result = await run(opened.doc);
+    } catch (error) {
+      await this.pool.close(opened.doc.id);
+      throw error;
+    }
+    if (!result.ok) {
+      // A failed one-shot operation has not returned a usable docId. Close it
+      // rather than leak an invisible document into the eight-document pool.
+      await this.pool.close(opened.doc.id);
+      return result;
+    }
+    return success(
+      `docId: ${opened.doc.id}\n${result.text}`,
+      { ...result.data, docId: opened.doc.id },
+    );
   }
 
   private resolve(id: string): { doc: DocEntry } | OpError {
@@ -363,14 +465,45 @@ export class ToolRouter {
    * notice leads, so a long result cannot truncate away the news that a docId
    * the caller still believes in has gone.
    */
-  private finish(result: Rendered): ToolResponse {
+  private finish(tool: string, result: Rendered): ToolResponse {
     const body = result.ok ? result.text : renderError(result);
     const evicted = this.pool.drainNotices();
     const notice = evicted.length
       ? `note: evicted ${evicted.join(', ')} (least recently used) to stay within the ${MAX_DOCS}-document limit.\n`
       : '';
-    return { text: cap(notice + body), isError: !result.ok };
+    const structured = result.ok
+      ? { tool, ...result.data, evicted }
+      : { ok: false, tool, error: result.error, ...(result.hint ? { hint: result.hint } : {}), evicted };
+    return {
+      text: cap(notice + body),
+      isError: !result.ok,
+      structuredContent: capStructured(structured),
+    };
   }
+}
+
+function capStructured(value: Record<string, unknown>): Record<string, unknown> {
+  if (JSON.stringify(value).length <= RESPONSE_CAP) return value;
+  const scalarCap = 2_000;
+  const summary: Record<string, unknown> = {
+    ok: value.ok,
+    tool: value.tool,
+    structuredTruncated: true,
+  };
+  for (const key of [
+    'docId', 'docIdA', 'docIdB', 'kind', 'label', 'value', 'total', 'offset',
+    'complete', 'truncated', 'matched', 'autoFields', 'fieldDiscoveryComplete',
+    'format', 'outPath', 'rows', 'bytes', 'atomic', 'error', 'hint', 'evicted',
+  ]) {
+    const item = value[key];
+    if (typeof item === 'string') summary[key] = item.length > scalarCap ? item.slice(0, scalarCap) + '…' : item;
+    else if (item === null || ['number', 'boolean'].includes(typeof item)) summary[key] = item;
+    else if (Array.isArray(item) && item.every((part) => typeof part === 'string')) {
+      summary[key] = item.slice(0, 50).map((part) => part.length > scalarCap ? part.slice(0, scalarCap) + '…' : part);
+    }
+  }
+  summary.hint ??= 'Structured details exceeded the response cap; narrow the query or request fewer profile values.';
+  return summary;
 }
 
 function str(v: unknown): string | undefined {
