@@ -200,9 +200,9 @@ try {
     csv.includes(`rows: ${TASKS / 4}`) && csv.includes('complete: true') && csv.includes('atomic: true') && !csv.includes('ADDRESS_NOT_FOUND'),
     csv,
   );
-  const csvBytes = (await stat(csvOut)).size;
-  check('the CSV on disk is real', csvBytes > 10_000, `${csvBytes} bytes`);
-  const csvRows = (await readFile(csvOut, 'utf8')).split('\r\n').filter(Boolean).length - 1;
+  const csvBuf = await readFile(csvOut);
+  check('the CSV on disk is real', csvBuf.length > 10_000, `${csvBuf.length} bytes`);
+  const csvRows = csvBuf.toString('utf8').split('\r\n').filter(Boolean).length - 1;
   check('the CSV is complete beyond the old 5,000-row display cap', csvRows === TASKS / 4, `${csvRows} rows`);
   const refused = text(await call('export_result', {
     docId: 'd1',
