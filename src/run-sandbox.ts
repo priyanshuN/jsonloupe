@@ -11,9 +11,26 @@ import { executeUserCode } from './run-exec';
 
 const post = (d: unknown): void => (self as unknown as Worker).postMessage(d);
 
+// The script runs with this worker's ambient authority, and the worker is
+// same-origin — untouched, a pasted-from-a-stranger script could read the
+// IndexedDB of every document ever opened here, or phone home. The script's
+// job is data → data, so every capability beyond compute is removed before
+// any user code can run. defineProperty because some of these are getters;
+// per-name try/catch because a non-configurable one must not stop the rest.
+for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'indexedDB', 'caches', 'navigator']) {
+  try {
+    Object.defineProperty(self, name, { value: undefined, configurable: false, writable: false });
+  } catch {
+    /* already gone or locked — either is fine */
+  }
+}
+
 if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessage === 'function') {
   (self as unknown as Worker).onmessage = (e: MessageEvent) => {
-    const { docText, code } = e.data as { docText: string; code: string };
-    post(executeUserCode(docText, code));
+    // A dedicated worker only hears from the page that spawned it; there is no
+    // origin to check. Shape-check instead so a malformed message is inert.
+    const d = e.data as { docText?: unknown; code?: unknown } | null;
+    if (!d || typeof d.docText !== 'string' || typeof d.code !== 'string') return;
+    post(executeUserCode(d.docText, d.code));
   };
 }
