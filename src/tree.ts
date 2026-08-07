@@ -1,21 +1,30 @@
 // Virtualized tree: renders only the visible slice at fixed row height.
-// Row data comes from the worker asynchronously; stale responses are dropped
+// Row data comes from a worker asynchronously; stale responses are dropped
 // by epoch so fast scrolling never paints out-of-date slices.
+//
+// The component is bound to its rows through these callbacks alone, so a second
+// instance over a second worker is just a second callback set — which is what
+// run mode's result pane is.
 
 import type { Row } from './protocol';
 
+// The optional members are CAPABILITIES the host grants this tree, not options:
+// a row offers `tbl` only where something can open a table, and a value is
+// editable only where there is a document to commit the edit to. The run
+// result's tree has neither — it is derived data, not a document you own — and
+// it says so by leaving them out rather than by passing no-ops.
 export interface TreeCallbacks {
   fetchRows(start: number, count: number): Promise<Row[]>;
   onToggle(id: number, index: number): void;
   onCopyPath(id: number): void;
   onCopyValue(id: number): void;
   onUnpack(id: number, index: number): void;
-  onTable(id: number): void;
-  onSelect(index: number): void;
+  onTable?(id: number): void;
+  onSelect?(index: number): void;
   /** Raw JSON literal to prefill the inline editor for a leaf node. */
-  getEditText(id: number): Promise<string>;
+  getEditText?(id: number): Promise<string>;
   /** Commit an inline value edit; returns ok:false (with a reason) to keep editing. */
-  onEditCommit(id: number, index: number, text: string): Promise<{ ok: boolean; error?: string }>;
+  onEditCommit?(id: number, index: number, text: string): Promise<{ ok: boolean; error?: string }>;
 }
 
 const ROW_H = 28;
@@ -51,7 +60,7 @@ export class VirtualTree {
       const index = Number(rowEl.dataset.index);
       if (t.closest('.btn-path')) return cbs.onCopyPath(id);
       if (t.closest('.btn-copy')) return cbs.onCopyValue(id);
-      if (t.closest('.btn-table')) return cbs.onTable(id);
+      if (t.closest('.btn-table')) return cbs.onTable?.(id);
       if (t.closest('.btn-unpack')) return cbs.onUnpack(id, index);
       this.select(index, { scroll: false });
       if (rowEl.dataset.children === '1') cbs.onToggle(id, index);
@@ -71,8 +80,9 @@ export class VirtualTree {
       if (index === this.selected) return;
       this.select(index, { scroll: false });
     });
-    // Double-click a primitive value → inline edit.
+    // Double-click a primitive value → inline edit, where this tree can edit.
     layer.addEventListener('dblclick', (e) => {
+      if (!cbs.getEditText || !cbs.onEditCommit) return;
       const t = e.target as HTMLElement;
       if (!t.classList.contains('val')) return;
       const rowEl = t.closest('.row') as HTMLElement | null;
@@ -86,10 +96,12 @@ export class VirtualTree {
 
   private async startEdit(rowEl: HTMLElement, row: Row): Promise<void> {
     if (this.editing) return;
+    const { getEditText, onEditCommit } = this.cbs;
+    if (!getEditText || !onEditCommit) return;
     const valEl = rowEl.querySelector('.val') as HTMLElement | null;
     if (!valEl) return;
     this.editing = true; // pauses render() so the input isn't clobbered
-    const literal = await this.cbs.getEditText(row.id);
+    const literal = await getEditText(row.id);
     if (!valEl.isConnected) {
       this.editing = false;
       this.schedule();
@@ -111,7 +123,7 @@ export class VirtualTree {
         this.schedule();
         return;
       }
-      const r = await this.cbs.onEditCommit(row.id, row.index, input.value);
+      const r = await onEditCommit(row.id, row.index, input.value);
       if (r.ok) {
         this.editing = false;
         this.schedule();
@@ -151,7 +163,7 @@ export class VirtualTree {
       else if (top + ROW_H > st + h) this.viewport.scrollTop = top + ROW_H - h;
       this.schedule();
     }
-    this.cbs.onSelect(this.selected);
+    this.cbs.onSelect?.(this.selected);
   }
 
   // The selection marker is one class on one row, so moving it does not need a
@@ -329,7 +341,9 @@ export class VirtualTree {
       ['btn-path', 'path', 'Copy path'],
       ['btn-copy', 'copy', 'Copy value as JSON'],
     ];
-    if (r.type === 'array' && r.hasChildren) btns.push(['btn-table', 'tbl', 'View array as table']);
+    if (this.cbs.onTable && r.type === 'array' && r.hasChildren) {
+      btns.push(['btn-table', 'tbl', 'View array as table']);
+    }
     for (const [cls, label, title] of btns) {
       const b = document.createElement('button');
       b.className = cls;
