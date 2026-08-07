@@ -11,6 +11,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Same reasoning as ci.yml: default types miss draft→ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     # Weekly, because the analysis improves even when the code does not.
     - cron: "0 4 * * 1"
