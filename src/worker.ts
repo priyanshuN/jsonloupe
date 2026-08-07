@@ -15,7 +15,9 @@ import type {
   CompareRow,
   CompareStatus,
 } from './protocol';
-import { runQuery, type PathSeg, type QueryResult } from './query';
+import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, type QueryResult } from './query';
+import { profileQuery } from './profile';
+import { EXPORT_CHUNK_BYTES, MAX_EXPORT_BYTES } from './export-policy';
 import {
   compareSemantic,
   type SemanticCompareOptions,
@@ -126,6 +128,24 @@ interface SemanticWorkerState {
 // the UI must explicitly initialize a fresh comparison against its baseline.
 let semanticCompare: SemanticWorkerState | null = null;
 
+interface QueryExportLine {
+  text: string;
+  row: boolean;
+}
+
+interface QueryExportSession {
+  iterator: Iterator<QueryExportLine>;
+  rows: number;
+  bytes: number;
+  pending?: QueryExportLine;
+  pendingOffset: number;
+}
+
+// MCP exports are pulled in bounded chunks. Keeping the iterator here means the
+// parsed values and LosslessNumbers never have to cross the document thread.
+const queryExportSessions = new Map<string, QueryExportSession>();
+let nextQueryExportId = 0;
+
 function clearCompareState(): void {
   semanticCompare = null;
 }
@@ -137,6 +157,7 @@ const post = (d: unknown) => (self as unknown as Worker).postMessage(d);
 // code-view Apply).
 function clearState(): void {
   clearCompareState();
+  queryExportSessions.clear();
   nodes = new Map();
   children = new Map();
   expanded = new Set();
@@ -151,6 +172,7 @@ function clearState(): void {
   lastQueryPaths = [];
   lastQueryValues = [];
   lastQueryResult = null;
+  lastQueryText = null;
   schemaCache = null;
   sizeCache.clear();
   // A reparse regenerates ids → the pre-filter expansion snapshot is stale; drop
@@ -1662,20 +1684,23 @@ function doDiff(otherText: string, ignoreSpec: string, keySpec: string): DiffRes
 
 let lastQueryPaths: PathSeg[][] = [];
 let lastQueryValues: unknown[] = [];
-// The full (cap-limited) result of the last query, kept so CSV export can build
-// off the true rows/groups rather than the panel-capped preview.
+// The full detail-window result of the last query, kept for the browser's
+// query panel/copy path. File export reruns the query through its lazy plan.
 let lastQueryResult: QueryResult | null = null;
+let lastQueryText: string | null = null;
 
 const QUERY_PANEL_CAP = 300;
 
-function doQuery(q: string): object {
+function doQuery(q: string, options?: QueryOptions): object {
   const root = nodes.get(rootId);
   if (!root) {
     lastQueryResult = null;
+    lastQueryText = null;
     return { ok: false, error: 'no document open', pos: 0 };
   }
-  const r: QueryResult = runQuery(root.value, q);
+  const r: QueryResult = runQuery(root.value, q, options);
   lastQueryResult = r.ok ? r : null;
+  lastQueryText = r.ok ? q : null;
   if (!r.ok) return r;
   if (r.kind === 'matches') {
     lastQueryPaths = r.matches.map((m) => m.path);
@@ -1684,6 +1709,8 @@ function doQuery(q: string): object {
       ok: true,
       kind: 'matches',
       total: r.total,
+      offset: r.offset,
+      complete: r.complete,
       truncated: r.truncated,
       matches: r.matches.slice(0, QUERY_PANEL_CAP).map((m, i) => ({
         i,
@@ -1793,17 +1820,16 @@ function buildSchema(path?: string): SchemaResult {
     if (schemaCache === null) schemaCache = renderSpec(specOf(root.value, 0), '').slice(0, 4000);
     return { text: schemaCache };
   }
-  const r = runQuery(root.value, path);
-  if (!r.ok) return r;
-  if (r.kind !== 'matches') {
-    return { ok: false, error: 'schema takes a path, not an aggregate pipe', pos: 0 };
-  }
-  if (r.matches.length === 0) return { ok: false, error: `no match for ${path}`, pos: 0 };
+  const scanned = scanQuery(root.value, path);
+  if (!scanned.ok) return scanned;
   let spec: Spec | null = null;
-  for (const m of r.matches.slice(0, SCHEMA_SAMPLE)) {
+  let sampled = 0;
+  for (const m of scanned.matches) {
     const s = specOf(m.value, 0);
     spec = spec ? mergeSpec(spec, s) : s;
+    if (++sampled >= SCHEMA_SAMPLE) break;
   }
+  if (!spec) return { ok: false, error: `no match for ${path}`, pos: 0 };
   return { text: renderSpec(spec!, '').slice(0, 4000) };
 }
 
@@ -1894,11 +1920,7 @@ function tableRows(start: number, count: number): { index: number; cells: string
   return out;
 }
 
-// ---------- CSV export (RFC 4180) ----------
-
-// Ceiling on the built string — refuse rather than materialize a >50M-char blob
-// (and never truncate silently: a half CSV is worse than none).
-const CSV_CAP = 50_000_000;
+// ---------- complete query/table export ----------
 
 // A CSV cell: LosslessNumber → exact digit string (unfloated), null/undefined →
 // empty, nested object/array → its JSON (llStringify) folded into one cell,
@@ -1928,26 +1950,138 @@ function csvField(s: string): string {
   return /[",\r\n]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe;
 }
 
-// Serialize header + rows with CRLF row endings, watching the running size so we
-// bail before crossing CSV_CAP instead of building the whole thing first.
-function csvSerialize(
-  cols: string[],
-  rows: string[][],
-): { ok: true; text: string } | { ok: false; error: string } {
-  let size = 0;
-  const lines: string[] = [];
-  const push = (fields: string[]): boolean => {
-    const line = fields.map(csvField).join(',');
-    size += line.length + 2; // + CRLF
-    if (size > CSV_CAP) return false;
-    lines.push(line);
-    return true;
-  };
-  if (!push(cols)) return { ok: false, error: 'too large for CSV' };
-  for (const r of rows) {
-    if (!push(r)) return { ok: false, error: 'too large for CSV' };
+function* csvLines(cols: string[], rows: Iterable<unknown[]>): Generator<QueryExportLine> {
+  yield { text: cols.map(csvField).join(',') + '\r\n', row: false };
+  for (const row of rows) {
+    yield { text: row.map(csvCell).map(csvField).join(',') + '\r\n', row: true };
   }
-  return { ok: true, text: lines.map((l) => l + '\r\n').join('') };
+}
+
+function* jsonlLines(values: Iterable<unknown>): Generator<QueryExportLine> {
+  for (const value of values) yield { text: (llStringify(value) ?? 'null') + '\n', row: true };
+}
+
+type QueryExportLines =
+  | { ok: true; lines: Iterable<QueryExportLine> }
+  | { ok: false; error: string };
+
+function queryExportLines(
+  query: string,
+  format: 'csv' | 'jsonl',
+): QueryExportLines {
+  const root = nodes.get(rootId);
+  if (!root) return { ok: false, error: 'no document open' };
+  const plan = planQueryExport(root.value, query);
+  if (!plan.ok) return { ok: false, error: plan.error };
+  if (format === 'csv') {
+    if (plan.kind !== 'table') {
+      return { ok: false, error: 'CSV needs a table query; append | pluck(...), | group(...) or | distinct' };
+    }
+    return { ok: true, lines: csvLines(plan.columns, plan.rows) };
+  }
+  if (plan.kind === 'values') return { ok: true, lines: jsonlLines(plan.values) };
+  const objects = (function* (): Generator<Record<string, unknown>> {
+    for (const row of plan.rows) yield Object.fromEntries(plan.columns.map((column, index) => [column, row[index]]));
+  })();
+  return { ok: true, lines: jsonlLines(objects) };
+}
+
+const utf8 = new TextEncoder();
+
+/** Browser export still needs one string; enforce the same exact byte ceiling. */
+function collectExport(lines: Iterable<QueryExportLine>, format: 'CSV' | 'JSONL'):
+  { ok: true; text: string; rows: number } | { ok: false; error: string } {
+  let bytes = 0;
+  let rows = 0;
+  const chunks: string[] = [];
+  for (const line of lines) {
+    bytes += utf8.encode(line.text).byteLength;
+    if (bytes > MAX_EXPORT_BYTES) return { ok: false, error: `too large for ${format}` };
+    chunks.push(line.text);
+    if (line.row) rows++;
+  }
+  return { ok: true, text: chunks.join(''), rows };
+}
+
+function buildQueryExport(
+  query: string,
+  format: 'csv' | 'jsonl',
+): { ok: true; text: string; rows: number } | { ok: false; error: string } {
+  const prepared = queryExportLines(query, format);
+  return prepared.ok ? collectExport(prepared.lines, format === 'csv' ? 'CSV' : 'JSONL') : prepared;
+}
+
+function startQueryExport(
+  query: string,
+  format: 'csv' | 'jsonl',
+): { ok: true; exportId: string } | { ok: false; error: string } {
+  const prepared = queryExportLines(query, format);
+  if (!prepared.ok) return prepared;
+  const exportId = `e${++nextQueryExportId}`;
+  queryExportSessions.set(exportId, {
+    iterator: prepared.lines[Symbol.iterator](),
+    rows: 0,
+    bytes: 0,
+    pendingOffset: 0,
+  });
+  return { ok: true, exportId };
+}
+
+function nextQueryExport(exportId: string):
+  | { ok: true; text: string; rows: number; bytes: number; done: boolean }
+  | { ok: false; error: string } {
+  const session = queryExportSessions.get(exportId);
+  if (!session) return { ok: false, error: `unknown or expired export '${exportId}'` };
+  const chunks: string[] = [];
+  let chunkBytes = 0;
+  try {
+    while (chunkBytes < EXPORT_CHUNK_BYTES) {
+      if (!session.pending) {
+        const next = session.iterator.next();
+        if (next.done) {
+          queryExportSessions.delete(exportId);
+          return { ok: true, text: chunks.join(''), rows: session.rows, bytes: session.bytes, done: true };
+        }
+        session.pending = next.value;
+        session.pendingOffset = 0;
+      }
+
+      const part = utf8Prefix(session.pending.text, session.pendingOffset, EXPORT_CHUNK_BYTES - chunkBytes);
+      if (!part.text) break; // the next multi-byte code point belongs in the next chunk
+      if (session.bytes + part.bytes > MAX_EXPORT_BYTES) {
+        queryExportSessions.delete(exportId);
+        return { ok: false, error: `too large for export (${MAX_EXPORT_BYTES} byte limit)` };
+      }
+      chunks.push(part.text);
+      chunkBytes += part.bytes;
+      session.bytes += part.bytes;
+      session.pendingOffset = part.end;
+      if (session.pendingOffset === session.pending.text.length) {
+        if (session.pending.row) session.rows++;
+        session.pending = undefined;
+      }
+    }
+    return { ok: true, text: chunks.join(''), rows: session.rows, bytes: session.bytes, done: false };
+  } catch (error) {
+    queryExportSessions.delete(exportId);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** Take a byte-bounded prefix without splitting a UTF-16 surrogate pair. */
+function utf8Prefix(text: string, start: number, maxBytes: number): { text: string; end: number; bytes: number } {
+  let end = start;
+  let bytes = 0;
+  while (end < text.length) {
+    const first = text.charCodeAt(end);
+    const pair = first >= 0xd800 && first <= 0xdbff && end + 1 < text.length &&
+      text.charCodeAt(end + 1) >= 0xdc00 && text.charCodeAt(end + 1) <= 0xdfff;
+    const width = pair ? 4 : first < 0x80 ? 1 : first < 0x800 ? 2 : 3;
+    if (bytes + width > maxBytes) break;
+    bytes += width;
+    end += pair ? 2 : 1;
+  }
+  return { text: text.slice(start, end), end, bytes };
 }
 
 // Build a CSV from either the open table view (respecting its sort order and
@@ -1956,16 +2090,12 @@ function csvSerialize(
 function buildCsv(source: string): { ok: true; text: string } | { ok: false; error: string } {
   if (source === 'table') {
     if (!tableArr) return { ok: false, error: 'no table open' };
-    const rows = tableIdx.map((orig) => tableCols.map((c) => csvCell(tableCell(orig, c))));
-    return csvSerialize(tableCols, rows);
+    const rows = tableIdx.map((orig) => tableCols.map((c) => tableCell(orig, c)));
+    return collectExport(csvLines(tableCols, rows), 'CSV');
   }
   if (source === 'query') {
-    const r = lastQueryResult;
-    if (!r || !r.ok) return { ok: false, error: 'no query result to export' };
-    if (r.kind === 'rows') return csvSerialize(r.cols, r.rows.map((row) => row.map(csvCell)));
-    if (r.kind === 'groups')
-      return csvSerialize([r.label, 'count'], r.groups.map((g) => [csvCell(g.key), csvCell(g.count)]));
-    return { ok: false, error: 'this result is not a table' };
+    if (!lastQueryText) return { ok: false, error: 'no query result to export' };
+    return buildQueryExport(lastQueryText, 'csv');
   }
   return { ok: false, error: 'unknown csv source' };
 }
@@ -2027,8 +2157,30 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return { rows: tableRows(msg.start as number, msg.count as number) };
     case 'csv':
       return buildCsv(msg.source as string);
+    case 'exportQuery':
+      return buildQueryExport(msg.query as string, msg.format as 'csv' | 'jsonl');
+    case 'exportStart':
+      return startQueryExport(msg.query as string, msg.format as 'csv' | 'jsonl');
+    case 'exportNext':
+      return nextQueryExport(msg.exportId as string);
+    case 'exportAbort':
+      return { ok: queryExportSessions.delete(msg.exportId as string) };
     case 'query':
-      return doQuery(msg.q as string);
+      return doQuery(msg.q as string, {
+        offset: msg.offset as number | undefined,
+        limit: msg.limit as number | undefined,
+        cardinalityCap: msg.cardinalityCap as number | undefined,
+      });
+    case 'profile': {
+      const root = nodes.get(rootId);
+      if (!root) return { ok: false, error: 'no document open' };
+      return profileQuery(
+        root.value,
+        msg.query as string,
+        (msg.fields as string[] | undefined) ?? [],
+        msg.top as number | undefined,
+      );
+    }
     case 'queryReveal':
       return queryReveal(msg.i as number);
     case 'queryFilter':

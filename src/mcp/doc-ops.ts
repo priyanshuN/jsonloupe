@@ -7,9 +7,12 @@
 // No MCP concepts appear in this file, and no engine logic either. It is the
 // glue that turns "sample 5 values at $.tasks" into reveal → rows → nodeValue.
 
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { link, lstat, open, readFile, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { basename, dirname, join, resolve } from 'node:path';
 import { stringify as llStringify } from 'lossless-json';
 import { decodeJsonPayload, sniffPayloadText } from '../codec';
+import { MAX_EXPORT_BYTES } from '../export-policy';
 import {
   MAX_DOC_BYTES,
   fmtBytes,
@@ -18,6 +21,7 @@ import {
   payloadSniffNeedsDecode,
 } from '../intake';
 import type { NodeType, Row } from '../protocol';
+import type { ProfileResult } from '../profile';
 import { QUERY_GRAMMAR, QUERY_PIPES } from '../query-grammar';
 import type { DocRequest } from './pool';
 
@@ -52,10 +56,10 @@ export interface QueryMatch {
 }
 
 export type QueryResultView =
-  | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: QueryMatch[] }
-  | { ok: true; kind: 'value'; label: string; value: string; note?: string }
-  | { ok: true; kind: 'groups'; label: string; groups: [string, number][]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean };
+  | { ok: true; kind: 'matches'; total: number; offset: number; complete: boolean; truncated: boolean; matches: QueryMatch[] }
+  | { ok: true; kind: 'value'; label: string; value: string; complete: boolean; note?: string }
+  | { ok: true; kind: 'groups'; label: string; total: number; offset: number; complete: boolean; groups: [string, number][]; truncated: boolean }
+  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; offset: number; complete: boolean; truncated: boolean; note?: string };
 
 export interface SampleValue {
   path: string;
@@ -89,9 +93,11 @@ export interface DiffResultView {
 
 export interface CsvResult {
   ok: true;
+  format: 'csv' | 'jsonl';
   outPath: string;
   rows: number;
   bytes: number;
+  atomic: true;
 }
 
 /** Top-level keys are a fingerprint, not a listing: enough to aim the next call. */
@@ -229,6 +235,8 @@ interface RawQueryResult {
   error?: string;
   pos?: number;
   total?: number;
+  offset?: number;
+  complete?: boolean;
   truncated?: boolean;
   matches?: { pathText: string; preview: string }[];
   label?: string;
@@ -239,8 +247,12 @@ interface RawQueryResult {
   rows?: unknown[][];
 }
 
-export function runQuery(engine: Engine, query: string): QueryResultView | OpError {
-  const r = engine({ type: 'query', q: query }) as RawQueryResult;
+export function runQuery(
+  engine: Engine,
+  query: string,
+  options: { offset?: number; limit?: number; cardinalityCap?: number } = {},
+): QueryResultView | OpError {
+  const r = engine({ type: 'query', q: query, ...options }) as RawQueryResult;
   if (!r.ok) return queryError(query, r.error ?? 'query failed', r.pos ?? 0);
   switch (r.kind) {
     case 'matches':
@@ -248,6 +260,8 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         ok: true,
         kind: 'matches',
         total: r.total ?? 0,
+        offset: r.offset ?? 0,
+        complete: r.complete !== false,
         truncated: r.truncated === true,
         matches: (r.matches ?? []).map((m) => ({ path: m.pathText, preview: clip(m.preview, CELL_CHARS) })),
       };
@@ -257,6 +271,7 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         kind: 'value',
         label: r.label ?? '',
         value: r.value === null || r.value === undefined ? 'null' : String(r.value),
+        complete: r.complete !== false,
         note: r.note,
       };
     case 'groups':
@@ -264,6 +279,9 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         ok: true,
         kind: 'groups',
         label: r.label ?? '',
+        total: r.total ?? (r.groups?.length ?? 0),
+        offset: r.offset ?? 0,
+        complete: r.complete !== false,
         truncated: r.truncated === true,
         groups: (r.groups ?? []).map((g) => [clip(g.key, CELL_CHARS), g.count] as [string, number]),
       };
@@ -273,12 +291,26 @@ export function runQuery(engine: Engine, query: string): QueryResultView | OpErr
         kind: 'rows',
         cols: r.cols ?? [],
         total: r.total ?? 0,
+        offset: r.offset ?? 0,
+        complete: r.complete !== false,
         truncated: r.truncated === true,
+        note: r.note,
         rows: (r.rows ?? []).map((row) => row.map(cell)),
       };
     default:
       return fail(`unexpected query result '${r.kind}'`);
   }
+}
+
+export function profile(
+  engine: Engine,
+  query: string,
+  fields: string[],
+  top: number,
+): ProfileResult | OpError {
+  const result = engine({ type: 'profile', query, fields, top }) as ProfileResult | (OpError & { pos?: number });
+  if (!result.ok && typeof result.pos === 'number') return queryError(query, result.error, result.pos);
+  return result;
 }
 
 // ---------- sample ----------
@@ -410,20 +442,132 @@ export async function exportCsv(
   engine: Engine,
   query: string,
   outPath: string,
+  overwrite = false,
 ): Promise<CsvResult | OpError> {
-  const r = engine({ type: 'query', q: query }) as RawQueryResult;
-  if (!r.ok) return queryError(query, r.error ?? 'query failed', r.pos ?? 0);
-  const rows = r.kind === 'rows' ? (r.rows?.length ?? 0) : r.kind === 'groups' ? (r.groups?.length ?? 0) : -1;
-  if (rows < 0) {
-    return fail(
-      `a ${r.kind} result has no table shape`,
-      'Project columns first: `| pluck(@.id, @.status)`, or aggregate with `| group(@.x)`.',
-    );
+  return exportResult(engine, query, outPath, 'csv', overwrite);
+}
+
+export async function exportResult(
+  engine: Engine,
+  query: string,
+  outPath: string,
+  format: 'csv' | 'jsonl',
+  overwrite = false,
+): Promise<CsvResult | OpError> {
+  const target = resolve(outPath);
+  try {
+    if (!overwrite && await pathExists(target)) {
+      return fail(`refusing to overwrite existing path '${target}'`, 'Choose a new outPath or set overwrite=true explicitly.');
+    }
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
   }
-  const csv = engine({ type: 'csv', source: 'query' }) as { ok: boolean; text?: string; error?: string };
-  if (!csv.ok || csv.text === undefined) return fail(csv.error ?? 'CSV export failed');
-  await writeFile(outPath, csv.text, 'utf8');
-  return { ok: true, outPath, rows, bytes: Buffer.byteLength(csv.text, 'utf8') };
+
+  let started: {
+    ok: boolean;
+    exportId?: string;
+    error?: string;
+  };
+  try {
+    started = engine({ type: 'exportStart', query, format }) as typeof started;
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+  if (!started.ok || !started.exportId) {
+    const hint = format === 'csv'
+      ? 'Project columns first: `| pluck(@.id, @.status)`, or aggregate with `| group(@.x)`.'
+      : undefined;
+    return fail(started.error ?? `${format.toUpperCase()} export failed`, hint);
+  }
+
+  const exportId = started.exportId;
+  const temp = join(dirname(target), `.${basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+  let file: FileHandle | undefined;
+  let tempExists = false;
+  let rows = 0;
+  let bytes = 0;
+
+  try {
+    file = await open(temp, 'wx', 0o600);
+    tempExists = true;
+
+    for (;;) {
+      const next = engine({ type: 'exportNext', exportId }) as {
+        ok: boolean;
+        text?: string;
+        rows?: number;
+        bytes?: number;
+        done?: boolean;
+        error?: string;
+      };
+      if (!next.ok || next.text === undefined) throw new ExportFailure(next.error ?? `${format.toUpperCase()} export failed`);
+      const chunkBytes = Buffer.byteLength(next.text, 'utf8');
+      if (bytes + chunkBytes > MAX_EXPORT_BYTES) {
+        throw new ExportFailure(`too large for export (${MAX_EXPORT_BYTES} byte limit)`);
+      }
+      if (next.text) await file.writeFile(next.text, { encoding: 'utf8' });
+      bytes += chunkBytes;
+      rows = next.rows ?? rows;
+      if (next.done) break;
+    }
+
+    await file.sync();
+    await file.close();
+    file = undefined;
+
+    if (overwrite) {
+      await rename(temp, target);
+      tempExists = false;
+    } else {
+      try {
+        // link() is the atomic no-replace primitive: unlike rename(), it cannot
+        // clobber a path created after the optimistic existence check above.
+        await link(temp, target);
+      } catch (error) {
+        if (hasCode(error, 'EEXIST')) {
+          throw new ExportFailure(`refusing to overwrite existing path '${target}'`);
+        }
+        throw error;
+      }
+      // The target now names the complete inode. Removing the temporary name is
+      // cleanup only; a retry in finally covers an interrupted unlink.
+      await unlink(temp).catch(() => undefined);
+      tempExists = await pathExists(temp);
+    }
+
+    return { ok: true, format, outPath: target, rows, bytes, atomic: true };
+  } catch (error) {
+    return fail(
+      error instanceof Error ? error.message : String(error),
+      error instanceof ExportFailure && error.message.includes('overwrite')
+        ? 'Choose a new outPath or set overwrite=true explicitly.'
+        : undefined,
+    );
+  } finally {
+    try {
+      engine({ type: 'exportAbort', exportId });
+    } catch {
+      // File cleanup still has to run when an engine has died mid-export.
+    }
+    if (file) await file.close().catch(() => undefined);
+    if (tempExists) await unlink(temp).catch(() => undefined);
+  }
+}
+
+class ExportFailure extends Error {}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === code;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return false;
+    throw error;
+  }
 }
 
 // ---------- the op table ----------
@@ -439,7 +583,18 @@ export async function runDocOp(engine: Engine, request: DocRequest): Promise<unk
     case 'schema':
       return getSchema(engine, request.path as string | undefined);
     case 'query':
-      return runQuery(engine, request.query as string);
+      return runQuery(engine, request.query as string, {
+        offset: request.offset as number | undefined,
+        limit: request.limit as number | undefined,
+        cardinalityCap: request.cardinalityCap as number | undefined,
+      });
+    case 'profile':
+      return profile(
+        engine,
+        request.query as string,
+        (request.fields as string[] | undefined) ?? [],
+        request.top as number,
+      );
     case 'sample':
       return sample(engine, request.path as string, request.n as number);
     case 'text':
@@ -447,7 +602,15 @@ export async function runDocOp(engine: Engine, request: DocRequest): Promise<unk
     case 'diff':
       return diffAgainst(engine, request.baselineText as string, request.keySpec as string);
     case 'csv':
-      return exportCsv(engine, request.query as string, request.outPath as string);
+      return exportCsv(engine, request.query as string, request.outPath as string, request.overwrite === true);
+    case 'export':
+      return exportResult(
+        engine,
+        request.query as string,
+        request.outPath as string,
+        request.format as 'csv' | 'jsonl',
+        request.overwrite === true,
+      );
     default:
       return fail(`unknown document operation '${request.op}'`);
   }

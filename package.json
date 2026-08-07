@@ -42,6 +42,7 @@
     "build": "tsc --noEmit && vite build && npm run build:mcp",
     "build:mcp": "tsc -p tsconfig.mcp.json --noEmit && node scripts/build-mcp.mjs",
     "smoke:mcp": "node scripts/mcp-smoke.mjs",
+    "eval:agent": "node scripts/agent-choice-eval.mjs",
     "preview": "vite preview --port 5199",
     "test": "vitest run",
     "coverage": "vitest run --coverage",

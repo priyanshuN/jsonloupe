@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { open } from 'node:fs/promises';
+import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -271,10 +270,59 @@ describe('exportCsv', () => {
     await load(DOC);
     const outPath = join(dir, 'out.csv');
     const r = ok(await exportCsv(engine, '$.tasks[*] | pluck(@.id, @.weight)', outPath));
-    expect(r).toMatchObject({ outPath, rows: 3 });
+    expect(r).toMatchObject({ outPath, rows: 3, atomic: true });
     const csv = await readFile(outPath, 'utf8');
     expect(csv).toBe(`id,weight\r\n${INT64},${DECIMAL}\r\n9007199254740994,1.50\r\n9007199254740995,2\r\n`);
     expect(r.bytes).toBe(csv.length);
+  });
+
+  it('refuses to overwrite by default and replaces atomically only when explicit', async () => {
+    await load(DOC);
+    const outPath = join(dir, 'existing.csv');
+    await writeFile(outPath, 'keep me');
+
+    const refused = await exportCsv(engine, '$.tasks[*] | pluck(@.id)', outPath);
+    expect(refused).toMatchObject({ ok: false, hint: expect.stringContaining('overwrite=true') });
+    expect(await readFile(outPath, 'utf8')).toBe('keep me');
+
+    const replaced = ok(await exportCsv(engine, '$.tasks[*] | pluck(@.id)', outPath, true));
+    expect(replaced).toMatchObject({ atomic: true, rows: 3 });
+    expect(await readFile(outPath, 'utf8')).toBe(`id\r\n${INT64}\r\n9007199254740994\r\n9007199254740995\r\n`);
+  });
+
+  it('reports exact UTF-8 bytes rather than JavaScript character count', async () => {
+    await load('{"rows":[{"label":"😀"}]}');
+    const outPath = join(dir, 'unicode.csv');
+    const r = ok(await exportCsv(engine, '$.rows[*] | pluck(@.label)', outPath));
+    const csv = await readFile(outPath, 'utf8');
+    expect(r.bytes).toBe(Buffer.byteLength(csv, 'utf8'));
+    expect(r.bytes).toBeGreaterThan(csv.length);
+  });
+
+  it('removes the temporary file and publishes nothing if a stream fails', async () => {
+    let next = 0;
+    const broken: Engine = (msg) => {
+      if (msg.type === 'exportStart') return { ok: true, exportId: 'e1' };
+      if (msg.type === 'exportNext' && next++ === 0) {
+        return { ok: true, text: 'id\r\n', rows: 0, bytes: 4, done: false };
+      }
+      if (msg.type === 'exportNext') return { ok: false, error: 'stream failed' };
+      if (msg.type === 'exportAbort') throw new Error('engine already exited');
+      return { ok: true };
+    };
+    const outPath = join(dir, 'broken.csv');
+    const r = await exportCsv(broken, '$.rows[*] | pluck(@.id)', outPath);
+    expect(r).toMatchObject({ ok: false, error: 'stream failed' });
+    await expect(readFile(outPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(dir)).filter((name) => name.startsWith('.broken.csv.'))).toEqual([]);
+  });
+
+  it('returns an ordinary operation error when export setup throws', async () => {
+    const unavailable: Engine = () => {
+      throw new Error('export engine unavailable');
+    };
+    const r = await exportCsv(unavailable, '$.rows[*] | pluck(@.id)', join(dir, 'unavailable.csv'));
+    expect(r).toEqual({ ok: false, error: 'export engine unavailable' });
   });
 
   it('explains that a bare match list has no table shape', async () => {
