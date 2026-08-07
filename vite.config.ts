@@ -68,11 +68,13 @@ export default defineConfig({
   base: '/',
   plugins: [keyServer()],
   build: {
-    // Two static entries: the app/landing and the standalone spec page.
+    // Static entries: the app/landing, the standalone spec page, and the
+    // styleguide (the contract's stare page — rule 23).
     rollupOptions: {
       input: {
         main: join(root, 'index.html'),
         spec: join(root, 'spec.html'),
+        styleguide: join(root, 'styleguide.html'),
       },
     },
   },

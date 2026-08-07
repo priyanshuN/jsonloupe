@@ -19,26 +19,34 @@ interface Palette {
   danger: string; bracket: string; search: string; searchSel: string;
 }
 
-// `bg` is the one value shared pixel-for-pixel with the tree pane sitting next
-// to this editor in split view, so both palettes read it from the stylesheet
-// (--bg-canvas, style.css rule 11) instead of spelling it out here. Carrying a
-// second copy is exactly how light drifted to #ffffff on this side and #eef1f6
-// on the tree's while dark stayed accidentally in sync. Everything below `bg`
-// is editor-only and stays local.
+// The palettes read the stylesheet's tokens (style.css :root blocks) instead of
+// carrying their own copies — a second copy is exactly how light drifted to
+// #ffffff on this side and #eef1f6 on the tree's while dark stayed accidentally
+// in sync, and how the editor stayed on a pre-brand blue after the app went
+// teal. var() strings pass through CodeMirror's theme untouched and resolve
+// live against [data-theme], so "a theme is a token block" now covers the
+// editor too. Only the alpha PERCENTAGES of the wash colors stay local — dark
+// needs heavier washes than light, an optical decision, not a palette.
 const DARK: Palette = {
-  bg: 'var(--bg-canvas)', gutterBg: '#1c212a', text: '#e7ecf3', faint: '#6b7484', dim: '#9aa5b6',
-  cursor: '#86c8dc', sel: 'rgba(134,200,220,0.24)', activeLine: 'rgba(255,255,255,0.035)',
-  activeGutter: 'rgba(134,200,220,0.10)', border: '#2e3540',
-  key: '#8fbcdb', str: '#a3be8c', num: '#ecc384', bool: '#c69ac2', nul: '#79839a', punct: '#7c869a',
-  danger: '#e06c75', bracket: 'rgba(134,200,220,0.32)', search: 'rgba(236,195,132,0.22)', searchSel: 'rgba(236,195,132,0.45)',
+  bg: 'var(--bg-canvas)', gutterBg: 'var(--gutter-bg)', text: 'var(--text)', faint: 'var(--text-faint)', dim: 'var(--text-dim)',
+  /* Washes are rgb(from …) — the token's hue at an alpha — NEVER
+     color-mix(… X%, transparent), which mixes toward transparent BLACK and
+     quietly muddied every wash the first time this file was tokenized. */
+  cursor: 'var(--accent)', sel: 'rgb(from var(--accent) r g b / 24%)', activeLine: 'rgba(255,255,255,0.035)',
+  activeGutter: 'rgb(from var(--accent) r g b / 10%)', border: 'var(--border)',
+  key: 'var(--c-key)', str: 'var(--c-string)', num: 'var(--c-number)', bool: 'var(--c-boolean)', nul: 'var(--c-null)', punct: 'var(--c-punct)',
+  /* Search fills mix INTO the canvas (opaque): a transparent amber wash lifts
+     a dark canvas so little that only the 1px outline survived. Opaque mixes
+     buy a real luminance step (~2:1 vs canvas at 30%). */
+  danger: 'var(--danger)', bracket: 'rgb(from var(--accent) r g b / 32%)', search: 'color-mix(in srgb, var(--c-number) 30%, var(--bg-canvas))', searchSel: 'color-mix(in srgb, var(--c-number) 52%, var(--bg-canvas))',
 };
 
 const LIGHT: Palette = {
-  bg: 'var(--bg-canvas)', gutterBg: '#f4f6fa', text: '#1e2632', faint: '#949dac', dim: '#5c6675',
-  cursor: '#2f7bd6', sel: 'rgba(47,123,214,0.16)', activeLine: 'rgba(47,123,214,0.05)',
-  activeGutter: 'rgba(47,123,214,0.10)', border: '#e0e4ec',
-  key: '#2f6fb0', str: '#217a49', num: '#b06400', bool: '#8148b5', nul: '#97a0af', punct: '#97a0af',
-  danger: '#cf3450', bracket: 'rgba(47,123,214,0.24)', search: 'rgba(176,100,0,0.16)', searchSel: 'rgba(176,100,0,0.34)',
+  bg: 'var(--bg-canvas)', gutterBg: 'var(--gutter-bg)', text: 'var(--text)', faint: 'var(--text-faint)', dim: 'var(--text-dim)',
+  cursor: 'var(--accent)', sel: 'rgb(from var(--accent) r g b / 16%)', activeLine: 'rgb(from var(--accent) r g b / 5%)',
+  activeGutter: 'rgb(from var(--accent) r g b / 10%)', border: 'var(--border)',
+  key: 'var(--c-key)', str: 'var(--c-string)', num: 'var(--c-number)', bool: 'var(--c-boolean)', nul: 'var(--c-null)', punct: 'var(--c-punct)',
+  danger: 'var(--danger)', bracket: 'rgb(from var(--accent) r g b / 24%)', search: 'rgb(from var(--c-number) r g b / 16%)', searchSel: 'rgb(from var(--c-number) r g b / 34%)',
 };
 
 interface CreateOpts {
@@ -209,7 +217,7 @@ export class CodeEditor {
           '.cm-panels': { backgroundColor: p.gutterBg, color: p.text },
           '.cm-panels.cm-panels-bottom': { borderTop: `1px solid ${p.border}` },
           '.cm-panel.cm-search input, .cm-panel.cm-search button, .cm-panel.cm-search label': {
-            fontFamily: 'inherit', fontSize: '12px',
+            fontFamily: 'inherit', fontSize: 'var(--fs-body)',
           },
           '.cm-tooltip': { backgroundColor: p.gutterBg, border: `1px solid ${p.border}`, color: p.text },
         },
