@@ -39,6 +39,7 @@
   },
   "scripts": {
     "dev": "vite --port 5199",
+    "lint:contract": "node scripts/lint-contract.mjs",
     "build": "tsc --noEmit && vite build && npm run build:mcp",
     "build:mcp": "tsc -p tsconfig.mcp.json --noEmit && node scripts/build-mcp.mjs",
     "smoke:mcp": "node scripts/mcp-smoke.mjs",

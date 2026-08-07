@@ -31,8 +31,9 @@
   </script>
 </head>
 <body>
-  <!-- The icon set (contract rule 3): one 16-unit box, one 1.5 stroke, round
-       caps and joins, currentColor ink. Defined once here as <symbol>s and
+  <!-- The icon set (contract rule 3): one 16-unit box, ONE stroke width — set
+       once in CSS on .ic, not per symbol — round caps and joins, currentColor
+       ink. Defined once here as <symbol>s and
        referenced with <use> from markup and from main.ts's icon(), so a
        dynamically built button cannot draw a seventh weight. The six replace
        ◂ ⇆ ⟳ ⤓ ⚠ ☾ — characters whose weight no font metric could reconcile, two
@@ -40,23 +41,23 @@
        emoji colour. ⋯ × ▸ ▾ stay as characters: universally covered, and the
        carets are load-bearing at 13px in a mono column. -->
   <svg class="icon-sprite" aria-hidden="true">
-    <symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M9.5 3.5 5 8l4.5 4.5" />
     </symbol>
-    <symbol id="i-compare" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-compare" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 6h10" /><path d="M10.5 3.5 13 6l-2.5 2.5" />
       <path d="M13 10H3" /><path d="M5.5 7.5 3 10l2.5 2.5" />
     </symbol>
-    <symbol id="i-reload" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-reload" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M13 8A5 5 0 1 1 11.5 4.5" /><path d="M8.5 4.5h3v-3" />
     </symbol>
-    <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.5v7.5" /><path d="M4.75 6.75 8 10l3.25-3.25" /><path d="M3 13.25h10" />
     </symbol>
-    <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.6 14.4 13.4H1.6Z" /><path d="M8 6.6v3" /><path d="M8 11.6h.01" />
     </symbol>
-    <symbol id="i-theme" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <symbol id="i-theme" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M14 8.5A6 6 0 1 1 7.5 2 4.7 4.7 0 0 0 14 8.5Z" />
     </symbol>
   </svg>
@@ -259,7 +260,7 @@
               <div class="codec-box-head">
                 <label class="standing-label" for="codec-out-c">output · Base64</label>
                 <span class="spacer"></span>
-                <button id="codec-copy-c" type="button" title="Copy the base64 zstd result">copy</button>
+                <button id="codec-copy-c" class="btn-quiet" type="button" title="Copy the base64 zstd result">copy</button>
               </div>
               <textarea id="codec-out-c" readonly spellcheck="false" placeholder="base64(zstd(…))"></textarea>
             </div>
@@ -287,8 +288,8 @@
                      wedged between the buttons and the box. -->
                 <span id="codec-trace" hidden></span>
                 <span class="spacer"></span>
-                <button id="codec-copy-d" type="button" title="Copy the decoded JSON">copy</button>
-                <button id="codec-open-d" type="button" title="Parse the decompressed text as a document">open as document</button>
+                <button id="codec-copy-d" class="btn-quiet" type="button" title="Copy the decoded JSON">copy</button>
+                <button id="codec-open-d" class="btn-quiet" type="button" title="Parse the decompressed text as a document">open as document</button>
               </div>
               <textarea id="codec-out-d" readonly spellcheck="false" placeholder="decoded JSON appears here"></textarea>
             </div>
@@ -301,13 +302,13 @@
       <section id="viewer" data-pane="tree" hidden>
         <div id="toolbar">
           <div class="tb-doc">
-            <button id="back-btn" class="btn-icon" type="button" title="Back to paste" aria-label="Back to paste"><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg></button>
+            <button id="back-btn" class="btn-icon btn-quiet" type="button" title="Back to paste" aria-label="Back to paste"><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg></button>
             <span id="doc-title" title="Click to rename"></span>
             <span id="doc-stats"></span>
             <button id="repair-badge" title="Input was malformed and auto-repaired — click to see the original bytes you pasted" hidden><svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>input repaired</button>
-            <button id="payload-badge" title="This document was decoded locally from a transport payload" hidden>decoded payload</button>
-            <button id="original-btn" title="reopen the document this was decoded from" hidden><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>original</button>
-            <button id="reload-btn" title="Re-read this file from disk" hidden><svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>reload</button>
+            <button id="payload-badge" class="btn-quiet" title="This document was decoded locally from a transport payload" hidden>decoded payload</button>
+            <button id="original-btn" class="btn-quiet" title="reopen the document this was decoded from" hidden><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>original</button>
+            <button id="reload-btn" class="btn-quiet" title="Re-read this file from disk" hidden><svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>reload</button>
           </div>
           <button id="compare-btn" title="Choose a baseline and open semantic side-by-side comparison"><svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg>compare</button>
           <!-- Four layouts of the SAME document, so `run` is a view here rather
@@ -335,9 +336,9 @@
                panes, and main.ts moves these same three buttons down into the
                tree half of the shared strip. -->
           <div class="tb-tree" id="tb-tree-ops">
-            <button id="collapse-btn" type="button" title="Collapse every expanded node">collapse</button>
-            <button id="fmt-btn" type="button" title="Copy pretty-printed JSON">copy</button>
-            <button id="dl-btn" type="button" popovertarget="dl-name" aria-expanded="false"
+            <button id="collapse-btn" class="btn-quiet" type="button" title="Collapse every expanded node">collapse</button>
+            <button id="fmt-btn" class="btn-quiet" type="button" title="Copy pretty-printed JSON">copy</button>
+            <button id="dl-btn" class="btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
               title="Name and download the original bytes">download</button>
           </div>
           <!-- Rule 21: the name popover renders to the top layer rather than
@@ -352,7 +353,7 @@
                a document lives on the pane it acts on when there is a pane to
                scope it to (code-bar / the split strip). -->
           <div class="tb-more">
-            <button id="more-btn" class="btn-icon" type="button" aria-haspopup="menu"
+            <button id="more-btn" class="btn-icon btn-quiet" type="button" aria-haspopup="menu"
               aria-expanded="false" aria-controls="more-menu" title="More actions">⋯</button>
             <div id="more-menu" class="menu" role="menu" hidden>
               <button id="min-btn" role="menuitem" type="button" title="Copy minified JSON">copy minified</button>
@@ -368,7 +369,7 @@
           <div class="ask-row">
             <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
             <button id="ask-run" class="primary">run</button>
-            <button id="ask-key" title="Set the Anthropic API key (stored in this browser only)">key</button>
+            <button id="ask-key" class="btn-quiet" title="Set the Anthropic API key (stored in this browser only)">key</button>
           </div>
           <!-- A real form: satisfies Chrome's password-field containment warning
                and makes Enter save. autocomplete=off because this is an API key,
@@ -380,7 +381,7 @@
           <div id="ask-query-line" hidden>
             <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
             <button id="ask-query-run" class="primary" title="Run this query as a saved query">run</button>
-            <button id="ask-query-copy" title="Copy this query">copy</button>
+            <button id="ask-query-copy" class="btn-quiet" title="Copy this query">copy</button>
           </div>
           <details id="ask-disclosure" hidden>
             <summary>sent to model</summary>
@@ -423,9 +424,9 @@
           <div class="code-bar" id="code-bar">
             <span class="standing-label pane-label">code</span>
             <button id="code-apply" class="primary" title="Re-parse the edited JSON (Ctrl/Cmd+S)">apply changes</button>
-            <button id="code-format" title="Re-format / pretty-print">format</button>
-            <button id="code-copy" title="Copy the editor contents">copy</button>
-            <button id="code-raw" title="Show the exact original bytes (key order, whitespace, precision) vs the canonical form">source</button>
+            <button id="code-format" class="btn-quiet" title="Re-format / pretty-print">format</button>
+            <button id="code-copy" class="btn-quiet" title="Copy the editor contents">copy</button>
+            <button id="code-raw" class="btn-quiet" title="Show the exact original bytes (key order, whitespace, precision) vs the canonical form">source</button>
             <!-- The editor's status readout used to sit here, at the TOP of the
                  pane, sharing a row with `apply changes`. It is a status line,
                  so it belongs on the app's bottom edge with every other one
@@ -478,12 +479,12 @@
             <span id="run-result-label">result</span>
             <span id="run-stale" hidden>source changed — re-run</span>
             <span class="spacer"></span>
-            <button id="run-copy" type="button" title="Copy the whole result">copy</button>
+            <button id="run-copy" class="btn-quiet" type="button" title="Copy the whole result">copy</button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts
                  remembers which button opened it and downloads accordingly. -->
-            <button id="run-dl" class="btn-icon" type="button" popovertarget="dl-name" aria-expanded="false"
+            <button id="run-dl" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
               aria-label="Name and download the result" title="Name and download the result"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
-            <button id="run-open" type="button" title="Open this result as a document of its own">open as document</button>
+            <button id="run-open" class="btn-quiet" type="button" title="Open this result as a document of its own">open as document</button>
           </div>
           <div id="run-viewport" hidden>
             <div id="run-spacer"></div>
