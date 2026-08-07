@@ -323,7 +323,14 @@
               title="Search keys and values. Wrap in slashes for a regular expression: /order-\d+/">
             <button id="filter-btn" class="tb-chip" title="Prune the tree to branches matching the search text">filter</button>
           </div>
-          <button id="ask-btn" title="Ask a question about this document in English">ask</button>
+          <!-- Rule 4's grouping: both of these reveal a panel in the strip
+               below and neither does anything else, so they are one group at
+               the in-group gap rather than two toolbar items. -->
+          <div class="tb-panels">
+            <button id="ask-btn" title="Ask a question about this document in English">ask</button>
+            <button id="run-btn" type="button" aria-expanded="false" aria-controls="run-panel"
+              title="Run a JavaScript snippet over this document">run</button>
+          </div>
           <!-- The tree's three document ops, behind a hairline (contract rule
                10, revised): with one tree on screen there is no second pane to
                scope a strip to, so they ride the toolbar instead of spending a
@@ -333,8 +340,17 @@
           <div class="tb-tree" id="tb-tree-ops">
             <button id="collapse-btn" type="button" title="Collapse every expanded node">collapse</button>
             <button id="fmt-btn" type="button" title="Copy pretty-printed JSON">copy</button>
-            <button id="dl-btn" type="button" title="Download the original bytes">download</button>
+            <button id="dl-btn" type="button" popovertarget="dl-name" aria-expanded="false"
+              title="Name and download the original bytes">download</button>
           </div>
+          <!-- Rule 21: the name popover renders to the top layer rather than
+               hanging off whichever bar #dl-btn is standing in — main.ts moves
+               that button between the toolbar and the split strip. A <form> so
+               Enter downloads, same idiom as the ask panel's key row. -->
+          <form id="dl-name" popover>
+            <input id="dl-name-input" spellcheck="false" aria-label="File name for the download">
+            <button type="submit" class="primary">download</button>
+          </form>
           <!-- Overflow: once-per-document-or-less. Anything you do while READING
                a document lives on the pane it acts on when there is a pane to
                scope it to (code-bar / the split strip). -->
@@ -376,6 +392,34 @@
           <div id="ask-status" hidden></div>
           <div id="ask-result" hidden></div>
           <div id="ask-saved"></div>
+        </div>
+        <!-- The run panel: a sibling strip of #ask-panel, not a mode of it —
+             one may be open without the other. The script runs in an ephemeral
+             sandbox worker (run-sandbox.ts), never in the parser worker that
+             owns the document. -->
+        <div id="run-panel" hidden>
+          <div id="run-lossy" hidden>
+            <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>this document has numbers plain JS cannot hold exactly — the script sees them rounded
+          </div>
+          <div id="run-editor"></div>
+          <div class="run-row">
+            <button id="run-exec" type="button" class="primary">run</button>
+            <span id="run-status" hidden></span>
+          </div>
+          <div id="run-error" hidden></div>
+          <div id="run-result" hidden>
+            <div class="run-row">
+              <span id="run-result-note"></span>
+              <span class="spacer"></span>
+              <button id="run-copy" type="button" title="Copy the full result">copy</button>
+              <button id="run-download" type="button" title="Download the full result as result.json"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>download</button>
+            </div>
+            <pre id="run-output"></pre>
+          </div>
+          <details id="run-console" hidden>
+            <summary>console</summary>
+            <pre id="run-console-body"></pre>
+          </details>
         </div>
         <div id="search-panel" hidden></div>
         <div id="pane-area">

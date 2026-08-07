@@ -40,6 +40,8 @@ import {
 import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayload } from './nl';
 import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
+import type { ScriptEditor } from './run-editor';
+import type { RunResult } from './run-exec';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
 // 404s on its first lazy import (e.g. the CodeMirror chunks). Vite surfaces
@@ -419,6 +421,19 @@ function emptyState(
   return el;
 }
 
+// Placing a top-layer popover under its own trigger (style.css rule 21): the
+// browser gives light dismiss and Esc, anchor positioning is not portable yet,
+// so this is the part that stays ours. Right-aligned under the trigger, clamped
+// to the viewport so a narrow window slides the panel in rather than off.
+function positionUnder(panel: HTMLElement, anchorEl: HTMLElement): void {
+  const anchor = anchorEl.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.max(gap, Math.min(anchor.right - box.width, window.innerWidth - box.width - gap));
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.top = `${Math.round(anchor.bottom + gap)}px`;
+}
+
 let toastTimer = 0;
 // `bad` is the failure tier (style.css contract rule 15): a copy that worked and
 // a file that could not be read must not be announced in the same colour.
@@ -486,7 +501,19 @@ async function pickPayloadFiles(
   }
 }
 
-// ---------- CSV download ----------
+// ---------- downloads ----------
+
+function downloadText(text: string, filename: string, mime: string): void {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 function sanitizeFilePart(s: string, max: number): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);
@@ -499,25 +526,13 @@ function csvFilename(suffix: string): string {
   return `${base}${tail ? '_' + tail : ''}.csv`;
 }
 
-function downloadCsv(text: string, filename: string): void {
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 async function exportCsv(source: 'table' | 'query', suffix: string): Promise<void> {
   const r = await call<{ ok: boolean; text?: string; error?: string }>({ type: 'csv', source });
   if (!r.ok || r.text === undefined) {
     showToast(r.error ?? 'CSV export failed', 'bad');
     return;
   }
-  downloadCsv(r.text, csvFilename(suffix));
+  downloadText(r.text, csvFilename(suffix), 'text/csv;charset=utf-8');
   showToast('CSV downloaded');
 }
 
@@ -1690,6 +1705,10 @@ async function openText(
   searchPanel.hidden = true;
   searchBox.value = '';
   resetAskPanel();
+  resetRunPanel(res.hasUnsafeNumbers);
+  // A new document brings its own name; the last one's chosen download name is
+  // not it.
+  downloadName = '';
   filterOn = false;
   filterScrollSnapshot = null;
   filterBtn.classList.remove('on');
@@ -2235,13 +2254,64 @@ $('#min-btn').addEventListener('click', async () => {
   showToast('minified JSON copied');
 });
 
-treeDownloadBtn.addEventListener('click', () => {
-  const blob = new Blob([currentText], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = /\.[a-z]+$/i.test(currentTitle) ? currentTitle : 'document.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
+// ---------- download: naming the file ----------
+
+// A pasted document has no filename, and `document.json` in the downloads
+// folder is indistinguishable from the last four of them — so ⇩ asks first.
+// The chosen name is remembered for THIS document only and is deliberately not
+// written back into currentTitle, which names the document everywhere else.
+const dlNameForm = $<HTMLFormElement>('#dl-name');
+const dlNameInput = $<HTMLInputElement>('#dl-name-input');
+let downloadName = '';
+
+const hasExtension = (name: string): boolean => /\.[a-z0-9]+$/i.test(name);
+
+function defaultDownloadName(): string {
+  return hasExtension(currentTitle) ? currentTitle : 'document.json';
+}
+
+// Path separators and control characters are what a browser would silently
+// rewrite (or refuse) anyway; an extensionless name gets .json so the file
+// opens in something rather than nothing.
+function sanitizeDownloadName(raw: string): string {
+  const name = raw.replace(/[\\/\u0000-\u001f]+/g, '').trim().slice(0, 120);
+  if (!name) return defaultDownloadName();
+  return hasExtension(name) ? name : `${name}.json`;
+}
+
+// Tracked, not read back: hidePopover() on a popover that is not showing
+// throws, and a browser without popover support never opens this one at all
+// (style.css keeps it display:none there) — same reasoning as #sem-plan-body.
+let dlNameOpen = false;
+
+// beforetoggle fires synchronously inside the show algorithm, so the frame
+// scheduled here still lands before the popover's first paint.
+dlNameForm.addEventListener('beforetoggle', (event) => {
+  dlNameOpen = (event as ToggleEvent).newState === 'open';
+  treeDownloadBtn.setAttribute('aria-expanded', String(dlNameOpen));
+  if (!dlNameOpen) return;
+  dlNameInput.value = downloadName || defaultDownloadName();
+  // Basename pre-selected, so typing replaces the name and keeps the extension
+  // — the edit this popover exists for.
+  const dot = dlNameInput.value.lastIndexOf('.');
+  requestAnimationFrame(() => {
+    positionUnder(dlNameForm, treeDownloadBtn);
+    dlNameInput.focus();
+    dlNameInput.setSelectionRange(0, dot > 0 ? dot : dlNameInput.value.length);
+  });
+});
+
+// Submit, not click: Enter in the field downloads, same idiom as the ask
+// panel's key row.
+dlNameForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  downloadName = sanitizeDownloadName(dlNameInput.value);
+  downloadText(currentText, downloadName, 'application/json');
+  if (dlNameOpen) dlNameForm.hidePopover();
+});
+
+window.addEventListener('resize', () => {
+  if (dlNameOpen) positionUnder(dlNameForm, treeDownloadBtn);
 });
 
 // ---------- toolbar overflow menu ----------
@@ -2460,6 +2530,9 @@ async function applyCode(): Promise<void> {
   currentText = text;
   markCurrentContentEdited();
   docStatsEl.textContent = `${fmtBytes(text.length)} · parsed in ${res.parseMs} ms${res.jsonl ? ' · JSONL' : ''}`;
+  // The applied text is a different document to the script: its result is stale
+  // and its numbers may have gained or lost exactness.
+  resetRunPanel(res.hasUnsafeNumbers);
   persistCurrentSnapshot(text, null);
   tree.setTotal(res.totalRows);
   tree.resetSelection();
@@ -3047,6 +3120,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   semanticCompare.reset();
   searchPanel.hidden = true;
   $('#ask-panel').hidden = true;
+  closeRunPanel();
   showPane('semantic');
   // showPane hands compare the bottom edge; this is its resting line until a
   // row is picked.
@@ -3075,19 +3149,9 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
 
 // The alignment plan is a popover (index.html, style.css rule 21): the browser
 // renders it in the top layer, so .sem-toolbar's overflow-x cannot clip it, and
-// light dismiss + Esc come with the attribute. What is left to us is placing it
-// under its own trigger — anchor positioning is not portable yet — and keeping
-// the button's aria-expanded honest.
-function positionSemPlan(): void {
-  const anchor = semPlanBtn.getBoundingClientRect();
-  const panel = semPlanBody.getBoundingClientRect();
-  const gap = 8;
-  // Prefer right-aligned under the trigger, as it hung before; clamp to the
-  // viewport so a narrow window slides it in rather than off.
-  const left = Math.max(gap, Math.min(anchor.right - panel.width, window.innerWidth - panel.width - gap));
-  semPlanBody.style.left = `${Math.round(left)}px`;
-  semPlanBody.style.top = `${Math.round(anchor.bottom + gap)}px`;
-}
+// light dismiss + Esc come with the attribute. Placing it under its own trigger
+// is positionUnder's job, shared with the download-name popover.
+const positionSemPlan = (): void => positionUnder(semPlanBody, semPlanBtn);
 
 // Tracked rather than read back off the element: `hidePopover()` on a popover
 // that is not showing throws, and a browser without popover support would throw
@@ -3692,15 +3756,210 @@ askSaved.addEventListener('click', async (e) => {
   await runAsk(saved.query); // engine-only re-run: no API call
 });
 
+// ---------- run: JavaScript over the document ----------
+
+// The ask panel answers questions in the query language; this one answers the
+// ones no query language should have to — a filter with a regex in it, a sum
+// over a computed field, a reshape. It is a SIBLING of #ask-panel, not a mode
+// of it: either can be open without the other.
+//
+// The script never reaches the parser worker. Each run gets its own sandbox
+// worker (run-sandbox.ts) holding nothing but a copy of the document text, and
+// that worker is terminated on the result or on the timeout — which is what
+// keeps `while (true) {}` from taking the app with it.
+
+const RUN_TIMEOUT_MS = 10_000;
+const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
+const RUN_PLACEHOLDER = 'return data.tasks.filter(t => t.status === "FAILED").length';
+
+const runPanel = $('#run-panel');
+const runBtn = $<HTMLButtonElement>('#run-btn');
+const runLossy = $('#run-lossy');
+const runEditorHost = $('#run-editor');
+const runExecBtn = $<HTMLButtonElement>('#run-exec');
+const runStatus = $('#run-status');
+const runErrorEl = $('#run-error');
+const runResult = $('#run-result');
+const runResultNote = $('#run-result-note');
+const runOutput = $('#run-output');
+const runConsole = $<HTMLDetailsElement>('#run-console');
+const runConsoleBody = $('#run-console-body');
+
+let runEditor: ScriptEditor | null = null;
+let runInFlight = false;
+// The last run's full compact result — what copy and download hand over. What
+// is on screen is only the part that fits.
+let runResultText = '';
+
+function loadLastScript(): string {
+  try {
+    return localStorage.getItem(RUN_SCRIPT_KEY) ?? '';
+  } catch {
+    return ''; // private mode
+  }
+}
+
+function saveLastScript(code: string): void {
+  try { localStorage.setItem(RUN_SCRIPT_KEY, code); } catch { /* private mode */ }
+}
+
+function setRunStatus(msg: string): void {
+  runStatus.hidden = !msg;
+  runStatus.textContent = msg;
+}
+
+// A new document (or a re-applied one) invalidates the result on screen. The
+// script survives, for the same reason the ask panel's question does: it is the
+// user's own input and is meant to be re-run across documents.
+function resetRunPanel(hasUnsafeNumbers: boolean): void {
+  runLossy.hidden = !hasUnsafeNumbers;
+  runResultText = '';
+  runResult.hidden = true;
+  runErrorEl.hidden = true;
+  runConsole.hidden = true;
+  runConsole.open = false;
+  setRunStatus('');
+}
+
+async function ensureRunEditor(): Promise<void> {
+  if (runEditor) return;
+  let mod: typeof import('./run-editor');
+  try {
+    mod = await import('./run-editor');
+  } catch {
+    // A deploy replaced this tab's hashed chunks — same case ensureEditor
+    // handles for the code view, same fallback.
+    runEditorHost.replaceChildren(
+      emptyState(
+        'jsonloupe was updated since this tab loaded',
+        'Reload the page to open the run panel.',
+      ),
+    );
+    return;
+  }
+  runEditor = await mod.ScriptEditor.create({
+    host: runEditorHost,
+    doc: loadLastScript(),
+    placeholder: RUN_PLACEHOLDER,
+    onRun: () => void runScript(),
+    onChange: saveLastScript,
+  });
+}
+
+function executeInSandbox(docText: string, code: string): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const sandbox = new Worker(new URL('./run-sandbox.ts', import.meta.url), { type: 'module' });
+    let timer = 0;
+    let settled = false;
+    const finish = (res: RunResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sandbox.terminate();
+      resolve(res);
+    };
+    timer = window.setTimeout(
+      () => finish({ ok: false, error: `script timed out after ${RUN_TIMEOUT_MS / 1000}s`, logs: [] }),
+      RUN_TIMEOUT_MS,
+    );
+    sandbox.onmessage = (e: MessageEvent) => finish(e.data as RunResult);
+    sandbox.onerror = (e) => finish({
+      ok: false,
+      error: e.message || 'the sandbox worker could not be started',
+      logs: [],
+    });
+    sandbox.postMessage({ docText, code });
+  });
+}
+
+function renderRunResult(res: RunResult): void {
+  runConsole.hidden = res.logs.length === 0;
+  runConsole.open = false;
+  runConsoleBody.textContent = res.logs.join('\n');
+
+  if (!res.ok) {
+    runResult.hidden = true;
+    runResultText = '';
+    runErrorEl.textContent = `✗ ${res.error}`;
+    runErrorEl.hidden = false;
+    setRunStatus('');
+    return;
+  }
+  runErrorEl.hidden = true;
+  runResultText = res.resultText;
+  runOutput.textContent = res.truncatedPreview;
+  runResultNote.textContent = res.truncated
+    ? `${fmtBytes(res.resultText.length)} · preview truncated — download for the full result`
+    : fmtBytes(res.resultText.length);
+  runResult.hidden = false;
+  setRunStatus(`ran in ${res.ms} ms`);
+}
+
+async function runScript(): Promise<void> {
+  if (runInFlight) return;
+  const code = runEditor?.getDoc().trim() ?? '';
+  if (!code) {
+    setRunStatus('the box is the body of (data) => { … } — write one and return something');
+    return;
+  }
+  if (!currentText) {
+    setRunStatus('open a document first');
+    return;
+  }
+  // A run outlives the document it was started on if the user opens another
+  // one mid-flight; the result belongs to the old document, so it is dropped
+  // rather than rendered under the new one.
+  const documentRevision = currentDocumentRevision;
+  runInFlight = true;
+  runExecBtn.disabled = true;
+  runErrorEl.hidden = true;
+  setRunStatus('running…');
+  const res = await executeInSandbox(currentText, code);
+  runInFlight = false;
+  runExecBtn.disabled = false;
+  if (documentRevision !== currentDocumentRevision) return;
+  renderRunResult(res);
+}
+
+// Semantic compare hides the whole .tb-panels group, so an open run panel
+// would wedge with no way to dismiss it — openSemanticCompare force-closes.
+function closeRunPanel(): void {
+  runPanel.hidden = true;
+  runBtn.classList.remove('on');
+  runBtn.setAttribute('aria-expanded', 'false');
+}
+
+runBtn.addEventListener('click', () => {
+  const open = Boolean(runPanel.hidden);
+  runPanel.hidden = !open;
+  runBtn.classList.toggle('on', open);
+  runBtn.setAttribute('aria-expanded', String(open));
+  if (open) void ensureRunEditor().then(() => runEditor?.focus());
+});
+
+runExecBtn.addEventListener('click', () => void runScript());
+
+$('#run-copy').addEventListener('click', async () => {
+  await copyText(runResultText);
+  showToast('result copied');
+});
+
+$('#run-download').addEventListener('click', () => {
+  downloadText(runResultText, 'result.json', 'application/json');
+});
+
 // ---------- keyboard ----------
 
 window.addEventListener('keydown', async (e) => {
   const ae = document.activeElement;
-  // The CodeMirror surface is a contenteditable div, not an <input>/<textarea> —
-  // count focus inside it as "typing" so tree j/k/y/c don't steal its keystrokes
-  // (critical in split, where the tree and editor are on screen together).
+  // A CodeMirror surface is a contenteditable div, not an <input>/<textarea> —
+  // count focus inside either of them as "typing" so tree j/k/y/c don't steal
+  // its keystrokes (critical in split, where the tree and editor are on screen
+  // together, and in the run panel, which sits above an open tree).
   const typing =
-    ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement || (ae != null && codeHost.contains(ae));
+    ae instanceof HTMLInputElement ||
+    ae instanceof HTMLTextAreaElement ||
+    (ae != null && (codeHost.contains(ae) || runEditorHost.contains(ae)));
   // '/' focuses search — but not while the code editor is up (it must type '/').
   if (e.key === '/' && !viewer.hidden && !typing && codeView.hidden && activePane !== 'semantic') {
     e.preventDefault();

@@ -51,6 +51,7 @@
   "devDependencies": {
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@codemirror/commands": "^6.6.0",
+    "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.1",
     "@codemirror/language": "^6.10.2",
     "@codemirror/search": "^6.5.6",

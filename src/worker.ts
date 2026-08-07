@@ -36,7 +36,7 @@ import {
   type PayloadDecodeFailure,
   type PayloadDecodeSuccess,
 } from './codec';
-import { parse as llParse, stringify as llStringify, isLosslessNumber, LosslessNumber } from 'lossless-json';
+import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber, LosslessNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
 
 // Lossless number handling: box a number whenever its canonical float form is
@@ -48,9 +48,19 @@ import { jsonrepair } from 'jsonrepair';
 // and this tool's one promise is that not a single digit changes. String(f)
 // also rejects everything isSafeNumber rejected (a differing significant digit
 // is in particular a differing byte), so this boxes strictly more, never less.
+//
+// Boxing is deliberately wider than "would lose digits" — '88.10' and '1e3' are
+// boxed to keep the author's formatting — so it cannot double as the run
+// panel's warning. isSafeNumber answers the narrower question the panel asks
+// ("would plain JSON.parse round this?"), and it only runs on the boxed
+// minority, so the common document pays nothing for it.
+let sawUnsafeNumber = false;
+
 const numberParser = (v: string): unknown => {
   const f = parseFloat(v);
-  return String(f) === v ? f : new LosslessNumber(v);
+  if (String(f) === v) return f;
+  if (!isSafeNumber(v)) sawUnsafeNumber = true;
+  return new LosslessNumber(v);
 };
 
 function lparse(text: string): unknown {
@@ -604,6 +614,9 @@ function doParse(text: string, isApply: boolean): ParseOk | ParseErr {
   const t0 = performance.now();
   const parserText = parserBoundaryText(text);
   const positionOffset = parserText.length === text.length ? 0 : 1;
+  // numberParser writes this flag as it goes; every lparse below is synchronous,
+  // so resetting here and reading after the last one is the whole bookkeeping.
+  sawUnsafeNumber = false;
   let value: unknown;
   let jsonl = false;
   let repaired = false;
@@ -636,7 +649,7 @@ function doParse(text: string, isApply: boolean): ParseOk | ParseErr {
     undoStack = [];
     redoStack = [];
   }
-  return { ok: true, totalRows: visible.length, parseMs, jsonl, repaired };
+  return { ok: true, totalRows: visible.length, parseMs, jsonl, repaired, hasUnsafeNumbers: sawUnsafeNumber };
 }
 
 function formatStandalone(
