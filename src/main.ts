@@ -42,6 +42,7 @@ import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
 import type { RunResult } from './run-exec';
+import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
 // 404s on its first lazy import (e.g. the CodeMirror chunks). Vite surfaces
@@ -58,59 +59,15 @@ window.addEventListener('vite:preloadError', (e) => {
 
 // ---------- worker rpc ----------
 
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-const WORKER_TIMEOUT_MS = 120_000;
-const pending = new Map<number, {
-  resolve: (result: unknown) => void;
-  reject: (error: Error) => void;
-  timer: number;
-}>();
-let seq = 0;
+// The document's worker, and the only one the app itself talks to. Run mode
+// spawns a SECOND instance for its result (`runResultChannel` below): the
+// mechanics are shared, this instance is the document's, and nothing a user
+// script does can reach it.
+const docChannel = createWorkerChannel('document');
 
 function call<T>(msg: Record<string, unknown>): Promise<T> {
-  const reqId = ++seq;
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      pending.delete(reqId);
-      reject(new Error(`worker request timed out: ${String(msg.type)}`));
-    }, WORKER_TIMEOUT_MS);
-    pending.set(reqId, {
-      resolve: resolve as (result: unknown) => void,
-      reject,
-      timer,
-    });
-    worker.postMessage({ ...msg, reqId });
-  });
+  return docChannel.call<T>(msg);
 }
-
-worker.onmessage = (e: MessageEvent) => {
-  const { reqId } = e.data as { reqId: number };
-  const waiter = pending.get(reqId);
-  if (!waiter) return;
-  pending.delete(reqId);
-  clearTimeout(waiter.timer);
-  const data = e.data as { error?: unknown; ok?: unknown };
-  if (typeof data.error === 'string' && data.ok === undefined) {
-    waiter.reject(new Error(data.error));
-  } else {
-    waiter.resolve(e.data);
-  }
-};
-
-function rejectPendingWorkerCalls(reason: string): void {
-  for (const waiter of pending.values()) {
-    clearTimeout(waiter.timer);
-    waiter.reject(new Error(reason));
-  }
-  pending.clear();
-}
-
-worker.onerror = (event) => {
-  rejectPendingWorkerCalls(event.message || 'worker crashed');
-};
-worker.onmessageerror = () => {
-  rejectPendingWorkerCalls('worker response could not be decoded');
-};
 
 type WorkerPayloadDecodeResult =
   | { ok: true; text: string; metadata: PayloadDecodeMetadata }
@@ -204,7 +161,10 @@ const splitDivider = $<HTMLElement>('#split-divider');
 const codeView = $('#code-view');
 const codeHost = $('#code-host');
 const toolbarTreeOps = $('#tb-tree-ops');
+const treeBar = $('#tree-bar');
 const treeBarOps = $('#tree-bar-ops');
+const codeBar = $('#code-bar');
+const codeBarOps = $('#code-bar-ops');
 const collapseBtn = $<HTMLButtonElement>('#collapse-btn');
 const treeCopyBtn = $<HTMLButtonElement>('#fmt-btn');
 const treeDownloadBtn = $<HTMLButtonElement>('#dl-btn');
@@ -300,15 +260,20 @@ function addStatusTrailChip(chip: HTMLElement): void {
   renderStatus();
 }
 
-type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic';
+type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic' | 'run';
 let activePane: Pane = 'tree';
 function showPane(p: Pane): void {
   activePane = p;
   const split = p === 'split';
+  const run = p === 'run';
   paneArea.classList.toggle('split', split);
-  treePane.hidden = !(p === 'tree' || split);
-  codeView.hidden = !(p === 'code' || split);
+  paneArea.classList.toggle('run', run);
+  // In run mode the left half is the SOURCE pane — whichever of the two the
+  // mini-switch is on.
+  treePane.hidden = !(p === 'tree' || split || (run && runSource === 'tree'));
+  codeView.hidden = !(p === 'code' || split || (run && runSource === 'code'));
   splitDivider.hidden = !split;
+  runPane.hidden = !run;
   diffView.hidden = p !== 'diff';
   semanticView.hidden = p !== 'semantic';
   tableView.hidden = p !== 'table';
@@ -320,16 +285,23 @@ function showPane(p: Pane): void {
   // Top-layer panels outlive the pane that opened them (rule 21) — the plan
   // panel would otherwise still be floating over the tree.
   if (p !== 'semantic') closeSemPlan();
-  placeTreeOps(split);
-  // The mode switch reflects tree/code/split; transient sub-views have no tab.
-  setModeTab(p === 'tree' || p === 'code' || p === 'split' ? p : null);
-  paintStatusForPane(p);
+  // Every way out of run mode goes through here — another view, a comparison, a
+  // new document — so the result worker is torn down in exactly one place.
+  if (!run) exitRunMode();
+  placeTreeOps(p);
+  placeRunSourceSwitch(p);
+  // The mode switch reflects the four layouts; transient sub-views have no tab.
+  setModeTab(p === 'tree' || p === 'code' || p === 'split' || run ? p : null);
+  paintStatusForPane();
 }
 
 // Handing the bottom edge to the pane taking over. Only the views that keep a
 // standing lead are repainted here — table, diff and compare write theirs when
 // they open, and nothing else can overwrite it now that there is one strip.
-function paintStatusForPane(p: Pane): void {
+// Reads activePane through the two ownership predicates rather than taking the
+// pane as an argument: which surface owns the lead is not the pane alone in run
+// mode, and one answer to that question beats two.
+function paintStatusForPane(): void {
   const codeOnScreen = codeOwnsStatus();
   // The editor's note and its search count are the editor's: off screen, the
   // shortcut they name is not even bound. The unapplied buffer itself survives
@@ -338,20 +310,32 @@ function paintStatusForPane(p: Pane): void {
   setStatusNote(codeOnScreen ? codeStatusText : '', codeOnScreen ? codeStatusKind : '');
   // In split the tree owns the lead and the code pane owns the note, which is
   // the arrangement 8g wanted: the path you are reading and the fact that the
-  // buffer under it is not the parsed document, on one line.
-  if (p === 'tree' || p === 'split') updateCrumbSoon();
-  else if (p === 'code') setStatusLead(caretLead);
+  // buffer under it is not the parsed document, on one line. Run mode has one
+  // source pane, so the lead is that pane's.
+  if (treeOwnsStatus()) updateCrumbSoon();
+  else if (codeOwnsLead()) setStatusLead(caretLead);
 }
 
 // One set of buttons with one set of listeners, moved rather than duplicated:
 // the tree's three document ops live on the global toolbar while the tree is
-// the only pane, and in the tree half of the split strip once there is a pane
-// to scope them to.
-function placeTreeOps(split: boolean): void {
-  (split ? treeBarOps : toolbarTreeOps).append(collapseBtn, treeCopyBtn, treeDownloadBtn);
+// the only pane, and in the bar of the pane they act on once there is a second
+// pane to scope them to — the tree half in split, the source half in run mode
+// (whichever of the two it is showing).
+function placeTreeOps(p: Pane): void {
+  const sourceBar = p === 'run' && runSource === 'code' ? codeBarOps : treeBarOps;
+  const host = p === 'split' || p === 'run' ? sourceBar : toolbarTreeOps;
+  host.append(collapseBtn, treeCopyBtn, treeDownloadBtn);
 }
 
-function setModeTab(mode: 'tree' | 'code' | 'split' | null): void {
+// The source pane's tree/code switch: run mode only, and it stands in the bar
+// of whichever pane it is switching — the label of that bar, in effect.
+function placeRunSourceSwitch(p: Pane): void {
+  runSrcSwitch.hidden = p !== 'run';
+  if (p !== 'run') return;
+  (runSource === 'code' ? codeBar : treeBar).prepend(runSrcSwitch);
+}
+
+function setModeTab(mode: 'tree' | 'code' | 'split' | 'run' | null): void {
   for (const b of modeSwitch.querySelectorAll<HTMLButtonElement>('button')) {
     b.classList.toggle('on', b.dataset.mode === mode);
   }
@@ -903,7 +887,7 @@ for (const control of [
 $('#transport-run').addEventListener('click', () => void runTransportInspector());
 transportIncludeBaseline.addEventListener('change', () => void runTransportInspector());
 transportBtn.addEventListener('click', () => {
-  if (codeDirty && (activePane === 'code' || activePane === 'split')) {
+  if (codeDirty && codeOwnsStatus()) {
     showToast('Apply or discard code edits before measuring transport size');
     return;
   }
@@ -1031,8 +1015,12 @@ function persistCurrentSnapshot(
   });
 }
 
+// Every path that changes the document's CONTENT lands here — an inline tree
+// edit, an Apply, an undo — which makes it the one place a shown run result
+// learns that it is no longer about this document.
 function markCurrentContentEdited(): void {
   currentDocumentRevision++;
+  markRunResultStale();
   if (!currentProvenance) return;
   currentProvenance = null;
   payloadBadge.hidden = true;
@@ -1124,6 +1112,7 @@ const TREE_STATUS_RESTING = 'Select a row to see its path.';
 // answer the bottom edge may belong to another view. It only ever paints while
 // the tree is on screen.
 function treeOwnsStatus(): boolean {
+  if (activePane === 'run') return runSource === 'tree'; // the source pane's lead
   return activePane === 'tree' || activePane === 'split';
 }
 
@@ -1705,7 +1694,7 @@ async function openText(
   searchPanel.hidden = true;
   searchBox.value = '';
   resetAskPanel();
-  resetRunPanel(res.hasUnsafeNumbers);
+  resetRunState(res.hasUnsafeNumbers);
   // A new document brings its own name; the last one's chosen download name is
   // not it.
   downloadName = '';
@@ -1988,6 +1977,9 @@ window.addEventListener('drop', async (e) => {
 // a cold visitor backing out of payload tools, who has not opened anything yet.
 function goLanding(): void {
   beginOpenRequest();
+  // Back/+new skip showPane, so the run teardown must happen here too — a
+  // result worker holding a large parsed result must not outlive the visit.
+  exitRunMode();
   viewer.hidden = true;
   codecPane.hidden = true;
   landing.hidden = false;
@@ -2263,11 +2255,27 @@ $('#min-btn').addEventListener('click', async () => {
 const dlNameForm = $<HTMLFormElement>('#dl-name');
 const dlNameInput = $<HTMLInputElement>('#dl-name-input');
 let downloadName = '';
+// The result pane's ⇩ opens the same popover for the same reason (`result.json`
+// four times over is no better than `document.json` four times over), so the
+// form serves two subjects and remembers which button opened it.
+type DownloadSubject = 'document' | 'result';
+let dlSubject: DownloadSubject = 'document';
+let dlAnchor: HTMLElement = treeDownloadBtn;
+let resultDownloadName = '';
 
 const hasExtension = (name: string): boolean => /\.[a-z0-9]+$/i.test(name);
 
 function defaultDownloadName(): string {
-  return hasExtension(currentTitle) ? currentTitle : 'document.json';
+  if (dlSubject === 'result') return resultDownloadName || 'result.json';
+  return downloadName || (hasExtension(currentTitle) ? currentTitle : 'document.json');
+}
+
+// Which button was pressed decides what the form is naming. Set on the click,
+// which the browser dispatches before it runs the popover's activation
+// behaviour — so beforetoggle below already knows.
+function setDownloadSubject(subject: DownloadSubject, anchor: HTMLElement): void {
+  dlSubject = subject;
+  dlAnchor = anchor;
 }
 
 // Path separators and control characters are what a browser would silently
@@ -2288,14 +2296,14 @@ let dlNameOpen = false;
 // scheduled here still lands before the popover's first paint.
 dlNameForm.addEventListener('beforetoggle', (event) => {
   dlNameOpen = (event as ToggleEvent).newState === 'open';
-  treeDownloadBtn.setAttribute('aria-expanded', String(dlNameOpen));
+  dlAnchor.setAttribute('aria-expanded', String(dlNameOpen));
   if (!dlNameOpen) return;
-  dlNameInput.value = downloadName || defaultDownloadName();
+  dlNameInput.value = defaultDownloadName();
   // Basename pre-selected, so typing replaces the name and keeps the extension
   // — the edit this popover exists for.
   const dot = dlNameInput.value.lastIndexOf('.');
   requestAnimationFrame(() => {
-    positionUnder(dlNameForm, treeDownloadBtn);
+    positionUnder(dlNameForm, dlAnchor);
     dlNameInput.focus();
     dlNameInput.setSelectionRange(0, dot > 0 ? dot : dlNameInput.value.length);
   });
@@ -2305,13 +2313,21 @@ dlNameForm.addEventListener('beforetoggle', (event) => {
 // panel's key row.
 dlNameForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  downloadName = sanitizeDownloadName(dlNameInput.value);
-  downloadText(currentText, downloadName, 'application/json');
+  const name = sanitizeDownloadName(dlNameInput.value);
+  if (dlSubject === 'result') {
+    resultDownloadName = name;
+    downloadText(runResultText, name, 'application/json');
+  } else {
+    downloadName = name;
+    downloadText(currentText, name, 'application/json');
+  }
   if (dlNameOpen) dlNameForm.hidePopover();
 });
 
+treeDownloadBtn.addEventListener('click', () => setDownloadSubject('document', treeDownloadBtn));
+
 window.addEventListener('resize', () => {
-  if (dlNameOpen) positionUnder(dlNameForm, treeDownloadBtn);
+  if (dlNameOpen) positionUnder(dlNameForm, dlAnchor);
 });
 
 // ---------- toolbar overflow menu ----------
@@ -2372,7 +2388,14 @@ let caretLead = '';
 // true while the editor is on screen — and it can still dispatch transactions
 // while hidden (a theme change reconfigures it), so every publish asks first.
 function codeOwnsStatus(): boolean {
-  return activePane === 'code' || activePane === 'split';
+  return activePane === 'code' || activePane === 'split' || (activePane === 'run' && runSource === 'code');
+}
+
+// Its note and its count belong to the editor wherever it is on screen; the
+// LEAD is only its own where there is no tree beside it to own that (in split
+// the tree does, and in run mode it depends which source pane is up).
+function codeOwnsLead(): boolean {
+  return activePane === 'code' || (activePane === 'run' && runSource === 'code');
 }
 
 function setCodeStatus(kind: StatusTone, msg: string): void {
@@ -2398,7 +2421,7 @@ function showCodeTooBig(): void {
   // worse than none. The strip keeps the fact instead.
   caretLead = '';
   setCodeStatus('', `too large to edit as text · ${fmtBytes(currentText.length)}`);
-  if (activePane === 'code') setStatusLead('');
+  if (codeOwnsLead()) setStatusLead('');
 }
 
 async function ensureEditor(): Promise<void> {
@@ -2431,7 +2454,7 @@ async function ensureEditor(): Promise<void> {
       caretLead = `line ${line} · col ${column}`;
       // In split the tree's path is the lead and this is only kept warm; the
       // caret is the answer to "where am I" when code is the whole view.
-      if (activePane === 'code') setStatusLead(caretLead);
+      if (codeOwnsLead()) setStatusLead(caretLead);
     },
     // 8a's count, delivered to the app's own strip instead of being drawn
     // inside CodeMirror's panel. It is only ever live while that panel is.
@@ -2470,39 +2493,35 @@ async function loadCodeContent(): Promise<void> {
   setCodeStatus('', 'in sync with the tree');
 }
 
-async function openCode(): Promise<void> {
-  showPane('code');
-  if (codeBusy) return;
+// Bring the editor up on the current document. Returns false when it did not
+// happen — another mount is already in flight, or the document is past the size
+// the editor takes — so callers do not follow up on a pane that is showing a
+// fallback. Three views mount the same editor; the guards belong with it.
+async function mountCodeEditor(): Promise<boolean> {
+  if (codeBusy) return false;
   if (currentText.length > CODE_MAX) {
     showCodeTooBig();
-    return;
+    return false;
   }
   codeBusy = true;
   try {
     await ensureEditor();
     await loadCodeContent();
-    codeEditor?.focus();
+    return true;
   } finally {
     codeBusy = false;
   }
 }
 
+async function openCode(): Promise<void> {
+  showPane('code');
+  if (await mountCodeEditor()) codeEditor?.focus();
+}
+
 async function openSplit(): Promise<void> {
   showPane('split');
   tree.refresh();
-  if (codeBusy) return;
-  if (currentText.length > CODE_MAX) {
-    showCodeTooBig();
-    return;
-  }
-  codeBusy = true;
-  try {
-    await ensureEditor();
-    await loadCodeContent();
-    syncCodeToSelectionSoon();
-  } finally {
-    codeBusy = false;
-  }
+  if (await mountCodeEditor()) syncCodeToSelectionSoon();
 }
 
 function showTree(): void {
@@ -2530,9 +2549,10 @@ async function applyCode(): Promise<void> {
   currentText = text;
   markCurrentContentEdited();
   docStatsEl.textContent = `${fmtBytes(text.length)} · parsed in ${res.parseMs} ms${res.jsonl ? ' · JSONL' : ''}`;
-  // The applied text is a different document to the script: its result is stale
-  // and its numbers may have gained or lost exactness.
-  resetRunPanel(res.hasUnsafeNumbers);
+  // The applied text is a different document to the one the script ran over —
+  // markCurrentContentEdited above has already marked any result stale — and its
+  // numbers may have gained or lost exactness.
+  setRunLossy(res.hasUnsafeNumbers);
   persistCurrentSnapshot(text, null);
   tree.setTotal(res.totalRows);
   tree.resetSelection();
@@ -2560,6 +2580,7 @@ modeSwitch.addEventListener('click', (e) => {
   if (!btn) return;
   if (btn.dataset.mode === 'code') void openCode();
   else if (btn.dataset.mode === 'split') void openSplit();
+  else if (btn.dataset.mode === 'run') void openRun();
   else showTree();
 });
 
@@ -3119,8 +3140,9 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   closeSemPlan();
   semanticCompare.reset();
   searchPanel.hidden = true;
-  $('#ask-panel').hidden = true;
-  closeRunPanel();
+  askPanel.hidden = true;
+  // Run mode is a pane layout now, so leaving it is showPane's job — the panel
+  // that had to be force-closed here no longer exists.
   showPane('semantic');
   // showPane hands compare the bottom edge; this is its resting line until a
   // row is picked.
@@ -3756,40 +3778,109 @@ askSaved.addEventListener('click', async (e) => {
   await runAsk(saved.query); // engine-only re-run: no API call
 });
 
-// ---------- run: JavaScript over the document ----------
+// ---------- run mode: source | result ----------
 
-// The ask panel answers questions in the query language; this one answers the
+// The ask panel answers questions in the query language; this view answers the
 // ones no query language should have to — a filter with a regex in it, a sum
-// over a computed field, a reshape. It is a SIBLING of #ask-panel, not a mode
-// of it: either can be open without the other.
+// over a computed field, a reshape. It is the fourth LAYOUT of the document
+// rather than a panel over it: source pane on the left, the script's result on
+// the right, both real document surfaces.
 //
-// The script never reaches the parser worker. Each run gets its own sandbox
-// worker (run-sandbox.ts) holding nothing but a copy of the document text, and
-// that worker is terminated on the result or on the timeout — which is what
-// keeps `while (true) {}` from taking the app with it.
+// Two workers, and neither of them is the document's. The script runs in an
+// ephemeral sandbox (run-sandbox.ts) holding nothing but a copy of the text,
+// terminated on the result or on the timeout — which is what keeps
+// `while (true) {}` from taking the app with it. The RESULT then goes into a
+// second doc-worker instance, which owns it exactly as the first owns the
+// document, so a 40 MB result scrolls the way a 40 MB file does. That worker
+// dies on the way out of run mode: results are large and two documents in
+// memory when only one is on screen is a cost with nothing to show for it.
 
 const RUN_TIMEOUT_MS = 10_000;
 const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
-const RUN_PLACEHOLDER = 'return data.tasks.filter(t => t.status === "FAILED").length';
+const RUN_PLACEHOLDER = 'data.tasks.filter(t => t.status === "FAILED").length';
 
-const runPanel = $('#run-panel');
-const runBtn = $<HTMLButtonElement>('#run-btn');
+const runPane = $('#run-pane');
 const runLossy = $('#run-lossy');
 const runEditorHost = $('#run-editor');
 const runExecBtn = $<HTMLButtonElement>('#run-exec');
 const runStatus = $('#run-status');
 const runErrorEl = $('#run-error');
-const runResult = $('#run-result');
-const runResultNote = $('#run-result-note');
-const runOutput = $('#run-output');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
+const runSrcSwitch = $('#run-src-switch');
+const runResultLabel = $('#run-result-label');
+const runStaleBadge = $('#run-stale');
+const runViewport = $('#run-viewport');
+const runEmpty = $('#run-empty');
+const runCopyBtn = $<HTMLButtonElement>('#run-copy');
+const runDownloadBtn = $<HTMLButtonElement>('#run-dl');
+const runOpenBtn = $<HTMLButtonElement>('#run-open');
 
 let runEditor: ScriptEditor | null = null;
 let runInFlight = false;
-// The last run's full compact result — what copy and download hand over. What
-// is on screen is only the part that fits.
+/** The last run's whole compact result — what copy, download and open hand over. */
 let runResultText = '';
+/** The result's own doc worker. Non-null exactly while run mode is on screen. */
+let runResultChannel: WorkerChannel | null = null;
+/** Which pane the left half is showing. Whatever the user arrived from. */
+let runSource: 'tree' | 'code' = 'tree';
+
+runEmpty.replaceChildren(
+  emptyState(
+    'run a script — the result renders here',
+    'The result is a document: it expands, scrolls and downloads like one.',
+    { pane: true },
+  ),
+);
+
+// Every result action answers null once that worker is gone — leaving run mode
+// terminates it, which rejects whatever was in flight, and the pane those rows
+// would have painted is already off screen. A failure on a channel that is
+// STILL the current one is a real one and says so.
+async function resultCall<T>(msg: Record<string, unknown>): Promise<T | null> {
+  const channel = runResultChannel;
+  if (!channel) return null;
+  try {
+    return await channel.call<T>(msg);
+  } catch (error) {
+    if (channel !== runResultChannel) return null; // torn down under the request
+    showToast(`result pane: ${error instanceof Error ? error.message : String(error)}`, 'bad');
+    return null;
+  }
+}
+
+// The result's tree. Same component, same row-slice protocol, a second callback
+// set over a second worker — no fork, and no table or inline editing, because a
+// derived value is not a document you own (see TreeCallbacks).
+const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'), {
+  fetchRows: async (start, count) => {
+    const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start, count });
+    return r?.rows ?? [];
+  },
+  onToggle: (id, index) => {
+    void resultCall<{ totalRows: number }>({ type: 'toggle', id, index }).then((r) => {
+      if (r) resultTree.setTotal(r.totalRows);
+    });
+  },
+  onCopyPath: (id) => {
+    void resultCall<{ text: string }>({ type: 'nodePath', id }).then((r) => {
+      if (r) void copyText(r.text).then(() => showToast(r.text));
+    });
+  },
+  onCopyValue: (id) => {
+    void resultCall<{ text: string }>({ type: 'nodeValue', id }).then((r) => {
+      if (r) void copyText(r.text).then(() => showToast('value copied'));
+    });
+  },
+  onUnpack: (id, index) => {
+    void resultCall<{ ok: boolean; totalRows: number; error?: string }>({ type: 'unpack', id, index })
+      .then((r) => {
+        if (!r) return;
+        if (!r.ok) showToast(r.error ?? 'not valid JSON', 'bad');
+        else resultTree.setTotal(r.totalRows);
+      });
+  },
+});
 
 function loadLastScript(): string {
   try {
@@ -3808,17 +3899,49 @@ function setRunStatus(msg: string): void {
   runStatus.textContent = msg;
 }
 
-// A new document (or a re-applied one) invalidates the result on screen. The
-// script survives, for the same reason the ask panel's question does: it is the
-// user's own input and is meant to be re-run across documents.
-function resetRunPanel(hasUnsafeNumbers: boolean): void {
+// True for as long as the document is open (style.css rule 15, tier 1): the
+// script sees plain JS numbers, and this document has some it cannot hold.
+function setRunLossy(hasUnsafeNumbers: boolean): void {
   runLossy.hidden = !hasUnsafeNumbers;
+}
+
+// The result on screen is no longer about this document. NEVER re-run for them:
+// the script is the user's, and a re-run is theirs to ask for.
+function markRunResultStale(): void {
+  if (runResultText) runStaleBadge.hidden = false;
+}
+
+function clearRunResult(): void {
   runResultText = '';
-  runResult.hidden = true;
+  runStaleBadge.hidden = true;
+  runResultLabel.textContent = 'result';
+  resultTree.resetSelection();
+  resultTree.setTotal(0);
+  runViewport.hidden = true;
+  runEmpty.hidden = false;
+  for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = true;
+}
+
+// A new document resets run mode entirely. The script survives, for the same
+// reason the ask panel's question does: it is the user's own input and is meant
+// to be re-run across documents.
+function resetRunState(hasUnsafeNumbers: boolean): void {
+  setRunLossy(hasUnsafeNumbers);
   runErrorEl.hidden = true;
   runConsole.hidden = true;
   runConsole.open = false;
   setRunStatus('');
+  resultDownloadName = '';
+  clearRunResult();
+}
+
+// Called from showPane on every exit, so there is one teardown rather than one
+// per way out (another view, a comparison, a new document).
+function exitRunMode(): void {
+  if (!runResultChannel) return;
+  runResultChannel.terminate();
+  runResultChannel = null;
+  clearRunResult();
 }
 
 async function ensureRunEditor(): Promise<void> {
@@ -3832,7 +3955,7 @@ async function ensureRunEditor(): Promise<void> {
     runEditorHost.replaceChildren(
       emptyState(
         'jsonloupe was updated since this tab loaded',
-        'Reload the page to open the run panel.',
+        'Reload the page to run scripts.',
       ),
     );
     return;
@@ -3845,6 +3968,40 @@ async function ensureRunEditor(): Promise<void> {
     onChange: saveLastScript,
   });
 }
+
+// Whatever the source pane needs to be showing, mounted. Split arrives on the
+// tree, so run mode entered from split defaults to it — the mini-switch is how
+// you get the other one.
+async function showRunSource(): Promise<void> {
+  showPane('run');
+  for (const b of runSrcSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', b.dataset.src === runSource);
+  }
+  if (runSource === 'code') await mountCodeEditor();
+  else tree.refresh();
+}
+
+async function openRun(): Promise<void> {
+  // The source pane starts as the view being left — someone reading raw code
+  // keeps reading it; split (and re-entry) fall back to the tree.
+  if (activePane !== 'run') runSource = activePane === 'code' ? 'code' : 'tree';
+  // Entering a pane layout closes the panels stacked above the panes, like
+  // every other pane swap does.
+  searchPanel.hidden = true;
+  askPanel.hidden = true;
+  if (!runResultChannel) runResultChannel = createWorkerChannel('result');
+  await showRunSource();
+  await ensureRunEditor();
+  runEditor?.focus();
+}
+
+runSrcSwitch.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-src]');
+  const src = btn?.dataset.src;
+  if ((src !== 'tree' && src !== 'code') || src === runSource) return;
+  runSource = src;
+  void showRunSource();
+});
 
 function executeInSandbox(docText: string, code: string): Promise<RunResult> {
   return new Promise((resolve) => {
@@ -3872,34 +4029,67 @@ function executeInSandbox(docText: string, code: string): Promise<RunResult> {
   });
 }
 
-function renderRunResult(res: RunResult): void {
+// The quiet line on the result bar: what came back, and how much of it. Read
+// from row 0 — the root node — rather than re-parsed here, so the type and the
+// count are the ones the pane is actually showing.
+async function paintResultLabel(): Promise<void> {
+  const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start: 0, count: 1 });
+  const root = r?.rows[0];
+  if (!root) return;
+  const count = root.type === 'object' || root.type === 'array'
+    ? ` ${fmtNumber(root.childCount)}`
+    : '';
+  runResultLabel.textContent = `result · ${root.type}${count}`;
+}
+
+// Hand the result to its own worker and read it back as a document. The guard
+// compares the channel it started with: leaving run mode terminates that worker,
+// and a result that arrives afterwards belongs to a pane that is gone.
+async function showResultDocument(text: string): Promise<void> {
+  const channel = runResultChannel;
+  const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text });
+  if (!res || channel !== runResultChannel) return;
+  if (!res.ok) {
+    // JSON.stringify produced this text, so this is a bug rather than bad input
+    // — say so plainly instead of blaming the script.
+    runErrorEl.textContent = `✗ the result could not be re-read: ${res.error}`;
+    runErrorEl.hidden = false;
+    clearRunResult();
+    return;
+  }
+  runResultText = text;
+  runStaleBadge.hidden = true;
+  runEmpty.hidden = true;
+  runViewport.hidden = false;
+  for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = false;
+  resultTree.resetSelection();
+  resultTree.setTotal(res.totalRows);
+  runViewport.scrollTop = 0;
+  await paintResultLabel();
+}
+
+async function renderRunResult(res: RunResult): Promise<void> {
   runConsole.hidden = res.logs.length === 0;
   runConsole.open = false;
   runConsoleBody.textContent = res.logs.join('\n');
 
   if (!res.ok) {
-    runResult.hidden = true;
-    runResultText = '';
+    clearRunResult();
     runErrorEl.textContent = `✗ ${res.error}`;
     runErrorEl.hidden = false;
     setRunStatus('');
     return;
   }
   runErrorEl.hidden = true;
-  runResultText = res.resultText;
-  runOutput.textContent = res.truncatedPreview;
-  runResultNote.textContent = res.truncated
-    ? `${fmtBytes(res.resultText.length)} · preview truncated — download for the full result`
-    : fmtBytes(res.resultText.length);
-  runResult.hidden = false;
-  setRunStatus(`ran in ${res.ms} ms`);
+  setRunStatus(`ran in ${res.ms} ms · ${fmtBytes(res.resultText.length)}`);
+  await showResultDocument(res.resultText);
 }
 
 async function runScript(): Promise<void> {
   if (runInFlight) return;
   const code = runEditor?.getDoc().trim() ?? '';
   if (!code) {
-    setRunStatus('the box is the body of (data) => { … } — write one and return something');
+    setRunStatus('write an expression, or statements ending in a `return`');
     return;
   }
   if (!currentText) {
@@ -3918,34 +4108,29 @@ async function runScript(): Promise<void> {
   runInFlight = false;
   runExecBtn.disabled = false;
   if (documentRevision !== currentDocumentRevision) return;
-  renderRunResult(res);
+  await renderRunResult(res);
 }
-
-// Semantic compare hides the whole .tb-panels group, so an open run panel
-// would wedge with no way to dismiss it — openSemanticCompare force-closes.
-function closeRunPanel(): void {
-  runPanel.hidden = true;
-  runBtn.classList.remove('on');
-  runBtn.setAttribute('aria-expanded', 'false');
-}
-
-runBtn.addEventListener('click', () => {
-  const open = Boolean(runPanel.hidden);
-  runPanel.hidden = !open;
-  runBtn.classList.toggle('on', open);
-  runBtn.setAttribute('aria-expanded', String(open));
-  if (open) void ensureRunEditor().then(() => runEditor?.focus());
-});
 
 runExecBtn.addEventListener('click', () => void runScript());
 
-$('#run-copy').addEventListener('click', async () => {
+runCopyBtn.addEventListener('click', async () => {
   await copyText(runResultText);
   showToast('result copied');
 });
 
-$('#run-download').addEventListener('click', () => {
-  downloadText(runResultText, 'result.json', 'application/json');
+// The name popover is shared with the document's ⇩ (see setDownloadSubject);
+// this click only says which subject it is about to name.
+runDownloadBtn.addEventListener('click', () => setDownloadSubject('result', runDownloadBtn));
+
+// Promote the result to a document of its own, through the same open path a
+// file takes — so it lands in recents, gets its own tree, and can be compared,
+// queried or run over in turn. Payload decoding is skipped: this text is
+// already JSON, and a result that happens to be a base64 string is a result,
+// not a payload to unwrap.
+runOpenBtn.addEventListener('click', () => {
+  if (!runResultText) return;
+  const base = currentTitle.replace(/\.[^.]+$/, '').trim();
+  void openText(runResultText, `${base || 'document'} · result.json`, null, null, null, true);
 });
 
 // ---------- keyboard ----------

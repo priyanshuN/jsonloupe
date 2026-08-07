@@ -1,15 +1,17 @@
-// The run panel's engine: one user-written script body over one document, with
-// no worker or DOM in sight so a test can call it directly.
+// The runner's engine: one user-written script over one document, with no
+// worker or DOM in sight so a test can call it directly.
 //
-// The script is the BODY of `(data) => { … }` — the user writes statements and
-// returns. `data` is a plain `JSON.parse` value, not the doc worker's boxed
+// The script is an EXPRESSION where it parses as one (`data.tasks.length`) and
+// the BODY of `(data) => { … }` where it does not (statements ending in a
+// `return`). `data` is a plain `JSON.parse` value, not the doc worker's boxed
 // tree: a script that says `data.orders.length` should mean the JavaScript it
 // looks like. The cost is that numbers past what a float holds arrive rounded,
-// which the panel says out loud (main.ts, `#run-lossy`) rather than hiding.
-
-/** Above this the preview stops being something a browser can paint; the full
- *  result is still returned for download. */
-export const PREVIEW_MAX = 256 * 1024;
+// which the producer strip says out loud (main.ts, `#run-lossy`) rather than
+// hiding.
+//
+// The result comes back as ONE compact string and is not previewed here: run
+// mode feeds it to a doc worker of its own and reads it as a document, so there
+// is no size at which the reading surface gives up.
 
 /** A runaway loop can log forever, so the capture is bounded on both axes. */
 const MAX_LOG_LINES = 200;
@@ -17,11 +19,8 @@ const MAX_LOG_CHARS = 2_000;
 
 export interface RunOk {
   ok: true;
-  /** The whole result, compact — what a download writes. */
+  /** The whole result, compact — what the result pane parses and a download writes. */
   resultText: string;
-  /** Pretty-printed for reading, capped at PREVIEW_MAX. */
-  truncatedPreview: string;
-  truncated: boolean;
   logs: string[];
   ms: number;
 }
@@ -51,10 +50,30 @@ function errorText(error: unknown): string {
   return String(error);
 }
 
+// Expression first, statement body second. `data.tasks.length` is what a person
+// writing one line means, and wrapping it in parentheses also keeps `{ a: 1 }`
+// an object literal rather than a block. Anything that is not an expression —
+// `return data`, a multi-statement body — fails to compile in that form and
+// falls through to the body form, so both spellings work and neither has to be
+// declared. A compile failure in BOTH is reported from the body form, whose
+// message is about the code as written.
+function compileScript(code: string): ((data: unknown) => unknown) | { error: string } {
+  try {
+    return new Function('data', `return (${code}\n)`) as (data: unknown) => unknown;
+  } catch {
+    /* not an expression — try it as a body */
+  }
+  try {
+    return new Function('data', code) as (data: unknown) => unknown;
+  } catch (error) {
+    return { error: errorText(error) };
+  }
+}
+
 /**
- * Run `code` — the body of `(data) => { … }` — over the document in `docText`.
- * Never throws: every failure comes back as `{ ok: false }` with a message the
- * panel can show verbatim.
+ * Run `code` — an expression, or the body of `(data) => { … }` — over the
+ * document in `docText`. Never throws: every failure comes back as
+ * `{ ok: false }` with a message the producer strip can show verbatim.
  */
 export function executeUserCode(docText: string, code: string): RunResult {
   const logs: string[] = [];
@@ -83,12 +102,9 @@ export function executeUserCode(docText: string, code: string): RunResult {
     return { ok: false, error: `the script sees plain JSON, and this document is not: ${errorText(error)}`, logs };
   }
 
-  let fn: (data: unknown) => unknown;
-  try {
-    fn = new Function('data', code) as (data: unknown) => unknown;
-  } catch (error) {
-    return { ok: false, error: errorText(error), logs };
-  }
+  const compiled = compileScript(code);
+  if (typeof compiled !== 'function') return { ok: false, error: compiled.error, logs };
+  const fn = compiled;
 
   const saved = { log: console.log, warn: console.warn, error: console.error };
   console.log = record('');
@@ -105,29 +121,28 @@ export function executeUserCode(docText: string, code: string): RunResult {
   }
 
   if (result === undefined) {
-    return { ok: false, error: 'the script returned nothing — end it with a `return`', logs };
+    return {
+      ok: false,
+      error: 'the script produced nothing — write an expression, or end a statement body with a `return`',
+      logs,
+    };
   }
 
   let resultText: string | undefined;
-  let pretty: string | undefined;
   try {
     resultText = JSON.stringify(result);
-    pretty = JSON.stringify(result, null, 2);
   } catch (error) {
     // Cycles and BigInt throw here; JSON.stringify's own message names which.
     return { ok: false, error: `the result cannot be serialized as JSON — ${errorText(error)}`, logs };
   }
-  if (resultText === undefined || pretty === undefined) {
+  if (resultText === undefined) {
     // A function or a symbol: stringify returns undefined rather than throwing.
     return { ok: false, error: 'the result cannot be serialized as JSON — return a value, not a function', logs };
   }
 
-  const truncated = pretty.length > PREVIEW_MAX;
   return {
     ok: true,
     resultText,
-    truncatedPreview: truncated ? pretty.slice(0, PREVIEW_MAX) : pretty,
-    truncated,
     logs,
     ms: Math.round(performance.now() - started),
   };

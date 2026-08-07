@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { executeUserCode, PREVIEW_MAX, type RunOk } from './run-exec';
+import { executeUserCode, type RunOk } from './run-exec';
 
 const DOC = JSON.stringify({
   tasks: [
@@ -20,16 +20,37 @@ describe('executeUserCode', () => {
       executeUserCode(DOC, 'return data.tasks.filter(t => t.status === "FAILED").map(t => t.id)'),
     );
     expect(res.resultText).toBe('[1,3]');
-    expect(res.truncatedPreview).toBe('[\n  1,\n  3\n]');
-    expect(res.truncated).toBe(false);
     expect(res.logs).toEqual([]);
     expect(res.ms).toBeGreaterThanOrEqual(0);
   });
 
-  it('rejects a script that never returns', () => {
-    const res = executeUserCode(DOC, 'data.tasks.length');
+  // The one-liner is what a person actually types, so it is the primary form:
+  // the expression compiles first and the body form is the fallback.
+  it('runs a bare expression', () => {
+    expect(expectOk(executeUserCode(DOC, 'data.tasks.length')).resultText).toBe('3');
+    expect(expectOk(executeUserCode(DOC, 'data.tasks.map(t => t.id)')).resultText).toBe('[1,2,3]');
+  });
+
+  it('reads a bare object literal as a value, not a block', () => {
+    const res = expectOk(executeUserCode(DOC, '{ total: data.tasks.length }'));
+    expect(res.resultText).toBe('{"total":3}');
+  });
+
+  it('falls back to the statement body for a multi-statement script', () => {
+    const res = expectOk(
+      executeUserCode(DOC, 'const failed = data.tasks.filter(t => t.status === "FAILED");\nreturn failed.length'),
+    );
+    expect(res.resultText).toBe('2');
+  });
+
+  it('falls back to the statement body for a bare `return`', () => {
+    expect(expectOk(executeUserCode(DOC, 'return data.tasks[0].id')).resultText).toBe('1');
+  });
+
+  it('rejects a script that produces nothing', () => {
+    const res = executeUserCode(DOC, 'const n = data.tasks.length;');
     expect(res.ok).toBe(false);
-    expect(res).toMatchObject({ error: expect.stringContaining('`return`') });
+    expect(res).toMatchObject({ error: expect.stringContaining('produced nothing') });
   });
 
   it('reports a syntax error instead of throwing', () => {
@@ -87,22 +108,10 @@ describe('executeUserCode', () => {
     expect(res.resultText).toBe('9007199254740992');
   });
 
-  it('caps the preview at PREVIEW_MAX and keeps the full result', () => {
-    // Two elements per pretty-printed line, so the array easily outgrows the cap.
-    const res = expectOk(executeUserCode(DOC, `return new Array(${PREVIEW_MAX}).fill(1)`));
-    expect(res.truncated).toBe(true);
-    expect(res.truncatedPreview).toHaveLength(PREVIEW_MAX);
-    expect(res.resultText.length).toBeGreaterThan(PREVIEW_MAX);
-    expect(JSON.parse(res.resultText)).toHaveLength(PREVIEW_MAX);
-  });
-
-  it('leaves a result that lands exactly on the cap untruncated', () => {
-    // A single string whose pretty form is PREVIEW_MAX bytes: the two quotes are
-    // the only overhead.
-    const res = expectOk(
-      executeUserCode(DOC, `return "x".repeat(${PREVIEW_MAX - 2})`),
-    );
-    expect(res.truncatedPreview).toHaveLength(PREVIEW_MAX);
-    expect(res.truncated).toBe(false);
+  // No preview and no cap: the whole result comes back as one compact string,
+  // and run mode reads it through a doc worker like any other document.
+  it('returns a large result whole, uncapped', () => {
+    const res = expectOk(executeUserCode(DOC, 'new Array(300000).fill(1)'));
+    expect(JSON.parse(res.resultText)).toHaveLength(300_000);
   });
 });
