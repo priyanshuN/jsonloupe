@@ -112,6 +112,10 @@ export interface ParseOk {
    *  Python None/True, truncation) before parsing. The stored raw text stays
    *  the user's original bytes; only the parsed value is the repaired form. */
   repaired: boolean;
+  /** The document holds at least one number a plain `JSON.parse` would round.
+   *  Free to compute — the parser already inspects every numeric literal — and
+   *  the run panel needs it, because its scripts see the rounded values. */
+  hasUnsafeNumbers: boolean;
 }
 
 export interface ParseErr {
