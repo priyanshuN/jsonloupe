@@ -41,6 +41,7 @@ import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayl
 import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
+import { scriptChipLabel } from './run-script';
 import type { RunResult } from './run-exec';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
@@ -292,6 +293,9 @@ function showPane(p: Pane): void {
   placeRunSourceSwitch(p);
   // The mode switch reflects the four layouts; transient sub-views have no tab.
   setModeTab(p === 'tree' || p === 'code' || p === 'split' || run ? p : null);
+  // The search header's `· source` qualifier is pane-dependent — keep it live.
+  const hitHeader = searchPanel.querySelector('.hit-header');
+  if (hitHeader) hitHeader.textContent = searchHeaderText() ?? '';
   paintStatusForPane();
 }
 
@@ -302,12 +306,12 @@ function showPane(p: Pane): void {
 // pane as an argument: which surface owns the lead is not the pane alone in run
 // mode, and one answer to that question beats two.
 function paintStatusForPane(): void {
-  const codeOnScreen = codeOwnsStatus();
+  const codeUp = codeOnScreen();
   // The editor's note and its search count are the editor's: off screen, the
   // shortcut they name is not even bound. The unapplied buffer itself survives
   // — loadCodeContent re-reads it the next time the pane opens.
   setStatusCount('');
-  setStatusNote(codeOnScreen ? codeStatusText : '', codeOnScreen ? codeStatusKind : '');
+  setStatusNote(codeUp ? codeStatusText : '', codeUp ? codeStatusKind : '');
   // In split the tree owns the lead and the code pane owns the note, which is
   // the arrangement 8g wanted: the path you are reading and the fact that the
   // buffer under it is not the parsed document, on one line. Run mode has one
@@ -887,7 +891,7 @@ for (const control of [
 $('#transport-run').addEventListener('click', () => void runTransportInspector());
 transportIncludeBaseline.addEventListener('change', () => void runTransportInspector());
 transportBtn.addEventListener('click', () => {
-  if (codeDirty && codeOwnsStatus()) {
+  if (codeDirty && codeOnScreen()) {
     showToast('Apply or discard code edits before measuring transport size');
     return;
   }
@@ -2384,10 +2388,12 @@ let codeStatusKind: StatusTone = '';
 // in split, so switching to code alone answers "where am I" immediately.
 let caretLead = '';
 
-// The code pane's tenancy on the strip. Its note and its search count are only
-// true while the editor is on screen — and it can still dispatch transactions
-// while hidden (a theme change reconfigures it), so every publish asks first.
-function codeOwnsStatus(): boolean {
+// The editor is up in three of the layouts, and three things key off that one
+// fact: its tenancy on the status strip (its note and its search count are only
+// true while it is visible — and it can still dispatch transactions while
+// hidden, since a theme change reconfigures it, so every publish asks first),
+// and whether a structural search hit can be followed into it.
+function codeOnScreen(): boolean {
   return activePane === 'code' || activePane === 'split' || (activePane === 'run' && runSource === 'code');
 }
 
@@ -2402,7 +2408,7 @@ function setCodeStatus(kind: StatusTone, msg: string): void {
   codeDirty = kind === 'dirty' || kind === 'bulk' || kind === 'error';
   codeStatusText = msg;
   codeStatusKind = kind;
-  if (codeOwnsStatus()) setStatusNote(msg, kind);
+  if (codeOnScreen()) setStatusNote(msg, kind);
 }
 
 function showCodeTooBig(): void {
@@ -2459,7 +2465,7 @@ async function ensureEditor(): Promise<void> {
     // 8a's count, delivered to the app's own strip instead of being drawn
     // inside CodeMirror's panel. It is only ever live while that panel is.
     onSearchCount: (label) => {
-      if (codeOwnsStatus()) setStatusCount(label ?? '');
+      if (codeOnScreen()) setStatusCount(label ?? '');
     },
     // 8g: the sentence the interface never said. Tier 2 (rule 15) because a
     // bulk rewrite you did not type is a change to notice before moving on —
@@ -2557,8 +2563,12 @@ async function applyCode(): Promise<void> {
   tree.setTotal(res.totalRows);
   tree.resetSelection();
   setCodeStatus('saved', 'applied ✓ — tree updated');
-  // In split, reformat to canonical + rebuild the line map so reveal stays accurate.
+  // In split, reformat to canonical + rebuild the line map so reveal stays
+  // accurate. Elsewhere the buffer keeps the user's text and diverges from the
+  // map — clear it so follow-the-hit misses to the tree instead of flashing a
+  // wrong line.
   if (paneArea.classList.contains('split')) await loadCodeContent();
+  else codeLineMap = new Map();
 }
 
 async function formatCode(): Promise<void> {
@@ -2665,6 +2675,8 @@ function renderHits(results: SearchHit[], header?: string): void {
     const el = document.createElement('div');
     el.className = 'hit';
     el.dataset.i = String(i);
+    // The path the code pane follows this hit by (see the click handler).
+    el.dataset.path = hit.pathText;
     const path = document.createElement('span');
     path.className = 'hit-path';
     path.textContent = hit.pathText;
@@ -2699,12 +2711,24 @@ async function runSearch(): Promise<void> {
     return;
   }
   const total = r.total ?? r.results.length;
-  const header = !total
-    ? undefined
-    : total > r.results.length
-      ? `${total} matches — showing first ${r.results.length}`
-      : `${total} ${total === 1 ? 'match' : 'matches'}`;
-  renderHits(r.results, header);
+  searchTotals = total ? { total, shown: r.results.length } : null;
+  renderHits(r.results, searchHeaderText());
+}
+
+// This box searches the SOURCE document. Everywhere else that is the only
+// document on screen; in run mode there is a second one in the result pane,
+// so the count says which of the two it counted. The suffix is pane-dependent,
+// so the header re-renders from these totals on pane changes — baking it in at
+// search time left a stale `· source` behind after leaving run mode.
+let searchTotals: { total: number; shown: number } | null = null;
+
+function searchHeaderText(): string | undefined {
+  if (!searchTotals) return undefined;
+  const { total, shown } = searchTotals;
+  const scope = activePane === 'run' ? ' · source' : '';
+  return total > shown
+    ? `${total} matches${scope} — showing first ${shown}`
+    : `${total} ${total === 1 ? 'match' : 'matches'}${scope}`;
 }
 
 async function findSameValue(id: number): Promise<void> {
@@ -2732,7 +2756,16 @@ searchPanel.addEventListener('click', async (e) => {
   // class but reveal nothing, so gate on the index rather than on each of them.
   if (!el || el.dataset.i === undefined) return;
   const r = await call<{ rowIndex: number; totalRows: number }>({ type: 'reveal', index: Number(el.dataset.i) });
-  showPane('tree');
+  // Follow the hit into the code pane wherever one is on screen, instead of
+  // pulling the user back to the tree. The hit's path is already the split
+  // view's line-map key — both come from the worker's one path formatter — so
+  // this reuses that map rather than inventing a position of its own. It is an
+  // EVENT: the line flashes and the pane keeps its cursor, its selection and
+  // its find/replace state. With no line for the path (raw source mode, or
+  // past the map's cap) the tree is still the answer, exactly as before.
+  const line = codeEditor && el.dataset.path ? codeLineMap.get(el.dataset.path) : undefined;
+  if (codeOnScreen() && line !== undefined) codeEditor?.flashLine(line);
+  else showPane('tree');
   tree.setTotal(r.totalRows);
   if (r.rowIndex >= 0) tree.scrollToIndex(r.rowIndex);
 });
@@ -3767,14 +3800,14 @@ askSaved.addEventListener('click', async (e) => {
   if (!chip) return;
   const id = chip.dataset.id!;
   if ((e.target as HTMLElement).closest('.chip-del')) {
-    await store.removeQuery(id);
+    await store.removeSaved(id);
     await renderSavedChips();
     return;
   }
   const saved = (await store.listQueries()).find((s) => s.id === id);
   if (!saved) return;
   askBox.value = saved.question;
-  void store.touchQuery(id);
+  void store.touchSaved(id);
   await runAsk(saved.query); // engine-only re-run: no API call
 });
 
@@ -3807,6 +3840,8 @@ const runStatus = $('#run-status');
 const runErrorEl = $('#run-error');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
+const runSaved = $('#run-saved');
+const runSaveChip = $<HTMLButtonElement>('#run-save');
 const runSrcSwitch = $('#run-src-switch');
 const runResultLabel = $('#run-result-label');
 const runStaleBadge = $('#run-stale');
@@ -3898,6 +3933,67 @@ function setRunStatus(msg: string): void {
   runStatus.hidden = !msg;
   runStatus.textContent = msg;
 }
+
+// ---------- saved scripts: the ask panel's chips, over the same store ----------
+//
+// A script you kept is the same object to the user as a question you kept — it
+// wears the same chip, deletes the same way, and outlives the document it was
+// written against — so it shares the ask panel's markup, its stylesheet and its
+// object store (db.ts). Pressing one loads it AND runs it: re-running is the
+// only reason it was kept.
+
+/** As many as the ask panel shows — a chip row is a shortcut, not an archive. */
+const SCRIPT_CHIPS_SHOWN = 12;
+
+async function renderScriptChips(): Promise<void> {
+  const saved = await store.listScripts();
+  // `+ save` leads the row and is never re-created, so it keeps focus across a
+  // re-render (deleting a chip with the keyboard lands you back on it).
+  runSaved.replaceChildren(runSaveChip);
+  for (const s of saved.slice(0, SCRIPT_CHIPS_SHOWN)) {
+    const chip = document.createElement('span');
+    chip.className = 'ask-chip';
+    chip.dataset.id = s.id;
+    chip.title = s.script;
+    const label = document.createElement('span');
+    label.textContent = scriptChipLabel(s.script);
+    const del = document.createElement('button');
+    del.className = 'chip-del';
+    del.textContent = '×';
+    del.title = 'Forget this script';
+    chip.append(label, del);
+    runSaved.appendChild(chip);
+  }
+}
+
+async function saveCurrentScript(): Promise<void> {
+  const code = runEditor?.getDoc().trim() ?? '';
+  if (!code) {
+    setRunStatus('nothing to save yet — write a script first');
+    return;
+  }
+  await store.saveScript(code);
+  await renderScriptChips();
+  showToast('script saved');
+}
+
+runSaved.addEventListener('click', async (e) => {
+  const target = e.target as HTMLElement;
+  if (target.closest('#run-save')) return void saveCurrentScript();
+  const chip = target.closest<HTMLElement>('.ask-chip');
+  const id = chip?.dataset.id;
+  if (!id) return;
+  if (target.closest('.chip-del')) {
+    await store.removeSaved(id);
+    await renderScriptChips();
+    return;
+  }
+  const saved = (await store.listScripts()).find((s) => s.id === id);
+  if (!saved || !runEditor) return;
+  runEditor.setDoc(saved.script);
+  void store.touchSaved(id);
+  await runScript();
+});
 
 // True for as long as the document is open (style.css rule 15, tier 1): the
 // script sees plain JS numbers, and this document has some it cannot hold.
@@ -3992,6 +4088,7 @@ async function openRun(): Promise<void> {
   if (!runResultChannel) runResultChannel = createWorkerChannel('result');
   await showRunSource();
   await ensureRunEditor();
+  void renderScriptChips();
   runEditor?.focus();
 }
 

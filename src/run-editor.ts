@@ -4,8 +4,10 @@
 //
 // It is NOT a second copy of code.ts. That editor is the document reading
 // surface — gutters, folding, search, an occurrence count, an undo stack the
-// app reasons about. This is a six-row field you type an expression into, so it
-// wears rule 14's field recipe and carries no chrome of its own. Its palette is
+// app reasons about. This is a field you type an expression into — two rows
+// when that is all it is, six at most before it scrolls, which is the
+// stylesheet's job — so it wears rule 14's field recipe and carries no chrome
+// of its own beyond the run button docked in its corner. Its palette is
 // read straight from the stylesheet's tokens rather than copied here, which
 // means a theme switch needs no reconfigure at all (style.css rule 11's lesson:
 // a second copy of a colour is how the two surfaces drifted apart).
@@ -94,6 +96,15 @@ export class ScriptEditor {
 
   getDoc(): string {
     return this.view.state.doc.toString();
+  }
+
+  // Loading a saved chip. A normal transaction, so it reaches onChange and
+  // becomes the remembered last script exactly as typing it would have.
+  setDoc(code: string): void {
+    this.view.dispatch({
+      changes: { from: 0, to: this.view.state.doc.length, insert: code },
+      selection: { anchor: code.length },
+    });
   }
 
   focus(): void {

@@ -522,7 +522,7 @@ describe('saved questions', () => {
     tick();
     const second = await db.saveQuery('two', '$.two');
     tick();
-    await db.touchQuery(first.id);
+    await db.touchSaved(first.id);
 
     const listed = await db.listQueries();
     expect(listed.map((q) => q.id)).toEqual([first.id, second.id]);
@@ -532,7 +532,7 @@ describe('saved questions', () => {
   });
 
   it('ignores a touch for an unknown id', async () => {
-    await expect(db.touchQuery('no-such-id')).resolves.toBeUndefined();
+    await expect(db.touchSaved('no-such-id')).resolves.toBeUndefined();
     expect(await db.listQueries()).toEqual([]);
   });
 
@@ -540,7 +540,7 @@ describe('saved questions', () => {
     const kept = await db.saveQuery('one', '$.one');
     const dropped = await db.saveQuery('two', '$.two');
 
-    await db.removeQuery(dropped.id);
+    await db.removeSaved(dropped.id);
 
     expect((await db.listQueries()).map((q) => q.id)).toEqual([kept.id]);
   });
@@ -571,5 +571,68 @@ describe('saved questions', () => {
     expect(all.map((q) => q.id)).toContain(revived.id);
     expect(all[0].id).toBe(revived.id);
     expect(all.length).toBe(100);
+  });
+});
+
+describe('saved scripts', () => {
+  it('stores a script with a first use and lists it apart from the questions', async () => {
+    await db.saveQuery('largest orders', '$.orders');
+    const script = await db.saveScript('data.orders.length');
+
+    expect(script.kind).toBe('script');
+    expect(script.uses).toBe(1);
+    expect(await db.listScripts()).toEqual([script]);
+    // The two kinds share a store; neither list may show the other's records.
+    expect((await db.listQueries()).map((q) => q.question)).toEqual(['largest orders']);
+  });
+
+  it('folds a repeat save of the same source, counting the use', async () => {
+    const first = await db.saveScript('data.orders.length');
+    tick();
+    const second = await db.saveScript('  data.orders.length  ');
+
+    expect(second.id).toBe(first.id);
+    expect(second.createdAt).toBe(first.createdAt);
+    expect(second.uses).toBe(2);
+    expect(await db.listScripts()).toHaveLength(1);
+  });
+
+  it('keeps scripts differing only in case apart — they are different code', async () => {
+    await db.saveScript('data.Orders');
+    tick();
+    await db.saveScript('data.orders');
+
+    expect(await db.listScripts()).toHaveLength(2);
+  });
+
+  it('lists the most recently used script first and removes by id', async () => {
+    const first = await db.saveScript('data.a');
+    tick();
+    const second = await db.saveScript('data.b');
+    tick();
+    await db.touchSaved(first.id);
+
+    expect((await db.listScripts()).map((s) => s.id)).toEqual([first.id, second.id]);
+
+    await db.removeSaved(first.id);
+    expect((await db.listScripts()).map((s) => s.id)).toEqual([second.id]);
+  });
+
+  it('caps scripts without touching the questions saved beside them', async () => {
+    const question = await db.saveQuery('kept', '$.kept');
+    for (let i = 0; i < 105; i++) {
+      tick();
+      await db.saveScript(`data.s${i}`);
+    }
+
+    expect(await db.listScripts()).toHaveLength(100);
+    expect((await db.listQueries()).map((q) => q.id)).toEqual([question.id]);
+  });
+
+  it('reads a record written before scripts shared the store as a question', async () => {
+    const legacy = await db.saveQuery('legacy', '$.legacy');
+
+    expect((await db.listQueries()).map((q) => q.id)).toEqual([legacy.id]);
+    expect(await db.listScripts()).toEqual([]);
   });
 });

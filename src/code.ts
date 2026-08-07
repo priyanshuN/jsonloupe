@@ -64,6 +64,10 @@ interface CreateOpts {
   confirmReplaceAll: (label: string) => boolean;
 }
 
+// How long a followed structural hit stays lit. Long enough to find with your
+// eye after the scroll, short enough that nothing is left marked afterwards.
+const FLASH_MS = 1000;
+
 // Above this many matches a replace-all stops being something you can eyeball
 // afterwards — the editor holds one screen and the rest of the changes are off
 // it — so it asks first. Below it, the count on the button is the whole warning.
@@ -87,6 +91,9 @@ export class CodeEditor {
     private themeComp: Compartment,
     private hlComp: Compartment,
     private setDocA: AnnotationType<boolean>,
+    /** Scroll a 1-based line into view and pulse it — see the flash block below. */
+    readonly flashLine: (line: number) => void,
+    private cancelFlash: () => void,
   ) {}
 
   static async create(opts: CreateOpts): Promise<CodeEditor> {
@@ -100,10 +107,10 @@ export class CodeEditor {
       import('@lezer/highlight'),
     ]);
 
-    const { EditorState, Compartment, Annotation } = state;
+    const { EditorState, Compartment, Annotation, StateEffect, StateField } = state;
     const {
       EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
-      drawSelection, dropCursor, keymap, highlightSpecialChars,
+      drawSelection, dropCursor, keymap, highlightSpecialChars, Decoration,
     } = view;
     const {
       foldGutter, indentOnInput, bracketMatching, syntaxHighlighting, HighlightStyle, foldKeymap,
@@ -230,6 +237,28 @@ export class CodeEditor {
     const hlComp = new Compartment();
     const setDocA = Annotation.define<boolean>();
 
+    // Follow-the-hit: a structural search match landing in this pane. It is an
+    // EVENT, not a place you now stand, so it may not leave a trace — no
+    // cursor move, no selection, nothing the find/replace panel (its query, its
+    // count, its position in the match list) can read. A line decoration and a
+    // scroll effect are the whole mechanism: they change no document, no
+    // selection and no field the search extension owns, and the decoration
+    // retires itself on a timer. Negative position = clear.
+    const flashMark = Decoration.line({ class: 'cm-flash-line' });
+    const setFlash = StateEffect.define<number>();
+    const flashField = StateField.define({
+      create: () => Decoration.none,
+      update(deco, tr) {
+        deco = deco.map(tr.changes);
+        for (const e of tr.effects) {
+          if (!e.is(setFlash)) continue;
+          deco = e.value < 0 ? Decoration.none : Decoration.set([flashMark.range(e.value)]);
+        }
+        return deco;
+      },
+      provide: (f) => EditorView.decorations.from(f),
+    });
+
     const editor = new EditorView({
       parent: opts.host,
       state: EditorState.create({
@@ -264,6 +293,7 @@ export class CodeEditor {
           EditorView.updateListener.of((u) => {
             if (u.docChanged && !u.transactions.some((tr) => tr.annotation(setDocA))) opts.onChange();
           }),
+          flashField,
           searchCount,
           caretReporter,
           EditorView.contentAttributes.of({ spellcheck: 'false', 'aria-label': 'JSON code editor' }),
@@ -300,8 +330,20 @@ export class CodeEditor {
       pendingReplaceCount = 0;
     });
 
+    let flashTimer: ReturnType<typeof setTimeout> | undefined;
+    const cancelFlash = (): void => clearTimeout(flashTimer);
+    const flashLine = (line: number): void => {
+      const doc = editor.state.doc;
+      const from = doc.line(Math.min(Math.max(1, Math.floor(line)), doc.lines)).from;
+      cancelFlash();
+      editor.dispatch({
+        effects: [setFlash.of(from), EditorView.scrollIntoView(from, { y: 'center' })],
+      });
+      flashTimer = setTimeout(() => editor.dispatch({ effects: setFlash.of(-1) }), FLASH_MS);
+    };
+
     opts.onCaret(1, 1);
-    return new CodeEditor(editor, makeTheme, makeHl, themeComp, hlComp, setDocA);
+    return new CodeEditor(editor, makeTheme, makeHl, themeComp, hlComp, setDocA, flashLine, cancelFlash);
   }
 
   setDoc(text: string): void {
@@ -341,6 +383,8 @@ export class CodeEditor {
   }
 
   destroy(): void {
+    // A pending flash would otherwise dispatch into a torn-down view.
+    this.cancelFlash();
     this.view.destroy();
   }
 }
