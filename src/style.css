@@ -536,6 +536,7 @@ button:has(> .ic) {
 .chip-del,
 .crumb-chip,
 .codec-box-head button,
+#run-exec,
 #ask-query-line button {
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
@@ -1992,7 +1993,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    height, which made every control in this panel 31px — a third size the
    contract does not have. The input is pinned to --ctl-h and the row centres,
    so 28px holds even if the font changes. */
-.ask-row, .run-row { display: flex; align-items: center; gap: 8px; }
+.ask-row { display: flex; align-items: center; gap: 8px; }
 /* Rule 14 gives these the ground, border, inset, type and ring; the comment
    that used to live here — "a field on chrome takes the canvas" — is now the
    rule itself, and it holds on every surface rather than only this one. */
@@ -2109,7 +2110,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .ask-table th { color: var(--c-key); font-weight: 600; }
 #ask-result .hit { padding: 3px 0; }
-#ask-saved { display: flex; flex-wrap: wrap; gap: 6px; }
+#ask-saved, #run-saved { display: flex; flex-wrap: wrap; gap: 6px; }
 /* Rule 16, the ACTIONABLE CHIP: clicking it re-runs the query, so it wears the
    same fully-round canvas shape as .crumb-chip rather than a third radius. */
 .ask-chip {
@@ -2124,6 +2125,17 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   cursor: pointer;
 }
 .ask-chip:hover { border-color: var(--accent); }
+/* The one chip you PRESS rather than re-run. Same shape as a saved chip, but a
+   real <button> so it is reachable without a pointer and gets rule 5's ring for
+   free; all it unwinds is the button base's regular height (rule 1's mini is
+   the size for something sitting in a chip row). */
+button.ask-chip.chip-add {
+  min-height: var(--ctl-h-mini);
+  padding: 3px 12px;
+  color: var(--text-dim);
+  font-family: var(--sans);
+}
+button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas); }
 .chip-del { border-radius: 10px; border: none; color: var(--text-dim); background: transparent; box-shadow: none; }
 .chip-del:hover { color: var(--danger); }
 
@@ -2155,21 +2167,26 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* Rule 14's field recipe, on a CodeMirror host instead of a <textarea>: the
    editor inside goes bare (run-editor.ts sets no ground of its own) and this
    shell carries the border, the canvas and the ring, exactly as .field does for
-   the inputs it wraps. Six rows at the mono line-height, then it scrolls. */
+   the inputs it wraps. */
 #run-editor {
   display: flex;
   flex-direction: column;
-  /* Six rows at the mono line-height plus the field's own inset. Fixed, not
-     grown-into: a script box that pushes the document down as you type is a
-     worse trade than one that scrolls. */
-  height: calc(6 * 20px + 2 * var(--gap-2) + 2px);
-  max-height: 34vh;
+  position: relative;
+  /* The box is the size of the script in it: two rows of the line-height set
+     below, six at most, and then it scrolls inside. A fixed six-row box spent a
+     hundred pixels of the producer strip on emptiness for the one-line
+     expression most runs are, and gave the long script no more room for it.
+     The 1.6 is IN the font shorthand rather than beside it: .cm-scroller takes
+     `font: inherit` below, and a bare `font:` resets line-height to normal —
+     which is how a box that said six 20px rows was drawing eight 15px ones. */
+  min-height: calc(2 * 20px + 2 * var(--gap-2) + 2px);
+  max-height: calc(6 * 20px + 2 * var(--gap-2) + 2px);
   overflow: hidden;
   padding: var(--gap-2) var(--gap-3);
   background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  font: 12.5px var(--mono);
+  font: 12.5px/1.6 var(--mono);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 /* Rule 5's ring, widened per rule 14 — the same pair every other field gets on
@@ -2178,10 +2195,29 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-/* The editor fills the shell so a click anywhere in the box lands in the text,
-   and CodeMirror's own scroller — not the shell — is what scrolls. */
-#run-editor .cm-editor { flex: 1; min-height: 0; }
-#run-editor .cm-scroller { font: inherit; }
+/* The editor is what GROWS the shell (flex-basis auto, so its content height is
+   the shell's), up to the six-row cap above — past which CodeMirror's own
+   scroller, not the shell, is what scrolls. */
+#run-editor .cm-editor { flex: 1 1 auto; min-height: 0; max-height: 100%; }
+#run-editor .cm-scroller { font: inherit; overflow-y: auto; }
+/* The run button docks in the bottom-right corner of the field (chat-input
+   style) instead of standing on a row of its own: the script and the act of
+   running it are one control. The content keeps a matching right inset so a
+   wrapped line never runs underneath it. */
+#run-exec {
+  position: absolute;
+  right: var(--gap-2);
+  bottom: var(--gap-2);
+  z-index: 1;
+}
+#run-editor .cm-content { padding-right: 52px; }
+
+/* Saved scripts and the run's status on one line, between the field and the
+   result pane. The status is parked at the right edge — it is what the last
+   press of that button had to say, not a chip. */
+.run-chips { display: flex; align-items: flex-start; gap: var(--gap-3); }
+.run-chips #run-saved { flex: 1; min-width: 0; }
+.run-chips #run-status { flex-shrink: 0; padding-top: 3px; }
 
 /* The right column: producer strip on top, result pane under it. It is a PANE,
    so it takes the pane area's geometry and its own hairline against the source
@@ -2749,6 +2785,25 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #code-host { flex: 1; min-height: 0; overflow: hidden; position: relative; }
 #code-host .cm-editor { height: 100%; }
 #code-host .cm-scroller { font: 13px/1.6 var(--mono); }
+
+/* Follow-the-hit: a structural search match scrolled this line into view. It is
+   the tree's row flash on the other surface — the same accent wash fading out
+   over about the same second — and like it, it marks nothing afterwards.
+   code.ts retires the decoration on a timer, so the fade is the whole visual.
+   The .cm-line prefix is the usual one, to outrank the editor's own generated
+   theme (an active line, say, under the same wash). */
+#code-host .cm-line.cm-flash-line { animation: cmlineflash 1s ease-out; }
+@keyframes cmlineflash {
+  from { background: var(--accent-soft); }
+  to { background: transparent; }
+}
+/* Rule 12 — the flash is the one place where losing the animation loses the
+   ANSWER, so under a reduced-motion preference it keeps the highlight and drops
+   only the pulse: the blanket rule below collapses the fade to nothing, and
+   this holds the wash flat until code.ts's timer takes it away. */
+@media (prefers-reduced-motion: reduce) {
+  #code-host .cm-line.cm-flash-line { background: var(--accent-soft); }
+}
 
 /* Rule 9 — CodeMirror's Ctrl+F panel, themed to this contract instead of
    tolerated: our inputs, our buttons, our checkbox, both themes (every value is
