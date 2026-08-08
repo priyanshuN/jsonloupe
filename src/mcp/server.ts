@@ -21,10 +21,12 @@ in the same call. For several questions, load once with load_doc, then work from
 docId: get_schema to learn the shape, profile to get field coverage/statistics,
 run_query to count/filter/group with small paged results, sample to read real
 values, diff_docs to compare two loads, and export_result to write complete CSV
-or JSONL without putting rows in context. Every response is capped, so prefer
-aggregates/profile or offset+limit over asking for everything. Numeric filters
-and aggregates keep exact digits — an int64 id read here is the id, not a float
-that looks like one.`;
+or JSONL without putting rows in context. For deterministic spreadsheet output
+use inspect, draft_spec, review or edit that small spec, then convert;
+conversion rows stay outside the conversation too. Every response is capped, so
+prefer aggregates/profile or offset+limit over asking for everything. Numeric
+filters and aggregates keep exact digits — an int64 id read here is the id, not
+a float that looks like one.`;
 
 export async function main(): Promise<void> {
   const pool = new DocPool(() => threadDocHost());

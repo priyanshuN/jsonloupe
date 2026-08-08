@@ -4,10 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
-  <title>jsonloupe — a loupe for large JSON</title>
-  <meta name="description" content="A loupe for JSON that is too big — and too precise — for your viewer. Five-million-element arrays open instantly, int64 IDs and exact decimals survive every round-trip, and nothing leaves your browser tab." />
-  <meta property="og:title" content="jsonloupe — a loupe for large JSON" />
-  <meta property="og:description" content="Local-first JSON viewer, differ and query tool. Lossless int64, five-million-element arrays, Zstd payload decoding — all in your browser tab." />
+  <!-- Two jobs, and the second one is the one people type into a search box:
+       someone handed a JSON file who needs it as a spreadsheet searches for
+       exactly that, and every word of this page's title and description used to
+       be about the viewer. Both promises fit in one line because they are the
+       same promise — the file survives the trip either way. -->
+  <title>jsonloupe — a loupe for large JSON, and a JSON to Excel converter</title>
+  <meta name="description" content="Turn nested JSON into a spreadsheet — each array becomes its own sheet, joined by id, never items/0/sku columns — and read JSON that is too big and too precise for your viewer. Excel or CSV, in your browser, nothing uploaded." />
+  <meta property="og:title" content="jsonloupe — a loupe for large JSON, and a JSON to Excel converter" />
+  <meta property="og:description" content="Local-first JSON viewer, differ and query tool — and a converter that turns nested JSON into linked Excel or CSV tables. Lossless int64, five-million-element arrays, all in your browser tab." />
   <meta property="og:type" content="website" />
   <!-- Pre-paint gate: theme and the returning-user flag must apply before first
        paint, or the page flashes the wrong theme / the marketing landing before
@@ -34,12 +39,15 @@
   <!-- The icon set (contract rule 3): one 16-unit box, ONE stroke width — set
        once in CSS on .ic, not per symbol — round caps and joins, currentColor
        ink. Defined once here as <symbol>s and
-       referenced with <use> from markup and from main.ts's icon(), so a
-       dynamically built button cannot draw a seventh weight. The six replace
+       referenced with <use> from markup and from the icon() helper, so a
+       dynamically built button cannot draw a ninth weight. These replace
        ◂ ⇆ ⟳ ⤓ ⚠ ☾ — characters whose weight no font metric could reconcile, two
        of which are missing on common stacks and one of which arrives in full
-       emoji colour. ⋯ × ▸ ▾ stay as characters: universally covered, and the
-       carets are load-bearing at 13px in a mono column. -->
+       emoji colour — and ↑ ↓, which put a third optical weight beside × in the
+       converter's one three-button cluster. ⋯ × ▸ ▾ stay as characters:
+       universally covered, and the carets are load-bearing at 13px in a mono
+       column. Every glyph centres on y=8 so buttons sitting side by side do
+       not read as drifting apart. -->
   <svg class="icon-sprite" aria-hidden="true">
     <symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M9.5 3.5 5 8l4.5 4.5" />
@@ -53,6 +61,14 @@
     </symbol>
     <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.5v7.5" /><path d="M4.75 6.75 8 10l3.25-3.25" /><path d="M3 13.25h10" />
+    </symbol>
+    <!-- The column cluster's ordering pair, mirrored about y=8 and carrying
+         i-download's chevron so the three arrowheads in that bar agree. -->
+    <symbol id="i-move-up" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 12.5V3.5" /><path d="M4.75 6.75 8 3.5l3.25 3.25" />
+    </symbol>
+    <symbol id="i-move-down" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 3.5v9" /><path d="M4.75 9.25 8 12.5l3.25-3.25" />
     </symbol>
     <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.6 14.4 13.4H1.6Z" /><path d="M8 6.6v3" /><path d="M8 11.6h.01" />
@@ -92,6 +108,10 @@
           </a>
           <nav class="lp-nav">
             <a href="#features">features</a>
+            <!-- Named for what the visitor searched, not for what the feature
+                 is called inside the app: `convert` means nothing to someone
+                 who arrived wanting a spreadsheet. -->
+            <a href="#convert">json to excel</a>
             <a href="#query">query language</a>
             <a href="#agents">agents</a>
             <a href="#privacy">privacy</a>
@@ -107,7 +127,7 @@
           <div class="lp-hero-copy">
             <span class="lp-pill">local-first <span class="lp-pill-sep">·</span> no backend, no telemetry</span>
             <h1>A loupe for JSON that is too big — and too precise — for your viewer.</h1>
-            <p class="lp-lede">Five-million-element arrays open instantly. Int64 IDs and exact decimals survive paste → edit → copy without a single rounded digit. Diff, query, export CSV — all inside your browser tab.</p>
+            <p class="lp-lede">Five-million-element arrays open instantly. Int64 IDs and exact decimals survive paste → edit → copy without a single rounded digit. Diff, query, and turn the nesting into linked spreadsheet tables — all inside your browser tab.</p>
             <p class="lp-wedge">Paste a Zstd, Base64 or PostgreSQL bytea blob straight in and it opens as JSON — the viewer and the decode page you keep in a second tab, in one paste.</p>
             <p class="lp-trust">0 bytes uploaded · no account · MIT</p>
           </div>
@@ -140,7 +160,9 @@
         <!-- demo-loop band lands here once the asset exists -->
 
         <section class="lp-band" id="features">
-          <h2 class="lp-h2">Built for the payloads that break other viewers</h2>
+          <!-- "other viewers" while a converter card stands in this grid would
+               be the band disowning one of its own cells. -->
+          <h2 class="lp-h2">Built for the payloads that break other tools</h2>
           <div class="lp-grid">
             <article class="lp-cell">
               <span class="lp-tag lp-tag-number">lossless numbers</span>
@@ -153,9 +175,25 @@
               <p>Virtualized tree with chunked expansion — <code>[0 … 9999]</code> range rows — and parsing, diffing, search and compression all off the UI thread.</p>
             </article>
             <article class="lp-cell">
-              <span class="lp-tag lp-tag-ok">payloads</span>
+              <span class="lp-tag lp-tag-warn">payloads</span>
               <h3>Compressed input is first-class</h3>
               <p>Raw <code>.zst</code>, Base64-Zstd, or PostgreSQL <code>\x…</code> bytea is detected, decoded in the worker, and opened with a transformation trace.</p>
+            </article>
+            <!-- The converter, standing where the EXPORT card used to. That card
+                 described the single-table CSV download and was being read as
+                 this one, which is worse than having no card at all: the reader
+                 concluded the tool already did what they came for and left. The
+                 CSV download it named now sits beside the query result it shares
+                 a button with, and this card makes the only promise that
+                 matters — the nesting survives the trip. Six cells, because the
+                 grid is three wide and a seventh leaves two holes.
+                 The grid's inks stay all-different: this card takes --ok, the
+                 outcome colour, and payloads takes the amber the old card
+                 vacated. -->
+            <article class="lp-cell" id="convert">
+              <span class="lp-tag lp-tag-ok">json to excel</span>
+              <h3>Nested JSON becomes linked tables</h3>
+              <p>Every list inside the file gets a sheet of its own, joined back to its parent by id — never <code>items/0/sku</code> columns. You read the real rows before you commit, then take one Excel file or one CSV per table.</p>
             </article>
             <article class="lp-cell">
               <span class="lp-tag lp-tag-boolean">diff</span>
@@ -167,18 +205,16 @@
               <h3>Paths, lenses, and “same value”</h3>
               <p>Copy any node as JSONPath, JSON Pointer, or JS accessor. Epoch → local date, lat/lng, uuid flags, and byte weight on collapsed nodes.</p>
             </article>
-            <article class="lp-cell">
-              <span class="lp-tag lp-tag-warn">export</span>
-              <h3>Tables and RFC 4180 CSV</h3>
-              <p>Any array becomes a sortable table; export the table or a query result as exact-digit CSV in the current sort order.</p>
-            </article>
           </div>
         </section>
 
         <div class="lp-split" id="query">
           <section class="lp-split-cell">
             <h2 class="lp-h2 lp-h2-sm">A query language, not a search box</h2>
-            <p class="lp-body">Filter, pluck, group and count across the whole document — evaluated in the worker, never on the main thread.</p>
+            <!-- The one-table CSV download the removed EXPORT card named: it
+                 belongs with the result it acts on, not in a card a
+                 spreadsheet-shaped reader mistakes for the converter. -->
+            <p class="lp-body">Filter, pluck, group and count across the whole document — evaluated in the worker, never on the main thread. Any array opens as a sortable table, and the table or the result downloads as exact-digit CSV.</p>
             <pre class="lp-code">$.tasks[?(@.status == <span class="lp-str">'FAILED'</span>)]
   | group(@.failureReason)
   | count()</pre>
@@ -311,6 +347,7 @@
             <button id="reload-btn" class="btn-quiet" title="Re-read this file from disk" hidden><svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>reload</button>
           </div>
           <button id="compare-btn" title="Choose a baseline and open semantic side-by-side comparison"><svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg>compare</button>
+          <button id="convert-btn" title="Turn this document into flat tables you can open in Excel">convert</button>
           <!-- Four layouts of the SAME document, so `run` is a view here rather
                than a button of its own: it composes the source pane with a
                derived one, exactly as split composes tree with code. -->
@@ -563,6 +600,103 @@
           <!-- No strip of its own: the alignment summary goes to #status-bar
                with every other view's (contract rule 19). -->
         </section>
+        <!-- Converter. The left rail answers "what is in here", the right pane
+             answers "what will I get" — and the preview under it is the real
+             product: a non-developer decides whether each item should be its
+             own row only by seeing the rows. -->
+        <div id="convert-view" hidden>
+          <div class="convert-bar">
+            <!-- The same heading cluster the compare view titles itself with,
+                 so a view names itself on rule 2's surface-title rank once
+                 rather than a fourth way. -->
+            <div class="sem-heading">
+              <strong>Convert</strong>
+              <!-- The descriptor says what this view DOES to the document, not
+                   what was found in it — the finding is the lead's job now. -->
+              <span id="convert-title">this document into spreadsheet tables</span>
+            </div>
+            <!-- The bar's lead, and it is a sentence about the FILE you are
+                 about to get, not a tally of what the detector found: someone
+                 who came here for a spreadsheet cannot tell from "3 tables
+                 found" whether they are getting one workbook or three files.
+                 convert-view writes that sentence into the slot inside it,
+                 which keeps #convert-count's id so filling it needs no
+                 rewiring. -->
+            <span class="convert-outcome" id="convert-outcome" aria-live="polite"><span id="convert-count"></span></span>
+            <span class="spacer"></span>
+            <!-- Naming a mapping, reopening a saved one and bringing one in from
+                 a file are once-per-session work, and five controls doing it
+                 stood between this view's title and the two fields you touch
+                 while actually mapping. They move to a strip of their own,
+                 revealed from here — the ask panel's idiom, not a floating
+                 panel: you type in it, and nothing in it is a menu item. -->
+            <button id="convert-mappings-btn" type="button" aria-expanded="false" aria-controls="convert-mappings"
+              title="Name this mapping, reopen one you saved, or bring one in from a file">mappings</button>
+            <!-- Rule 10: these two write the whole mapping's output rather than
+                 the selected table's, so they stand beside the format switch —
+                 the other output-wide decision — and not in a table's head.
+                 The label stands inside the field (rule 14) so the placeholder
+                 is free to carry the example. -->
+            <label class="field convert-inline-field"><span class="field-prefix">missing</span><input id="convert-missing" aria-label="Default missing value"></label>
+            <label class="field convert-inline-field"><span class="field-prefix">arrays</span><input id="convert-array-join" value="; " aria-label="Array join separator"></label>
+            <div class="mode-switch" id="convert-format" role="group" aria-label="Output format">
+              <button type="button" data-fmt="xlsx" class="on" title="One spreadsheet, one sheet per table, already linked by id">Excel</button>
+              <button type="button" data-fmt="csv" title="One CSV file per table">CSV</button>
+            </div>
+            <button id="convert-dl" class="primary" type="button" title="Convert and download"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>download</button>
+            <button id="convert-close" type="button">back to tree</button>
+          </div>
+          <!-- The mapping strip: hidden until `mappings` reveals it, and a bar
+               stacked under a bar (rule 11's second chrome step) rather than a
+               floating panel, because a strip that holds a text field wants to
+               stay put while you type in it. The mapping FILE lives here too —
+               it is the same job as `save`, one step further from this browser,
+               and beside `download` it was a second control wearing the same
+               ⇩ for a completely different file. -->
+          <div id="convert-mappings" hidden>
+            <label class="standing-label" for="convert-saved">saved</label>
+            <select id="convert-saved">
+              <option value="">starter mapping</option>
+            </select>
+            <button id="convert-forget" class="btn-quiet" type="button" title="Delete the selected saved mapping" disabled>forget</button>
+            <label class="standing-label" for="convert-map-name">name</label>
+            <input id="convert-map-name" class="convert-map-name" placeholder="what this mapping is for">
+            <button id="convert-save" type="button" title="Keep this mapping in this browser">save</button>
+            <span class="spacer"></span>
+            <button id="convert-import" type="button" title="Open a mapping you saved to a file">open a file…</button>
+            <input id="convert-import-file" type="file" accept=".json,application/json" hidden>
+            <button id="convert-spec" type="button" title="Save this mapping to a file — run it again later, or hand it to an agent"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>save to a file</button>
+            <span class="convert-mappings-note">a mapping you keep runs next month's file exactly the way it ran this one.</span>
+          </div>
+          <!-- What the chosen format costs this particular document. It sits here
+               rather than inside the bar's outcome sentence because it is prose,
+               and prose in a control strip moved the controls every time the
+               format was flipped. -->
+          <p id="convert-format-note" class="convert-format-note" aria-live="polite" hidden></p>
+          <div id="convert-body">
+            <div id="convert-tables" role="list" aria-label="Detected tables"></div>
+            <div id="convert-detail">
+              <div id="convert-cols-head">
+                <span id="convert-detail-name"></span>
+                <span id="convert-detail-src"></span>
+                <span class="spacer"></span>
+                <!-- Rule 10: target CSV rewrites the SELECTED table's columns,
+                     so it belongs on that table's own head next to + column,
+                     not in the view's bar among the whole-mapping ops. -->
+                <button id="convert-target" type="button" title="Use the first row of a CSV as the target columns">target CSV</button>
+                <input id="convert-target-file" type="file" accept=".csv,text/csv,text/plain" hidden>
+                <button id="convert-add-column" type="button" title="Add an output column">+ column</button>
+              </div>
+              <div id="convert-cols" role="list" aria-label="Columns"></div>
+              <div id="convert-preview-head">
+                <span>preview</span>
+                <span id="convert-preview-note"></span>
+              </div>
+              <div id="convert-preview"></div>
+              <div id="convert-report" hidden aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
         <div id="table-view" hidden>
           <div class="table-bar">
             <span id="table-title"></span>

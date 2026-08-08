@@ -18,6 +18,10 @@ import type {
 import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, type QueryResult } from './query';
 import { profileQuery } from './profile';
 import { EXPORT_CHUNK_BYTES, MAX_EXPORT_BYTES } from './export-policy';
+import { csvCell, csvField } from './csv';
+import { numberParser } from './lossless';
+import { convertInspect, convertPreview, convertRun, resetConvertCache } from './convert/session';
+import type { ConvertSpec } from './convert/index';
 import {
   compareSemantic,
   type SemanticCompareOptions,
@@ -36,35 +40,29 @@ import {
   type PayloadDecodeFailure,
   type PayloadDecodeSuccess,
 } from './codec';
-import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber, LosslessNumber } from 'lossless-json';
+import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
 
-// Lossless number handling: box a number whenever its canonical float form is
-// not byte-identical to the source literal — everything else stays a native
-// number so the parsed tree isn't bloated with wrappers. The obvious library
-// predicate, isSafeNumber(v, {approx: false}), compares *significant* digits,
-// so '88.10' passed as "safe" and every canonical copy silently became 88.1;
-// trailing zeros, '-0', '1e3' and '0.0000005' are formatting the author chose,
-// and this tool's one promise is that not a single digit changes. String(f)
-// also rejects everything isSafeNumber rejected (a differing significant digit
-// is in particular a differing byte), so this boxes strictly more, never less.
+// Lossless number handling lives in ./lossless so the converter engine and the
+// MCP server parse through the exact same predicate.
 //
-// Boxing is deliberately wider than "would lose digits" — '88.10' and '1e3' are
-// boxed to keep the author's formatting — so it cannot double as the run
-// panel's warning. isSafeNumber answers the narrower question the panel asks
-// ("would plain JSON.parse round this?"), and it only runs on the boxed
-// minority, so the common document pays nothing for it.
+// That predicate boxes deliberately wider than "would lose digits" — '88.10'
+// and '1e3' are boxed to keep the author's formatting — so it cannot double as
+// the run panel's warning. isSafeNumber answers the narrower question the panel
+// asks ("would plain JSON.parse round this?"), and it only runs on the boxed
+// minority, so the common document pays nothing for it. The flag is worker
+// state, which is why parsing here wraps the shared predicate instead of
+// calling ./lossless's own `lparse`.
 let sawUnsafeNumber = false;
 
-const numberParser = (v: string): unknown => {
-  const f = parseFloat(v);
-  if (String(f) === v) return f;
-  if (!isSafeNumber(v)) sawUnsafeNumber = true;
-  return new LosslessNumber(v);
+const trackedNumberParser = (v: string): unknown => {
+  const parsed = numberParser(v);
+  if (isLosslessNumber(parsed) && !isSafeNumber(v)) sawUnsafeNumber = true;
+  return parsed;
 };
 
 function lparse(text: string): unknown {
-  return llParse(text, undefined, numberParser as never);
+  return llParse(text, undefined, trackedNumberParser as never);
 }
 
 // A UTF-8 decoder may surface the byte-order mark as U+FEFF. JSON parsers do
@@ -167,6 +165,7 @@ const post = (d: unknown) => (self as unknown as Worker).postMessage(d);
 // code-view Apply).
 function clearState(): void {
   clearCompareState();
+  resetConvertCache();
   queryExportSessions.clear();
   nodes = new Map();
   children = new Map();
@@ -614,8 +613,9 @@ function doParse(text: string, isApply: boolean): ParseOk | ParseErr {
   const t0 = performance.now();
   const parserText = parserBoundaryText(text);
   const positionOffset = parserText.length === text.length ? 0 : 1;
-  // numberParser writes this flag as it goes; every lparse below is synchronous,
-  // so resetting here and reading after the last one is the whole bookkeeping.
+  // trackedNumberParser writes this flag as it goes; every lparse below is
+  // synchronous, so resetting here and reading after the last one is the whole
+  // bookkeeping.
   sawUnsafeNumber = false;
   let value: unknown;
   let jsonl = false;
@@ -1934,34 +1934,11 @@ function tableRows(start: number, count: number): { index: number; cells: string
 }
 
 // ---------- complete query/table export ----------
-
-// A CSV cell: LosslessNumber → exact digit string (unfloated), null/undefined →
-// empty, nested object/array → its JSON (llStringify) folded into one cell,
-// everything else (string/number/boolean) stringified as-is.
-function csvCell(v: unknown): string {
-  if (v === undefined || v === null) return '';
-  if (isLosslessNumber(v)) return v.toString();
-  if (typeof v === 'object') return llStringify(v) ?? '';
-  return String(v);
-}
-
-// A field whose first non-blank character is one of = + - @ TAB CR is executed as
-// a formula when the CSV is opened in Excel / Sheets / LibreOffice (CWE-1236), so
-// it is prefixed with an apostrophe — the standard neutralizer, which those apps
-// strip on display. Plain numeric literals are exempt: `-123`, `+42`, `-1.5e9`
-// and exact int64 digit strings are not formulas, and the lossless-number
-// guarantee requires their CSV form to stay byte-identical.
-const CSV_FORMULA_LEAD = /^[ \t]*[=+\-@\t\r]/;
-const CSV_PLAIN_NUMBER = /^[ \t]*[-+]?\d+(\.\d+)?([eE][-+]?\d+)?[ \t]*$/;
-
-// Neutralization first, then RFC 4180 field quoting: wrap in double-quotes when
-// the field contains a comma, a double-quote, or a line break; inner
-// double-quotes are doubled. Every export path (table cells, query rows, group
-// keys, and all headers) goes through here, so this is the one control point.
-function csvField(s: string): string {
-  const safe = CSV_FORMULA_LEAD.test(s) && !CSV_PLAIN_NUMBER.test(s) ? `'${s}` : s;
-  return /[",\r\n]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe;
-}
+// The cell and field rules (RFC 4180 quoting, the formula-injection
+// neutralizer) live in ./csv so the converter engine shares this exact
+// neutralizer rather than growing a second one; every export path below —
+// table cells, query rows, group keys, and all headers — goes through them, so
+// that module stays the one control point.
 
 function* csvLines(cols: string[], rows: Iterable<unknown[]>): Generator<QueryExportLine> {
   yield { text: cols.map(csvField).join(',') + '\r\n', row: false };
@@ -2261,6 +2238,21 @@ export async function handleAsync(
     | TransportInspectWorkerMessage
     | DecodePayloadWorkerMessage,
 ): Promise<object | TransportInspection | DecodePayloadWorkerResult> {
+  // Converter ops. The document never leaves the worker; the spec arrives from
+  // the UI on every call and the rows go back.
+  if (msg.type === 'convertInspect' || msg.type === 'convertPreview' || msg.type === 'convertRun') {
+    const root = nodes.get(rootId);
+    if (!root) return { error: 'no document open' };
+    const doc = effValue(root);
+    if (msg.type === 'convertInspect') {
+      return convertInspect(doc, (msg as { hints?: import('./convert').DraftHints }).hints);
+    }
+    const spec = (msg as unknown as { spec: ConvertSpec }).spec;
+    if (msg.type === 'convertPreview') {
+      return convertPreview(doc, spec, ((msg as { rows?: number }).rows ?? 20));
+    }
+    return convertRun(doc, spec);
+  }
   if (msg.type === 'decodePayload') {
     const input = msg.input;
     if (
@@ -2319,7 +2311,13 @@ export async function handleAsync(
 if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessage === 'function') {
   (self as unknown as Worker).onmessage = (e: MessageEvent) => {
     const msg = e.data as { reqId: number; type: string } & Record<string, unknown>;
-    if (msg.type === 'transportInspect' || msg.type === 'decodePayload') {
+    if (
+      msg.type === 'transportInspect' ||
+      msg.type === 'decodePayload' ||
+      msg.type === 'convertInspect' ||
+      msg.type === 'convertPreview' ||
+      msg.type === 'convertRun'
+    ) {
       void handleAsync(msg).then(
         (result) => post({ reqId: msg.reqId, ...result }),
         (err) => post({ reqId: msg.reqId, error: String(err) }),

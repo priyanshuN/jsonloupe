@@ -17,16 +17,34 @@ import { spawn } from 'node:child_process';
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 
 const args = process.argv.slice(2);
+
+// The converter verbs. Their bundle is imported only when one is used, so
+// serving the viewer never pays for code it does not run.
+const CONVERT = new Set(['inspect', 'draft', 'convert']);
+if (CONVERT.has(args[0])) {
+  const { run } = await import('../dist-cli/commands.js');
+  process.exit(await run(args));
+}
+if (args[0] === 'serve') args.shift();
+
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`jsonloupe — a loupe for large JSON, served locally from this package
 
-usage: jsonloupe [--port <n>] [--no-open]
+usage: jsonloupe [serve] [--port <n>] [--no-open]
+       jsonloupe inspect <file>
+       jsonloupe draft   <file> [-o spec.json]
+       jsonloupe convert <file> --spec <spec.json> [-o out] [--to xlsx|csv]
 
   --port, -p   port to listen on (default 5199; next free port if taken)
   --no-open    don't open the browser
 
+With no arguments jsonloupe serves the viewer. The three converter verbs turn
+nested JSON into flat tables: \`inspect\` reports what is in a document,
+\`draft\` writes a mapping spec you can read and edit, \`convert\` runs one.
+
 Nothing leaves your machine: the server binds 127.0.0.1 and serves only the
-app's own files. Documents you open stay in your browser's IndexedDB.`);
+app's own files. Documents you open stay in your browser's IndexedDB, and the
+converter reads and writes only the paths you name.`);
   process.exit(0);
 }
 const portFlag = args.findIndex((a) => a === '--port' || a === '-p');

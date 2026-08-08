@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/json-to-excel.html" />
+  <!-- The title, the description and the <h1> open with the same four words on
+       purpose: someone who typed them into a search box has to recognise this
+       page as the answer without reading a second line. -->
+  <title>Convert JSON to Excel — jsonloupe</title>
+  <meta name="description" content="Convert JSON to Excel in your browser. Lists inside your file become separate linked sheets instead of items/0/sku columns, long ID numbers keep every digit, and the file is never uploaded." />
+  <meta property="og:title" content="Convert JSON to Excel" />
+  <meta property="og:description" content="Paste JSON, get a spreadsheet. Lists become their own sheets, long IDs keep every digit, and the file never leaves your browser." />
+  <meta property="og:type" content="website" />
+  <!-- Stylesheet as a link (not a JS import) so the page paints styled on the
+       first frame — same reasoning as index.html and spec.html. -->
+  <link rel="stylesheet" href="/src/style.css" />
+  <!-- Same pre-paint theme gate as index.html and spec.html: the stylesheet's
+       bare :root is the dark palette, so without this a light-theme visitor
+       gets slammed into dark for a frame. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('wb-theme');
+        if (t !== 'light' && t !== 'dark')
+          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+      } catch (e) { /* private mode: no flash protection, nothing broken */ }
+    })();
+  </script>
+</head>
+<body>
+  <!-- This is index.html's marketing landing, reused whole rather than
+       re-dressed: the same #landing wrapper and the same ids on the paste
+       panel's controls, so every rule that dresses that panel — including the
+       one loud button and the red tint on an invalid box — applies here and
+       this page adds no CSS of its own. main.ts does NOT run on this page; the
+       small script at the end of the body is all the behaviour there is, and
+       all it does is hand the pasted text to the app. -->
+  <section id="landing">
+    <header class="lp-header">
+      <a class="lp-brand" href="./" title="jsonloupe">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span>json<span class="brand-loupe">loupe</span></span>
+      </a>
+      <nav class="lp-nav">
+        <a href="#what">what you get</a>
+        <a href="#how">how it works</a>
+        <a href="#privacy">privacy</a>
+        <a href="./">the viewer</a>
+      </nav>
+      <span class="lp-spacer"></span>
+      <span class="lp-meta">free · no account</span>
+      <button id="cta-open" class="lp-cta" type="button">open the converter →</button>
+    </header>
+
+    <div class="lp-hero">
+      <div class="lp-hero-copy">
+        <span class="lp-pill">runs in this tab <span class="lp-pill-sep">·</span> nothing is uploaded</span>
+        <h1>Convert JSON to Excel</h1>
+        <p class="lp-lede">Paste the JSON you were handed and get a spreadsheet back: one sheet per list, already joined up by ID, with every digit of every number intact.</p>
+        <!-- The one line that decides whether this page is worth their next ten
+             seconds: it names the exact mess they got from the last converter
+             they tried. -->
+        <p class="lp-wedge">A list inside your file becomes its own sheet — not sixty columns called items/0/sku, items/1/sku, items/2/sku.</p>
+        <p class="lp-trust">0 bytes uploaded · no account · free</p>
+      </div>
+      <div class="lp-paste">
+        <div class="lp-paste-head">
+          <span class="lp-paste-title">Paste JSON</span>
+          <span class="lp-paste-status">nothing leaves this tab</span>
+        </div>
+        <div class="lp-paste-body">
+          <textarea id="paste-box" spellcheck="false"
+            placeholder="Paste JSON here, then press convert."></textarea>
+          <p class="lp-paste-hint">you see the sheets it found, and can rename or drop columns, before anything downloads</p>
+          <div class="lp-paste-actions">
+            <button id="parse-btn" type="button">convert</button>
+            <button id="open-btn" type="button" title="Open the converter and choose a file there — no size limit">open a file instead</button>
+            <span class="lp-spacer"></span>
+            <span class="lp-note">⌃↵ to convert</span>
+          </div>
+          <div id="parse-error" class="error" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="lp-band" id="what">
+      <h2 class="lp-h2">The three things that usually go wrong</h2>
+      <div class="lp-grid">
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-accent">lists</span>
+          <h3>A list gets its own sheet</h3>
+          <p>An order with three items does not become <code>items/0/sku, items/1/sku, items/2/sku</code>. The items land on their own sheet with the order's ID on every row, so a lookup or a pivot works the way you already know.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-ok">privacy</span>
+          <h3>The file never leaves your browser</h3>
+          <p>There is nothing to upload, no account to make, and no server behind this page that could keep a copy. Turn your wifi off once the page has loaded and the conversion still works.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-number">numbers</span>
+          <h3>Long IDs keep every digit</h3>
+          <p>A 19-digit order number comes out as the number you put in, not rounded off in the last four digits. The same goes for prices and quantities: what went in is what comes out.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="lp-split" id="how">
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Your file, as sheets</h2>
+        <p class="lp-body">One sheet per list, joined by an ID column that is filled in for you. Download it as an Excel file, or as a folder of CSVs if you are feeding it to something else.</p>
+        <pre class="lp-code">orders        id · customer · placed_at
+order_items   <span class="lp-str">order_id</span> · sku · qty · price
+addresses     <span class="lp-str">order_id</span> · line1 · city · postcode</pre>
+      </section>
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">You approve it before it downloads</h2>
+        <p class="lp-body">You see real rows from your own file first, and rename headings or drop the columns you do not want. Save the setup when it looks right, and next month's file gives you the same sheets with the same headings — no redoing it by hand.</p>
+        <div class="lp-chips">
+          <span class="lp-chip">.xlsx</span>
+          <span class="lp-chip">one CSV per sheet</span>
+          <span class="lp-chip">saved setups</span>
+        </div>
+      </section>
+    </div>
+
+    <section class="lp-band lp-privacy" id="privacy">
+      <div>
+        <h2 class="lp-h2 lp-h2-sm">Why nothing is uploaded</h2>
+        <p class="lp-body lp-body-wide">The conversion runs inside this browser tab, the way a formula runs inside Excel. Your file is read here and nowhere else — there is no server to send it to, which is why it keeps working with your wifi off. Nothing is logged, counted, or kept anywhere but your own computer, so a file you are not allowed to email is a file you are allowed to convert.</p>
+      </div>
+      <div class="lp-facts">
+        <div class="lp-fact"><span>bytes uploaded</span><span class="lp-fact-ok">0</span></div>
+        <div class="lp-fact"><span>account needed</span><span class="lp-fact-ok">none</span></div>
+        <div class="lp-fact"><span>works with wifi off</span><span class="lp-fact-ok">yes</span></div>
+        <div class="lp-fact"><span>price</span><span class="lp-fact-accent">free · MIT</span></div>
+      </div>
+    </section>
+
+    <footer class="lp-footer">
+      <span>jsonloupe — MIT</span>
+      <span class="lp-spacer"></span>
+      <a href="./#convert">open the converter</a>
+      <a href="./">the viewer</a>
+      <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+      <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+    </footer>
+  </section>
+
+  <script>
+    (function () {
+      // This page converts nothing. It collects the text and hands it to the
+      // app's converter — one implementation of the conversion, not two. With
+      // scripting off the buttons go quiet and the footer's plain link to the
+      // converter is the way through, which is why that link is an <a>.
+      var APP = './#convert';
+      // sessionStorage rather than localStorage: the handover is meant to
+      // survive one navigation, not outlive the tab. On a shared machine
+      // nobody's payload is left sitting on disk afterwards.
+      var HANDOFF = 'wb-convert-handoff';
+
+      var box = document.getElementById('paste-box');
+      var convert = document.getElementById('parse-btn');
+      var openFile = document.getElementById('open-btn');
+      var cta = document.getElementById('cta-open');
+      var err = document.getElementById('parse-error');
+
+      // Anything left from an earlier visit in this tab is stale by definition:
+      // the only reader is the app, and it reads once, on arrival. The same
+      // call doubles as the availability probe — a browser with storage blocked
+      // throws here, and this page needs to know that before it promises to
+      // carry anything.
+      var canCarry = true;
+      try { sessionStorage.removeItem(HANDOFF); } catch (e) { canCarry = false; }
+
+      function fail(message) {
+        err.textContent = message;
+        err.hidden = false;
+      }
+
+      // 'empty' | 'ok' | 'no-handoff' — the caller decides which of those is
+      // fatal. 'no-handoff' covers both a paste too large for the storage quota
+      // and a browser that refuses storage outright: from here they are the
+      // same fact, and they have the same two ways out.
+      function carry() {
+        var text = box.value.trim();
+        if (!text) return 'empty';
+        if (!canCarry) return 'no-handoff';
+        try {
+          sessionStorage.setItem(HANDOFF, text);
+          return 'ok';
+        } catch (e) {
+          return 'no-handoff';
+        }
+      }
+
+      function convertNow() {
+        err.hidden = true;
+        var carried = carry();
+        if (carried === 'empty') {
+          fail('paste some JSON first, or use “open a file instead”.');
+          box.focus();
+          return;
+        }
+        if (carried === 'no-handoff') {
+          // Saying so beats dropping the text quietly and landing them in an
+          // empty converter wondering where their file went.
+          fail('this browser would not hold that text long enough to carry it across. use “open a file instead” — the converter reads a file directly, at any size.');
+          return;
+        }
+        location.href = APP;
+      }
+
+      // The app's own file picker is better than a second one here, so both of
+      // these are a trip to the app. Whatever is in the box rides along if it
+      // fits; an empty box, or one that would not fit, is no reason to block
+      // the trip.
+      function openApp() {
+        err.hidden = true;
+        carry();
+        location.href = APP;
+      }
+
+      convert.addEventListener('click', convertNow);
+      openFile.addEventListener('click', openApp);
+      cta.addEventListener('click', openApp);
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          convertNow();
+        }
+      });
+      // preventScroll: below ~1100px the hero stacks and the paste panel sits
+      // under the copy, so a plain focus() would scroll the headline — the one
+      // line this page exists to show — off the top before it is read.
+      box.focus({ preventScroll: true });
+    })();
+  </script>
+</body>
+</html>

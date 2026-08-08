@@ -4,7 +4,7 @@
 // costs one thread and the server keeps answering.
 
 import { parentPort } from 'node:worker_threads';
-import { handle } from '../worker';
+import { handle, handleAsync } from '../worker';
 import { runDocOp, type Engine } from './doc-ops';
 import type { DocRequest } from './pool';
 
@@ -14,7 +14,7 @@ const port = parentPort;
 if (!port) throw new Error('doc-thread must be started as a worker thread');
 
 port.on('message', (request: DocRequest & { id: number }) => {
-  void runDocOp(engine, request).then(
+  void runDocOp(engine, request, handleAsync).then(
     (result) => port.postMessage({ id: request.id, result }),
     (err: unknown) => port.postMessage({ id: request.id, error: errorText(err) }),
   );
