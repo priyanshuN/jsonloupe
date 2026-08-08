@@ -4116,6 +4116,8 @@ const runPicked = new Set<string>();
 let runResultKind = '';
 /** How many functions the library holds, so the bar can hide what is moot. */
 let runLibraryCount = 0;
+/** What the bar's count says when nothing is ticked — restored on the last untick. */
+let runLibCountResting = 'functions';
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4243,12 +4245,21 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
 
   // Rule 7's one checkbox. It is always drawn rather than revealed on hover:
   // a tick that hides when the pointer leaves cannot be counted by eye.
+  //
+  // And it stands in a COLUMN that is entirely its own, full row height: the
+  // box itself is 14px, so every near-miss around it used to land on the row
+  // and RUN the function — the most expensive possible outcome for a slip
+  // aimed at the cheapest possible act. The zone is the target; the box is
+  // just what the zone draws.
+  const zone = document.createElement('span');
+  zone.className = 'run-lib-pickzone';
   const pick = document.createElement('input');
   pick.type = 'checkbox';
   pick.className = 'chk run-lib-pick';
   pick.checked = runPicked.has(rec.id);
   pick.title = `Include ${rec.name} in a batch`;
   pick.setAttribute('aria-label', `Include ${rec.name} in a batch`);
+  zone.appendChild(pick);
 
   const open = document.createElement('button');
   open.type = 'button';
@@ -4283,7 +4294,7 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
   del.title = `Forget ${rec.name}`;
   del.setAttribute('aria-label', `Forget ${rec.name}`);
 
-  row.append(pick, open, meta, del);
+  row.append(zone, open, meta, del);
   return row;
 }
 
@@ -4294,7 +4305,11 @@ function paintPickState(total: number): void {
   const picked = runPicked.size;
   runPickedBtn.hidden = picked === 0;
   runPickedBtn.textContent = `run ${fmtNumber(picked)}`;
-  if (picked > 0) runLibCount.textContent = `${fmtNumber(picked)} of ${fmtNumber(total)} picked`;
+  // Both directions: unticking the last one has to put the bar back to what it
+  // said before, or it keeps claiming a selection that is gone.
+  runLibCount.textContent = picked > 0
+    ? `${fmtNumber(picked)} of ${fmtNumber(total)} picked`
+    : runLibCountResting;
 }
 
 async function renderLibrary(): Promise<void> {
@@ -4308,9 +4323,10 @@ async function renderLibrary(): Promise<void> {
   runExportBtn.hidden = runFace !== 'functions' || all.length === 0;
   runLibSearchWanted = all.length >= LIBRARY_SEARCH_MIN;
   runLibSearch.hidden = !runLibSearchWanted || runFace !== 'functions';
-  if (all.length === 0) runLibCount.textContent = 'functions';
-  else if (term) runLibCount.textContent = `${fmtNumber(shown.length)} of ${fmtNumber(all.length)}`;
-  else runLibCount.textContent = `${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`;
+  if (all.length === 0) runLibCountResting = 'functions';
+  else if (term) runLibCountResting = `${fmtNumber(shown.length)} of ${fmtNumber(all.length)}`;
+  else runLibCountResting = `${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`;
+  runLibCount.textContent = runLibCountResting;
 
   if (shown.length === 0) {
     runLibList.replaceChildren(
@@ -4482,11 +4498,18 @@ runLibList.addEventListener('click', async (e) => {
   const id = target.closest<HTMLElement>('.run-lib-row')?.dataset.id;
   if (!id) return;
   // Ticking is not running: it says what a later press will cover, and the
-  // result on screen stays whatever it already was.
-  if (target.closest('.run-lib-pick')) {
-    if ((target as HTMLInputElement).checked) runPicked.add(id);
+  // result on screen stays whatever it already was. Anywhere in the column
+  // counts — a click on the padding around the box has to mean the same thing
+  // as a click on the box, or the column is decoration rather than a target.
+  const zone = target.closest('.run-lib-pickzone');
+  if (zone) {
+    const box = zone.querySelector<HTMLInputElement>('.run-lib-pick');
+    if (!box) return;
+    // The box toggles itself when it is what was hit; the padding does not.
+    if (target !== box) box.checked = !box.checked;
+    if (box.checked) runPicked.add(id);
     else runPicked.delete(id);
-    paintPickState((await store.listScripts()).length);
+    paintPickState(runLibraryCount);
     return;
   }
   if (target.closest('.run-lib-del')) {

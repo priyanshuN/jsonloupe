@@ -2449,12 +2449,30 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 /* Rule 7's checkbox, and it is NOT hover-revealed like the delete beside it: a
    tick that disappears when the pointer leaves cannot be counted by eye, and
-   counting them is the whole point of it. The inset it takes is the row's, so
-   the names still line up under each other. */
-.run-lib-pick { margin-left: var(--gap-3); flex-shrink: 0; }
-/* Selection and picking are different things and must not collide: rule 18's
-   2px bar is at the very edge, the checkbox starts after the row's inset. */
-.run-lib-row.selected .run-lib-pick { margin-left: calc(var(--gap-3) - 2px); }
+   counting them is the whole point of it.
+   THE TARGET IS THE COLUMN, NOT THE BOX. A 14px box inside a 38px row means
+   most of the space around it belonged to the row, so a near-miss aimed at the
+   cheapest act in the panel (ticking) performed the most expensive one
+   (running). The zone spans the row's full height and a comfortable width; the
+   box is only what it draws. */
+.run-lib-pickzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 34px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+/* The column is DRAWN, not just present. A hover tint alone could not say it —
+   the row lights up on hover too, so the two were indistinguishable and the
+   column still read as a checkbox floating in a row. One hairline makes the
+   boundary visible at rest, which is the whole claim: left of this line ticks,
+   right of it runs. Its hover then needs a ground of its own, one step off the
+   row's, or it disappears back into it. */
+.run-lib-pickzone { border-right: 1px solid var(--border); }
+.run-lib-pickzone:hover { background: var(--bg-inset); }
+.run-lib-pick { pointer-events: none; }
 
 /* The rest of the row is the press: loading a function and running it are one
    act, so the name, its first line and the hit area are one button rather than
