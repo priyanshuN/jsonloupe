@@ -66,6 +66,14 @@ SPDX-License-Identifier: MIT -->
       <path d="M2.5 6.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1z" />
       <path d="M5.5 5.5v-2a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2" />
     </symbol>
+    <!-- The magnifier and the funnel: the two glyphs a search bar can wear
+         without a tooltip. Both centre on y=8 like every other symbol. -->
+    <symbol id="i-search" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="7" cy="7" r="4.25" /><path d="m10.2 10.2 3 3" />
+    </symbol>
+    <symbol id="i-filter" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 3.5h11l-4.25 5v4.25l-2.5-1.5V8.5z" />
+    </symbol>
     <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.5v7.5" /><path d="M4.75 6.75 8 10l3.25-3.25" /><path d="M3 13.25h10" />
     </symbol>
@@ -376,9 +384,20 @@ SPDX-License-Identifier: MIT -->
                inside the search field. Regex / syntax hints ride the tooltip
                rather than a second line of chrome. -->
           <div class="tb-search">
-            <input id="search-box" placeholder="search — press /" spellcheck="false"
+            <!-- The magnifier is rule 14's standing label in graphic form: it
+                 names the field from inside the shell, which frees the
+                 placeholder to teach the SHORTCUT instead of repeating the
+                 word the glyph already says. Short on purpose: this field is
+                 the one control that gives width back when the toolbar is
+                 tight, so its hint has to survive being squeezed to 160px. -->
+            <svg class="ic tb-search-icon" aria-hidden="true"><use href="#i-search"></use></svg>
+            <input id="search-box" placeholder="press /" spellcheck="false"
               title="Search keys and values. Wrap in slashes for a regular expression: /order-\d+/">
-            <button id="filter-btn" class="tb-chip" title="Prune the tree to branches matching the search text">filter</button>
+            <!-- Glyph plus a COUNT when it is on: the funnel says what the
+                 control does, the number says what it did, and only the second
+                 one needs words. -->
+            <button id="filter-btn" class="tb-chip" aria-pressed="false"
+              title="Prune the tree to branches matching the search text" aria-label="Filter the tree to matches"><svg class="ic" aria-hidden="true"><use href="#i-filter"></use></svg></button>
           </div>
           <button id="ask-btn" title="Ask a question about this document in English">ask</button>
           <!-- The tree's three document ops, behind a hairline (contract rule

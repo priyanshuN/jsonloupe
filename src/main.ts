@@ -414,7 +414,7 @@ const PASTE_ECHO_MAX = 2_000_000;
 // index.html is the only place the paths live, so a button built here gets the
 // same box, the same 1.5 stroke and the same currentColor ink as one written in
 // markup — which is the whole point of dropping the six characters.
-type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'warn' | 'theme';
+type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'search' | 'filter' | 'warn' | 'theme';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function icon(name: IconName): SVGSVGElement {
@@ -1912,7 +1912,7 @@ async function openText(
   filterOn = false;
   filterScrollSnapshot = null;
   filterBtn.classList.remove('on');
-  filterBtn.textContent = 'filter';
+  paintFilterBtn(null);
   tree.resetSelection();
   // showPane repaints the strip; with nothing selected that is the resting line.
   showPane('tree');
@@ -3096,6 +3096,20 @@ let filterOn = false;
 // scroll position is main-side), restored when the filter is cleared.
 let filterScrollSnapshot: number | null = null;
 
+// The funnel says what the control DOES and never changes; the count says what
+// it did, and only exists while the filter is on. Rebuilt rather than assigned
+// as text, because the glyph is a child element and `textContent` would delete
+// it — which is exactly what the old `filter (37)` string did to any icon put
+// beside it.
+function paintFilterBtn(matches: number | null): void {
+  filterBtn.replaceChildren(icon('filter'));
+  filterBtn.setAttribute('aria-pressed', String(matches !== null));
+  if (matches === null) return;
+  const count = document.createElement('span');
+  count.textContent = `${fmtNumber(matches)}${matches >= 2000 ? '+' : ''}`;
+  filterBtn.appendChild(count);
+}
+
 async function setFilter(query: string): Promise<void> {
   // Snapshot scroll only on ENTERING filter from the unfiltered tree; don't
   // re-snapshot on repeated filter edits while already filtered.
@@ -3103,7 +3117,7 @@ async function setFilter(query: string): Promise<void> {
   const r = await call<{ totalRows: number; matches: number }>({ type: 'filter', query });
   filterOn = !!query;
   filterBtn.classList.toggle('on', filterOn);
-  filterBtn.textContent = filterOn ? `filter (${r.matches}${r.matches >= 2000 ? '+' : ''})` : 'filter';
+  paintFilterBtn(filterOn ? r.matches : null);
   showPane('tree');
   searchPanel.hidden = true;
   tree.resetSelection();

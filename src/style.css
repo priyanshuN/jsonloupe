@@ -771,11 +771,28 @@ select:focus {
      draws a second one three pixels inside the first. */
   box-shadow: none;
 }
+/* The magnifier stands where .field-prefix stands, and does the same job: it
+   names the field from inside the shell. Faint like the prefix text, so it
+   reads as a label rather than as a control you can press. */
+.tb-search-icon {
+  flex-shrink: 0;
+  margin-left: var(--gap-3);
+  color: var(--text-faint);
+}
+/* The input keeps its own inset when the icon is not there to provide one;
+   with the icon it would double up, so the left side is the icon's margin. */
+.tb-search > .tb-search-icon + input { padding-left: var(--gap-2); }
+
 /* The prefix owns the shell's inset, so the input's text starts after it. */
 .field > input { padding: 0; }
 /* No shell inset of its own — the input carries the contract's 12px so the
    trailing chip can sit tight against the right edge. */
 .tb-search > input { padding: 0 var(--gap-3); }
+/* Glyph + count. The gap only exists when the count does, so the resting chip
+   is a square around the funnel rather than a square with a hole beside it. */
+#filter-btn { display: inline-flex; align-items: center; gap: var(--gap-1); }
+#filter-btn > span { font-variant-numeric: tabular-nums; }
+
 /* Rule 14's standing label, and the ONE small-caps label device in the app. It
    has two homes and they are the same device: INSIDE the shell on a one-line
    field (.field-prefix), and ABOVE the box everywhere a shell has no baseline
