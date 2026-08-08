@@ -3536,7 +3536,30 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
   flex-shrink: 0;
-  flex-wrap: wrap;
+  /* This strip carries prose, which rule 11's no-wrap default did not anticipate:
+     the outcome sentence changes length when the mapping breaks or the format
+     flips, and a WRAPPING bar answers by moving the controls — flipping to CSV
+     re-laid the whole strip and stranded `back to tree` on a line of its own.
+     So the bar does not wrap; the sentence is the only member allowed to shrink,
+     and it takes its second line inside itself while every control stays put. */
+  flex-wrap: nowrap;
+}
+.convert-bar > * { flex-shrink: 0; }
+/* The sentence takes every pixel the controls leave, which is also what pushes
+   them to the right edge — so it gets the whole remainder before it has to wrap.
+   The shared .spacer is flex:1 and would otherwise compete for that same space,
+   costing the sentence a line it did not need to take. */
+.convert-bar > .convert-outcome { flex: 1 1 auto; min-width: 0; }
+.convert-bar > .spacer { flex: 0 1 0; min-width: 0; }
+/* The heading and the sentence are the only text here, and at most widths they
+   do not both fit beside the controls. The heading gives ground first — it
+   ellipsizes, and #convert-title is built for that — but only a little, because
+   an ellipsis loses words for good while a wrapped sentence loses nothing. */
+.convert-bar > .sem-heading { flex-shrink: 1; }
+/* Below the layout's own breakpoint there is no width left to shrink into, and
+   a bar that overflows is worse than one that wraps. */
+@media (max-width: 900px) {
+  .convert-bar { flex-wrap: wrap; }
 }
 /* Rule 18: --c-key paints JSON values, and "tables in this document" is prose
    about the view. Same treatment #sem-title has for the same job — the dim mono
@@ -3777,6 +3800,19 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 
 /* Rung 3 of the baseDate ladder: where a time has no date to borrow, ask —
    never quietly use the day the conversion happens to run on. */
+/* Rule 15 tier 2, and a full-width strip rather than a bar member: it is the
+   longest sentence this view writes, it appears and disappears with the format
+   switch, and inside the bar it was re-laying the controls on every flip. Its
+   own row under the bar can grow a line without moving anything. */
+.convert-format-note {
+  flex-shrink: 0;
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-chrome);
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+}
+
 .convert-ask {
   display: flex;
   align-items: center;

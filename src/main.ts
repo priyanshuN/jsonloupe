@@ -1563,6 +1563,7 @@ const converter = new ConvertView(
     detailSrc: $('#convert-detail-src'),
     cols: $('#convert-cols'),
     previewNote: $('#convert-preview-note'),
+    formatNote: $('#convert-format-note'),
     preview: $('#convert-preview'),
     format: $('#convert-format'),
     mappingName: $<HTMLInputElement>('#convert-map-name'),

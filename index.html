@@ -668,6 +668,11 @@
             <button id="convert-spec" type="button" title="Save this mapping to a file — run it again later, or hand it to an agent"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>save to a file</button>
             <span class="convert-mappings-note">a mapping you keep runs next month's file exactly the way it ran this one.</span>
           </div>
+          <!-- What the chosen format costs this particular document. It sits here
+               rather than inside the bar's outcome sentence because it is prose,
+               and prose in a control strip moved the controls every time the
+               format was flipped. -->
+          <p id="convert-format-note" class="convert-format-note" aria-live="polite" hidden></p>
           <div id="convert-body">
             <div id="convert-tables" role="list" aria-label="Detected tables"></div>
             <div id="convert-detail">

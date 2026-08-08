@@ -381,6 +381,7 @@ export class ConvertView {
       detailSrc: HTMLElement;
       cols: HTMLElement;
       previewNote: HTMLElement;
+      formatNote: HTMLElement;
       preview: HTMLElement;
       format: HTMLElement;
       mappingName: HTMLInputElement;
@@ -539,8 +540,13 @@ export class ConvertView {
       format,
       problems: this.errors.length,
     });
-    if (format === 'csv') text += ` ${csvCaution(this.previewedTables())}`;
     host.textContent = text;
+
+    // The caution goes to its own strip, not onto the sentence above: it is the
+    // longest string this view produces, and the bar has controls to protect.
+    const caution = format === 'csv' ? csvCaution(this.previewedTables()) : '';
+    this.els.formatNote.textContent = caution;
+    this.els.formatNote.hidden = !caution;
   }
 
   /**
