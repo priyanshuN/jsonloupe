@@ -2223,6 +2223,7 @@ function showCodec(): void {
   landing.hidden = true;
   viewer.hidden = true;
   codecPane.hidden = false;
+  paintCodecJsonPlaceholder();
 }
 
 // What the last press did, under the pair it acted on: the trip and its sizes
@@ -2379,7 +2380,23 @@ $('#codec-run-d').addEventListener('click', async () => {
   await decodeInPayloadTools(src, 'pasted payload');
 });
 
-$('#codec-use-current').addEventListener('click', () => void compressOpenDocument());
+// An empty left box is not a mistake while a document is open — it is the one
+// input this side cannot hold, since rendering 40 MB into a textarea wedges the
+// page. So the placeholder says it, where and exactly when it applies, instead
+// of a button whose label never could.
+function paintCodecJsonPlaceholder(): void {
+  codecJson.placeholder = currentText
+    ? `{"orders": […]} · or leave this empty to compress the open document (${fmtBytes(currentText.length)})`
+    : '{"orders": […]}';
+}
+
+// Emptying the box is what makes the hint true again, so that is when it comes
+// back. Without this the box keeps whatever note the last press left on it —
+// "the open document … not rendered here on purpose" long after the user has
+// typed over it and cleared it, which describes a state that no longer exists.
+codecJson.addEventListener('input', () => {
+  if (!codecJson.value) paintCodecJsonPlaceholder();
+});
 
 // Copy on BOTH sides: whichever one just filled is the one you came for, and
 // having to leave the page to get at it was the whole complaint.

@@ -286,18 +286,20 @@ SPDX-License-Identifier: MIT -->
              placeholder vanishes the moment there is content. -->
         <div class="codec-pair">
           <div class="codec-side">
-            <div class="codec-box">
-              <div class="codec-box-head">
-                <label class="standing-label" for="codec-json">JSON or text</label>
-                <span class="spacer"></span>
-                <button id="codec-copy-json" class="btn-quiet" type="button" title="Copy this JSON">copy</button>
-                <button id="codec-open-json" class="btn-quiet" type="button" title="Parse this JSON as a document">open as document</button>
-              </div>
-              <textarea id="codec-json" spellcheck="false" placeholder="{&quot;orders&quot;: […]}"></textarea>
+            <div class="codec-box-head">
+              <label class="standing-label" for="codec-json">JSON or text</label>
+              <span class="spacer"></span>
+              <button id="codec-copy-json" class="btn-quiet" type="button" title="Copy this JSON">copy</button>
+              <button id="codec-open-json" class="btn-quiet" type="button" title="Parse this JSON as a document">open as document</button>
             </div>
-            <div class="codec-actions">
-              <button id="codec-use-current" title="Compress the currently open document (never rendered here — stays fast for huge docs)">use open doc</button>
-            </div>
+            <!-- main.ts extends this placeholder while a document is open:
+                 leaving the box empty compresses THAT, which is the one input
+                 this side cannot hold (a 40 MB document rendered into a
+                 textarea wedges the page). It used to be a `use open doc`
+                 button, but the menu entry already arrives compressed and the
+                 arrow already falls back — three doors to one room, and the
+                 button's label was the only one that did not say so. -->
+            <textarea id="codec-json" spellcheck="false" placeholder="{&quot;orders&quot;: […]}"></textarea>
           </div>
 
           <!-- The two directions, between the two sides they act on. -->
@@ -307,15 +309,13 @@ SPDX-License-Identifier: MIT -->
           </div>
 
           <div class="codec-side">
-            <div class="codec-box">
-              <div class="codec-box-head">
-                <label class="standing-label" for="codec-payload">payload · base64, bytea, or a SQL cell</label>
-                <span class="spacer"></span>
-                <button id="codec-copy-payload" class="btn-quiet" type="button" title="Copy the payload">copy</button>
-              </div>
-              <textarea id="codec-payload" spellcheck="false"
-                placeholder="KLUv/SAsxQAe… · \x28b52ffd… · 'quoted cell'"></textarea>
+            <div class="codec-box-head">
+              <label class="standing-label" for="codec-payload">payload · base64, bytea, or a SQL cell</label>
+              <span class="spacer"></span>
+              <button id="codec-copy-payload" class="btn-quiet" type="button" title="Copy the payload">copy</button>
             </div>
+            <textarea id="codec-payload" spellcheck="false"
+              placeholder="KLUv/SAsxQAe… · \x28b52ffd… · 'quoted cell'"></textarea>
             <div class="codec-actions">
               <button id="codec-file-d">choose file…</button>
               <input type="file" id="codec-file-input"

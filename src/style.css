@@ -1487,35 +1487,48 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   flex: 1;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
+  /* label row · boxes · actions row. The rows are the PAIR's, not each side's,
+     which is what lets the arrows centre on the boxes rather than on the column
+     (see .codec-run) and keeps the two labels on one baseline even when one
+     side's label wraps and the other's does not. */
+  grid-template-rows: auto 1fr auto;
   gap: var(--gap-4);
   min-height: 0;
-  align-items: stretch;
 }
+/* The sides are containers for authoring, not for layout: `display: contents`
+   drops them out of the grid so their three bands land in the pair's three
+   rows directly. Without it each side is one cell and every band inside it is
+   sized by that side alone. */
 .codec-side {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
+  display: contents;
 }
-/* The two directions, centred on the boxes they act on rather than on the
-   column — the label rows above the boxes are not theirs to sit beside. */
+.codec-side:first-of-type > * { grid-column: 1; }
+.codec-side:last-of-type > * { grid-column: 3; }
+/* Every band names its ROW as well as its column. Auto-placement cannot: the
+   cursor has advanced past row 2 by the time the second side is laid out, so
+   its bands land in rows 3, 4 and 5 and the two sides stack instead of facing
+   each other. Six cells, six coordinates. */
+.codec-side > .codec-box-head { grid-row: 1; }
+.codec-side > textarea { grid-row: 2; }
+.codec-side > .codec-actions { grid-row: 3; }
+/* THE ARROWS SIT ON THE BOXES, not on the column. Centred against the whole
+   height they would drift by half the difference between the label row above
+   and the actions row below — which is a different amount on each side, so the
+   pair of buttons would sit slightly off the thing they act on and there would
+   be no way to say why. Pinned to the box row, "centred" means centred on the
+   text they move between. */
 .codec-run {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: var(--gap-2);
-  min-width: 0;
 }
 .codec-run button { white-space: nowrap; }
-/* A labelled box: the standing label (rule 14) above the textarea, because a
-   textarea's shell has no baseline to seat a .field-prefix on. */
-.codec-box {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+/* The label row (rule 14's standing label — a textarea's shell has no baseline
+   to seat a .field-prefix on) and the side's own ops, which act on the box
+   below them. */
 .codec-box-head {
   display: flex;
   align-items: center;
@@ -1524,10 +1537,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 /* Rule 14 supplies ground, border, inset, type and the focus ring; only the
    box's own facts live here. Both sides are WRITABLE now — you paste into
-   whichever one you have, and press the arrow that points away from it — so
-   the read-only output surface (--bg-inset) has no user on this page. */
+   whichever one you have and press the arrow pointing away from it — so the
+   read-only output surface (--bg-inset) has no user on this page. */
 .codec-side textarea {
-  flex: 1;
   min-height: 160px;
   resize: none;
   border-radius: var(--r);
