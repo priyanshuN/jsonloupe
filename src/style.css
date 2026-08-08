@@ -2246,7 +2246,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    empty result as an answer. Not tier 3: the run is not blocked and the reading
    can be incomplete (it knows only the branch the last run took), so it must
    not dress as a failure. */
-#run-fit {
+.run-remark {
   display: flex;
   align-items: center;
   /* The strip is a column, so a block child would stretch the hairline across
@@ -2447,16 +2447,25 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   width: 2px;
   background: var(--accent);
 }
-/* The whole row is the press: loading a function and running it are one act,
-   so the name, its first line and the hit area are one button rather than a
-   label with a play control beside it. */
+/* Rule 7's checkbox, and it is NOT hover-revealed like the delete beside it: a
+   tick that disappears when the pointer leaves cannot be counted by eye, and
+   counting them is the whole point of it. The inset it takes is the row's, so
+   the names still line up under each other. */
+.run-lib-pick { margin-left: var(--gap-3); flex-shrink: 0; }
+/* Selection and picking are different things and must not collide: rule 18's
+   2px bar is at the very edge, the checkbox starts after the row's inset. */
+.run-lib-row.selected .run-lib-pick { margin-left: calc(var(--gap-3) - 2px); }
+
+/* The rest of the row is the press: loading a function and running it are one
+   act, so the name, its first line and the hit area are one button rather than
+   a label with a play control beside it. */
 .run-lib-open {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: baseline;
   gap: var(--gap-2);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--gap-2);
   min-height: 38px;
   border: none;
   border-radius: 0;

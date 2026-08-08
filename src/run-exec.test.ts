@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
-import { executeUserCode, type RunOk } from './run-exec';
+import { executeUserCode, executeUserScripts, type RunOk } from './run-exec';
 
 const DOC = JSON.stringify({
   tasks: [
@@ -168,5 +168,67 @@ describe('executeUserCode · trace', () => {
   it('records no machinery — a result on its way out is probed for toJSON', () => {
     const res = expectOk(executeUserCode(DOC, 'data.tasks', true));
     expect(res.reads?.some((p) => p.includes('toJSON'))).toBe(false);
+  });
+});
+
+// Several saved functions over ONE document — the day's answers as one report.
+describe('executeUserScripts', () => {
+  const batch = (scripts: { name: string; code: string }[], trace = false) =>
+    executeUserScripts(DOC, scripts, trace);
+
+  it('keys every answer by its function name', () => {
+    const res = batch([
+      { name: 'failed', code: 'data.tasks.filter(t => t.status === "FAILED").length' },
+      { name: 'ids', code: 'data.tasks.map(t => t.id)' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({ failed: 2, ids: [1, 2, 3] });
+    expect(res.entries.map((e) => [e.name, e.ok])).toEqual([['failed', true], ['ids', true]]);
+  });
+
+  it('keeps a failed function in the report as null, and says why', () => {
+    // The shape has to be the same every day even when one of them breaks —
+    // otherwise yesterday's report and today's cannot be compared at all.
+    const res = batch([
+      { name: 'good', code: 'data.tasks.length' },
+      { name: 'bad', code: 'data.nope.length' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({ good: 3, bad: null });
+    expect(res.entries[1]).toMatchObject({ name: 'bad', ok: false });
+    expect(res.entries[1].error).toContain('TypeError');
+  });
+
+  it('costs one key, not the report, when a result will not serialize', () => {
+    const res = batch([
+      { name: 'cyclic', code: 'const a = {}; a.self = a; return a' },
+      { name: 'fine', code: 'data.tasks.length' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({ cyclic: null, fine: 3 });
+  });
+
+  it('fails as a whole only when the document itself cannot be read', () => {
+    const res = executeUserScripts('{"a": 1,}', [{ name: 'any', code: 'data.a' }]);
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('plain JSON') });
+  });
+
+  it('names which function wrote which console line', () => {
+    const res = batch([
+      { name: 'first', code: 'console.log("hello"); return 1' },
+      { name: 'second', code: 'console.warn("careful"); return 2' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.logs).toEqual(['first: hello', 'second warn: careful']);
+  });
+
+  it('learns what each function reads, separately', () => {
+    const res = batch([
+      { name: 'statuses', code: 'data.tasks.map(t => t.status)' },
+      { name: 'count', code: 'data.tasks.length' },
+    ], true);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.entries[0].reads).toEqual(['tasks', 'tasks[].status']);
+    expect(res.entries[1].reads).toEqual(['tasks']);
   });
 });

@@ -501,7 +501,11 @@ SPDX-License-Identifier: MIT -->
                  document actually has. A remark about the script, never a gate
                  in front of the run: it can only know the branch the last run
                  took. -->
-            <div id="run-fit" hidden></div>
+            <div id="run-fit" class="run-remark" hidden></div>
+            <!-- Which functions in the last batch did not make it. A batch is
+                 not a failure because one of its functions was: the others
+                 produced, and their keys are in the report. -->
+            <div id="run-batch" class="run-remark" hidden></div>
             <div id="run-lossy" hidden>
               <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>this document has numbers plain JS cannot hold exactly — the script sees them rounded
             </div>
@@ -527,6 +531,10 @@ SPDX-License-Identifier: MIT -->
             <span class="spacer"></span>
             <input id="run-lib-search" class="run-lib-search" type="search" hidden
               placeholder="find a function" aria-label="Find a function" />
+            <!-- Appears only once something is ticked: with nothing picked, a
+                 row press is still the whole interaction. -->
+            <button id="run-picked" class="primary" type="button" hidden
+              title="Run every ticked function over this document">run</button>
             <button id="run-new" class="btn-quiet" type="button" hidden title="Write a new function">+ new</button>
             <button id="run-copy" class="btn-quiet" type="button" title="Copy the whole result">copy</button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts

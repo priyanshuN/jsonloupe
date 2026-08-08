@@ -49,7 +49,7 @@ import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
 import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
 import type { SavedScript } from './db';
-import type { RunResult } from './run-exec';
+import type { RunResult, BatchResult } from './run-exec';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
@@ -4029,6 +4029,8 @@ const runErrorEl = $('#run-error');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
 const runFitEl = $('#run-fit');
+const runBatchEl = $('#run-batch');
+const runPickedBtn = $<HTMLButtonElement>('#run-picked');
 const runHead = $('.run-head');
 const runNameEl = $('#run-name');
 const runNameInput = $<HTMLInputElement>('#run-name-input');
@@ -4087,6 +4089,18 @@ let runLibSearchWanted = false;
  * rather than claiming the document is wrong.
  */
 let runLoadedReads: string[] | undefined;
+/**
+ * The functions ticked for a batch. Empty is the ordinary state and the whole
+ * point of it: with nothing ticked, a row press is still the entire interaction
+ * — one function, one answer. Ticking is what turns the library into a report.
+ */
+const runPicked = new Set<string>();
+/**
+ * What produced the result on screen, when it was not a single script: a batch
+ * says `report · 3 functions` where one script says `array 2`. Empty for a
+ * single run, which lets the label describe the value itself.
+ */
+let runResultKind = '';
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4189,6 +4203,7 @@ function setRunFace(face: 'functions' | 'result'): void {
   for (const el of [runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = showing;
   runLibCount.hidden = !showing;
   runNewBtn.hidden = !showing;
+  runPickedBtn.hidden = !showing || runPicked.size === 0;
   runLibSearch.hidden = !showing || runLibSearchWanted === false;
   if (showing) runStaleBadge.hidden = true;
   else runStaleBadge.hidden = !runResultText || !runStaleWanted;
@@ -4207,6 +4222,15 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
   const misfit = (rec.reads ?? []).filter((p) => missing.has(p));
   row.classList.toggle('misfit', misfit.length > 0);
   row.dataset.id = rec.id;
+
+  // Rule 7's one checkbox. It is always drawn rather than revealed on hover:
+  // a tick that hides when the pointer leaves cannot be counted by eye.
+  const pick = document.createElement('input');
+  pick.type = 'checkbox';
+  pick.className = 'chk run-lib-pick';
+  pick.checked = runPicked.has(rec.id);
+  pick.title = `Include ${rec.name} in a batch`;
+  pick.setAttribute('aria-label', `Include ${rec.name} in a batch`);
 
   const open = document.createElement('button');
   open.type = 'button';
@@ -4241,8 +4265,18 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
   del.title = `Forget ${rec.name}`;
   del.setAttribute('aria-label', `Forget ${rec.name}`);
 
-  row.append(open, meta, del);
+  row.append(pick, open, meta, del);
   return row;
+}
+
+// The bar says what the library is, or — once anything is ticked — what a press
+// is about to run. The button carries the count so the number and the act are
+// one control rather than a label beside a verb.
+function paintPickState(total: number): void {
+  const picked = runPicked.size;
+  runPickedBtn.hidden = picked === 0;
+  runPickedBtn.textContent = `run ${fmtNumber(picked)}`;
+  if (picked > 0) runLibCount.textContent = `${fmtNumber(picked)} of ${fmtNumber(total)} picked`;
 }
 
 async function renderLibrary(): Promise<void> {
@@ -4271,6 +4305,10 @@ async function renderLibrary(): Promise<void> {
   const union = [...new Set(shown.flatMap((s) => s.reads ?? []))];
   const missing = new Set(await missingPaths(union));
   runLibList.replaceChildren(...shown.map((s) => renderLibraryRow(s, missing)));
+  // A tick on a function that has since been deleted would keep a batch that
+  // cannot run: the picks are only ever what the library still holds.
+  for (const id of runPicked) if (!all.some((s) => s.id === id)) runPicked.delete(id);
+  paintPickState(all.length);
 }
 
 /** Has the editor drifted from the record it was loaded from? */
@@ -4423,6 +4461,14 @@ runLibList.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
   const id = target.closest<HTMLElement>('.run-lib-row')?.dataset.id;
   if (!id) return;
+  // Ticking is not running: it says what a later press will cover, and the
+  // result on screen stays whatever it already was.
+  if (target.closest('.run-lib-pick')) {
+    if ((target as HTMLInputElement).checked) runPicked.add(id);
+    else runPicked.delete(id);
+    paintPickState((await store.listScripts()).length);
+    return;
+  }
   if (target.closest('.run-lib-del')) {
     await store.removeSaved(id);
     if (id === runLoadedId) runLoadedId = null;
@@ -4460,6 +4506,7 @@ function markRunResultStale(): void {
 
 function clearRunResult(): void {
   runResultText = '';
+  runResultKind = '';
   runStaleWanted = false;
   runStaleBadge.hidden = true;
   runResultLabel.textContent = 'nothing run yet';
@@ -4574,29 +4621,46 @@ runSrcSwitch.addEventListener('click', (e) => {
   void showRunSource();
 });
 
-function executeInSandbox(docText: string, code: string, trace: boolean): Promise<RunResult> {
+// One sandbox, two shapes of press: a single script, or a batch of named ones
+// over a single parse of the document. Same worker, same timeout, same
+// termination — the batch is a different message, not a different mechanism.
+function executeInSandbox(docText: string, code: string, trace: boolean): Promise<RunResult>;
+function executeInSandbox(
+  docText: string,
+  scripts: { name: string; code: string }[],
+  trace: boolean,
+): Promise<BatchResult>;
+function executeInSandbox(
+  docText: string,
+  work: string | { name: string; code: string }[],
+  trace: boolean,
+): Promise<RunResult | BatchResult> {
   return new Promise((resolve) => {
     const sandbox = new Worker(new URL('./run-sandbox.ts', import.meta.url), { type: 'module' });
     let timer = 0;
     let settled = false;
-    const finish = (res: RunResult): void => {
+    const finish = (res: RunResult | BatchResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       sandbox.terminate();
       resolve(res);
     };
+    // The cap is the PRESS, not the script: a batch that runs long is stopped
+    // whole, because a worker terminated halfway has no partial report to give.
     timer = window.setTimeout(
       () => finish({ ok: false, error: `script timed out after ${RUN_TIMEOUT_MS / 1000}s`, logs: [] }),
       RUN_TIMEOUT_MS,
     );
-    sandbox.onmessage = (e: MessageEvent) => finish(e.data as RunResult);
+    sandbox.onmessage = (e: MessageEvent) => finish(e.data as RunResult | BatchResult);
     sandbox.onerror = (e) => finish({
       ok: false,
       error: e.message || 'the sandbox worker could not be started',
       logs: [],
     });
-    sandbox.postMessage({ docText, code, trace });
+    sandbox.postMessage(
+      typeof work === 'string' ? { docText, code: work, trace } : { docText, scripts: work, trace },
+    );
   });
 }
 
@@ -4616,8 +4680,11 @@ async function paintResultLabel(): Promise<void> {
     return;
   }
   // The switch beside it already says `result`; saying it again here put the
-  // word twice on one strip. What the label is for is what CAME BACK.
-  runResultLabel.textContent = `${root.type}${container ? ` ${fmtNumber(root.childCount)}` : ''}`;
+  // word twice on one strip. What the label is for is what CAME BACK — and for
+  // a batch, what came back is a report, not an object that happens to have
+  // three keys. The head names what is LOADED; this names what produced this.
+  runResultLabel.textContent = runResultKind
+    || `${root.type}${container ? ` ${fmtNumber(root.childCount)}` : ''}`;
 }
 
 // Hand the result to its own worker and read it back as a document. The guard
@@ -4689,6 +4756,10 @@ async function runScript(): Promise<void> {
   runInFlight = true;
   runExecBtn.disabled = true;
   runErrorEl.hidden = true;
+  // One script answers for itself, so the label goes back to describing the
+  // value rather than the press that made it.
+  runResultKind = '';
+  runBatchEl.hidden = true;
   setRunStatus('running…');
   const res = await executeInSandbox(currentText, code, trace);
   runInFlight = false;
@@ -4707,6 +4778,80 @@ async function learnReads(id: string, reads: string[]): Promise<void> {
   runLoadedReads = reads;
   void renderLibrary();
 }
+
+// ---------- a batch: several functions, one document, one report ----------
+//
+// The answers come back as ONE object keyed by function name, which is what
+// keeps the result face working unchanged — it is a document like any other, so
+// it scrolls, downloads and opens as its own document, and that object IS the
+// day's report. A function that fails keeps its key with a `null` beside it, so
+// the report has the same shape tomorrow as today; the reasons are said here
+// instead, because a batch is not a failure just because one of its parts was.
+async function runPickedScripts(): Promise<void> {
+  if (runInFlight) return;
+  if (!currentText) {
+    setRunStatus('open a document first');
+    return;
+  }
+  const all = await store.listScripts();
+  const picked = all.filter((s) => runPicked.has(s.id));
+  if (picked.length === 0) return;
+
+  const documentRevision = currentDocumentRevision;
+  // One trace for the whole batch when ANY of them has yet to be read: the
+  // per-function cost is the same, and asking twice would need two passes.
+  const trace = picked.some((s) => s.reads === undefined);
+  runInFlight = true;
+  runPickedBtn.disabled = true;
+  runExecBtn.disabled = true;
+  runErrorEl.hidden = true;
+  runBatchEl.hidden = true;
+  setRunStatus(`running ${fmtNumber(picked.length)}…`);
+
+  const res = await executeInSandbox(
+    currentText,
+    picked.map((s) => ({ name: s.name, code: s.script })),
+    trace,
+  );
+  runInFlight = false;
+  runPickedBtn.disabled = false;
+  runExecBtn.disabled = false;
+  if (documentRevision !== currentDocumentRevision) return;
+
+  if (!res.ok) {
+    // Only an unreadable document gets here — every script-level failure is an
+    // entry, not the batch's verdict.
+    clearRunResult();
+    runErrorEl.textContent = `✗ ${res.error}`;
+    runErrorEl.hidden = false;
+    setRunStatus('');
+    return;
+  }
+
+  const byName = new Map(picked.map((s) => [s.name, s.id]));
+  for (const entry of res.entries) {
+    const id = byName.get(entry.name);
+    if (entry.reads && id) await learnReads(id, entry.reads);
+  }
+
+  const failed = res.entries.filter((e) => !e.ok);
+  runBatchEl.hidden = failed.length === 0;
+  runBatchEl.textContent = failed.length === 1
+    ? `${failed[0].name} failed · ${failed[0].error}`
+    : `${fmtNumber(failed.length)} of ${fmtNumber(res.entries.length)} failed · ${failed.map((f) => f.name).join(', ')}`;
+  runBatchEl.title = failed.map((f) => `${f.name}: ${f.error}`).join('\n');
+
+  runConsole.hidden = res.logs.length === 0;
+  runConsole.open = false;
+  runConsoleBody.textContent = res.logs.join('\n');
+  runErrorEl.hidden = true;
+  const ran = res.entries.length - failed.length;
+  setRunStatus(`ran ${fmtNumber(ran)} of ${fmtNumber(res.entries.length)} in ${res.ms} ms · ${fmtBytes(res.resultText.length)}`);
+  runResultKind = `report · ${fmtNumber(res.entries.length)} functions`;
+  await showResultDocument(res.resultText);
+}
+
+runPickedBtn.addEventListener('click', () => void runPickedScripts());
 
 runExecBtn.addEventListener('click', () => void runScript());
 
