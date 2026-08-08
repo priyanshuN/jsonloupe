@@ -36,7 +36,10 @@ export function csvCell(v: unknown): string {
 // and exact int64 digit strings are not formulas, and the lossless-number
 // guarantee requires their CSV form to stay byte-identical.
 const CSV_FORMULA_LEAD = /^[ \t]*[=+\-@\t\r]/;
-const CSV_PLAIN_NUMBER = /^[ \t]*[-+]?\d+(\.\d+)?([eE][-+]?\d+)?[ \t]*$/;
+// Only ordinary spaces are harmless around a numeric literal. A leading tab is
+// itself a spreadsheet-control prefix, so treating it as numeric whitespace
+// would let values such as `\t0` bypass the neutralizer above.
+const CSV_PLAIN_NUMBER = /^ *[-+]?\d+(\.\d+)?([eE][-+]?\d+)? *$/;
 
 // Neutralization first, then RFC 4180 field quoting: wrap in double-quotes when
 // the field contains a comma, a double-quote, or a line break; inner
