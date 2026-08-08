@@ -33,7 +33,7 @@ if (args.includes('--help') || args.includes('-h')) {
 usage: jsonloupe [serve] [--port <n>] [--no-open]
        jsonloupe inspect <file>
        jsonloupe draft   <file> [-o spec.json]
-       jsonloupe convert <file> --spec <spec.json> [-o out] [--format xlsx|csv]
+       jsonloupe convert <file> --spec <spec.json> [-o out] [--to xlsx|csv]
 
   --port, -p   port to listen on (default 5199; next free port if taken)
   --no-open    don't open the browser

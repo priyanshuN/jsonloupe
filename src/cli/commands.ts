@@ -25,10 +25,13 @@ export const USAGE = `jsonloupe — convert nested JSON into flat tables
 usage:
   jsonloupe inspect <file>                     what tables are in here?
   jsonloupe draft   <file> [-o spec.json]      write a starter mapping spec
-  jsonloupe convert <file> --spec <spec.json> [-o out] [--format xlsx|csv]
+  jsonloupe convert <file> --spec <spec.json> [-o out] [--to xlsx|csv]
 
   --format      override the input format (json | jsonl | csv); inferred from
                 the extension otherwise
+  --to          output format (xlsx | csv); the spec's own output format
+                otherwise. Reading and writing get separate flags because csv
+                is a legal answer to both questions
   --out, -o     output path. xlsx → a file; csv → a directory, one per table
   --base-date   draft only: what to date time-only columns against —
                 a yyyy-MM-dd date, or "today". By default the draft looks for
@@ -65,9 +68,15 @@ function parse(argv: string[]): Args | { error: string } {
     }
     else if (v === '--format') {
       const f = argv[++i];
-      if (f === 'xlsx' || f === 'csv') a.outFormat = f;
-      if (f === 'json' || f === 'jsonl' || f === 'csv') a.format = f;
-      if (!a.outFormat && !a.format) return { error: `unknown format \`${f}\`` };
+      if (f !== 'json' && f !== 'jsonl' && f !== 'csv') {
+        return { error: `--format reads the input and wants json, jsonl or csv, got \`${f}\`${f === 'xlsx' ? ' — to write xlsx, use --to' : ''}` };
+      }
+      a.format = f;
+    }
+    else if (v === '--to') {
+      const f = argv[++i];
+      if (f !== 'xlsx' && f !== 'csv') return { error: `--to writes the output and wants xlsx or csv, got \`${f}\`` };
+      a.outFormat = f;
     } else if (v.startsWith('-')) return { error: `unknown option \`${v}\`` };
     else rest.push(v);
   }
