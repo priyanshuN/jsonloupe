@@ -37,10 +37,21 @@ apex A records and `www` CNAME, then add response-header transform rules. This
 is account configuration, not something a repository workflow can truthfully
 claim to have deployed.
 
-1. In Cloudflare DNS, change the `jsonloupe.dev` A records and `www` CNAME from
-   **DNS only** to **Proxied**. Keep GitHub's current record values.
+1. In Cloudflare DNS, change the `jsonloupe.dev` A **and AAAA** records and the
+   `www` CNAME from **DNS only** to **Proxied**. Keep GitHub's current record
+   values, and leave the MX and TXT records DNS-only. The AAAA records are easy
+   to miss and matter as much as the A records: left DNS-only they still resolve
+   to GitHub, so every IPv6 visitor bypasses the edge and receives none of these
+   headers — and a verification run over IPv4 will not catch it. After the
+   change, `dig AAAA jsonloupe.dev` must return Cloudflare space (`2606:4700::/32`),
+   not GitHub's `2606:50c0::/32`.
 2. Confirm SSL/TLS mode is **Full (strict)** and that HTTPS works before adding
-   HSTS.
+   HSTS. GitHub Pages serves a publicly trusted Let's Encrypt certificate for
+   the custom domain, so strict origin validation succeeds; verify with
+   `openssl s_client -connect 185.199.108.153:443 -servername jsonloupe.dev`
+   before selecting the mode. A zone left on **Automatic SSL/TLS** reaches the
+   same place on its own next scan, but only pinning the mode makes the
+   guarantee explicit.
 3. Create a response-header transform rule for hostnames `jsonloupe.dev` and
    `www.jsonloupe.dev`, on all paths, setting the five non-CSP headers above.
 4. Create a second response-header transform rule for the HTML paths `/`,
@@ -55,6 +66,15 @@ claim to have deployed.
 Cloudflare applies response transforms only to proxied traffic. If the records
 are returned to DNS-only mode, the headers disappear and HSTS can make the site
 unreachable, so disable or expire HSTS before such a rollback.
+
+Under **Full (strict)** an expired origin certificate stops being a degraded
+connection and becomes a hard `526` outage, so GitHub's certificate renewal has
+to keep working from behind the proxy. It does: Cloudflare passes
+`/.well-known/acme-challenge/` through to GitHub unredirected, which is what the
+HTTP-01 validator needs. Confirm that path still reaches the origin — a GitHub
+404 body rather than a Cloudflare error page — if the certificate ever fails to
+renew. Reverting to **Full** restores service immediately while that is
+diagnosed.
 
 ## Verification
 
