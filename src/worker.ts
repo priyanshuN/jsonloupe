@@ -37,7 +37,8 @@ import {
   type TransportInspection,
 } from './transport';
 import {
-  compressToB64,
+  encodePayload,
+  type EncodeFormat,
   decodeJsonPayload,
   type DecodeJsonPayloadOptions,
   type PayloadDecodeFailure,
@@ -2269,6 +2270,8 @@ export type DecodePayloadWorkerResult =
 export interface CompressPayloadWorkerMessage extends Record<string, unknown> {
   type: 'compressPayload';
   text: string;
+  /** Which of the three text-holdable forms to produce. Defaults to base64 zstd. */
+  format?: EncodeFormat;
   level?: number;
 }
 
@@ -2319,9 +2322,10 @@ export async function handleAsync(
     if (typeof msg.text !== 'string') throw new TypeError('compressPayload requires text');
     const level = typeof msg.level === 'number' ? msg.level : undefined;
     try {
+      const format = (msg.format as EncodeFormat | undefined) ?? 'base64-zstd';
       return {
         ok: true,
-        b64: await compressToB64(msg.text, level),
+        b64: await encodePayload(msg.text, format, level),
         sourceBytes: new TextEncoder().encode(msg.text).length,
       } satisfies CompressPayloadWorkerResult;
     } catch (error) {

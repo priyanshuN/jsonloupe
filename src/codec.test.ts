@@ -11,6 +11,7 @@ import {
   type PayloadDecodeSuccess,
 } from './codec';
 import { handleAsync } from './worker';
+import { encodePayload, bytesToBytea, encodeFormatFor } from './codec';
 
 const encoder = new TextEncoder();
 
@@ -369,5 +370,37 @@ describe('decodePayload worker route', () => {
     await expect(
       handleAsync({ type: 'decodePayload', input: 42 }),
     ).rejects.toThrow(/string, ArrayBuffer, or Uint8Array/);
+  });
+});
+
+// The encode side used to know exactly one destination, so a document pulled
+// OUT of a Postgres column could not be put back in the shape it came from.
+describe('encodePayload', () => {
+  const doc = '{"orders":[{"id":88231}]}';
+
+  it('produces the three forms a text field can hold', async () => {
+    const b64 = await encodePayload(doc, 'base64-zstd');
+    const bytea = await encodePayload(doc, 'bytea-zstd');
+    const plain = await encodePayload(doc, 'base64');
+
+    expect(await decodeJsonPayload(b64)).toMatchObject({ ok: true, text: doc });
+    expect(await decodeJsonPayload(bytea)).toMatchObject({ ok: true, text: doc });
+    expect(bytea.startsWith('\\x')).toBe(true);
+    // Plain base64 is NOT compressed — the point of the option.
+    expect(atob(plain)).toBe(doc);
+  });
+
+  it('renders bytea as PostgreSQL does: \\x and lowercase hex', () => {
+    expect(bytesToBytea(new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0x00]))).toBe('\\x28b52ffd00');
+    expect(bytesToBytea(new Uint8Array())).toBe('\\x');
+  });
+
+  it('suggests the format a payload came in as, and nothing for plain text', () => {
+    expect(encodeFormatFor('postgres-bytea-zstd')).toBe('bytea-zstd');
+    expect(encodeFormatFor('base64url-zstd')).toBe('base64-zstd');
+    expect(encodeFormatFor('raw-zstd')).toBe('base64-zstd');
+    // Nothing to return to: the standing choice stands.
+    expect(encodeFormatFor('json-text')).toBeNull();
+    expect(encodeFormatFor('unknown')).toBeNull();
   });
 });

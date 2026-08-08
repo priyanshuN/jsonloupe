@@ -59,6 +59,13 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-reload" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M13 8A5 5 0 1 1 11.5 4.5" /><path d="M8.5 4.5h3v-3" />
     </symbol>
+    <!-- The other universal glyph rule 3 names: two sheets, one behind the
+         other. It joins the sprite so the document ops can drop their labels
+         and make room for `compress` beside them. -->
+    <symbol id="i-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 6.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1z" />
+      <path d="M5.5 5.5v-2a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2" />
+    </symbol>
     <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.5v7.5" /><path d="M4.75 6.75 8 10l3.25-3.25" /><path d="M3 13.25h10" />
     </symbol>
@@ -260,7 +267,7 @@ SPDX-License-Identifier: MIT -->
         <footer class="lp-footer">
           <span>jsonloupe — MIT</span>
           <span class="lp-spacer"></span>
-          <button id="codec-btn" class="lp-foot-link" type="button" title="Decode raw Zstd, bytea, SQL cells, and Base64 payloads; or encode JSON">payload tools</button>
+          <button id="codec-btn" class="lp-foot-link" type="button" title="Decode raw Zstd, bytea, SQL cells, and Base64 payloads; or encode JSON">compress &amp; decode</button>
           <a href="./spec.html">spec</a>
           <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
           <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
@@ -269,7 +276,7 @@ SPDX-License-Identifier: MIT -->
       </section>
       <section id="codec" hidden>
         <div class="codec-head">
-          <h1>Payload tools</h1>
+          <h1>Compress &amp; decode</h1>
           <span class="codec-sub">JSON, raw Zstd, PostgreSQL bytea, SQL cells, and standard or URL-safe Base64</span>
           <button id="codec-close">back</button>
         </div>
@@ -309,8 +316,20 @@ SPDX-License-Identifier: MIT -->
           </div>
 
           <div class="codec-side">
+            <!-- The label row carries the CHOICE. Decoding has always been
+                 permissive — you take whatever the world hands you — while
+                 encoding knew one destination, so a document pulled out of a
+                 Postgres column could not be put back in the shape it came
+                 from. The chips are what `compress →` produces and what `copy`
+                 copies, and a decode moves them to the form it just read, so
+                 the round trip closes without anyone choosing. -->
             <div class="codec-box-head">
-              <label class="standing-label" for="codec-payload">payload · base64, bytea, or a SQL cell</label>
+              <label class="standing-label" for="codec-payload">encode as</label>
+              <div class="mode-switch mode-switch-mini" id="codec-format" role="group" aria-label="Payload format">
+                <button type="button" data-format="base64-zstd" class="on" title="Zstd, then Base64 — a Kafka message or a JSON string cell">base64 zstd</button>
+                <button type="button" data-format="bytea-zstd" title="Zstd, then PostgreSQL \x hex — a bytea column">bytea</button>
+                <button type="button" data-format="base64" title="Base64 with no compression — when the other end cannot inflate">base64</button>
+              </div>
               <span class="spacer"></span>
               <button id="codec-copy-payload" class="btn-quiet" type="button" title="Copy the payload">copy</button>
             </div>
@@ -370,9 +389,20 @@ SPDX-License-Identifier: MIT -->
                tree half of the shared strip. -->
           <div class="tb-tree" id="tb-tree-ops">
             <button id="collapse-btn" class="btn-quiet" type="button" title="Collapse every expanded node">collapse</button>
-            <button id="fmt-btn" class="btn-quiet" type="button" title="Copy pretty-printed JSON">copy</button>
-            <button id="dl-btn" class="btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
-              title="Name and download the original bytes">download</button>
+            <!-- copy and download are the two glyphs rule 3 calls universal
+                 without argument, and dropping their labels is what pays for
+                 the button beside them: the bar was already wrapping below a
+                 ~1475px window before `compress` existed. -->
+            <button id="fmt-btn" class="btn-icon btn-quiet" type="button" title="Copy pretty-printed JSON"
+              aria-label="Copy pretty-printed JSON"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+            <button id="dl-btn" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
+              title="Name and download the original bytes" aria-label="Name and download the original bytes"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
+            <!-- A document op like its neighbours — it acts on the document you
+                 are reading — so it rides with them, including down into the
+                 pane bar in split and run. Out of the ⋯ deliberately: getting
+                 the blob back out is not once-per-document residue. -->
+            <button id="compress-btn" class="btn-quiet" type="button"
+              title="Compress this document to base64 zstd, copy it, and open compress &amp; decode">compress</button>
           </div>
           <!-- Rule 21: the name popover renders to the top layer rather than
                hanging off whichever bar #dl-btn is standing in — main.ts moves
@@ -391,10 +421,8 @@ SPDX-License-Identifier: MIT -->
             <div id="more-menu" class="menu" role="menu" hidden>
               <button id="min-btn" role="menuitem" type="button" title="Copy minified JSON">copy minified</button>
               <div class="menu-sep" role="separator"></div>
-              <button id="zstd-btn" role="menuitem" type="button"
-                title="Compress this document to base64 zstd and open payload tools">payload tools</button>
               <button id="transport-btn" role="menuitem" type="button"
-                title="Inspect exact JSON, Zstd, Base64, envelope, and transport-budget sizes">payload size report</button>
+                title="Inspect exact JSON, Zstd, Base64, envelope, and transport-budget sizes">size report</button>
             </div>
           </div>
         </div>

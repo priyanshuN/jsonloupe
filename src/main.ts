@@ -22,8 +22,10 @@ import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
   decodeJsonPayload,
+  encodeFormatFor,
   sniffPayloadText,
   type DecodeJsonPayloadOptions,
+  type EncodeFormat,
   type PayloadDecodeError,
   type PayloadDecodeMetadata,
   type PayloadInput,
@@ -88,10 +90,14 @@ type WorkerPayloadDecodeResult =
 // decoding (already in the worker) always worked. Both directions live in the
 // worker now, where the policy allows it and a 40 MB compress is off the UI
 // thread besides.
-async function compressInWorker(text: string): Promise<{ b64: string; sourceBytes: number }> {
+async function compressInWorker(
+  text: string,
+  format: EncodeFormat = 'base64-zstd',
+): Promise<{ b64: string; sourceBytes: number }> {
   const res = await call<{ ok: boolean; b64?: string; sourceBytes?: number; error?: string }>({
     type: 'compressPayload',
     text,
+    format,
   });
   if (!res.ok || typeof res.b64 !== 'string') throw new Error(res.error ?? 'compress failed');
   return { b64: res.b64, sourceBytes: res.sourceBytes ?? text.length };
@@ -188,6 +194,7 @@ const splitDivider = $<HTMLElement>('#split-divider');
 const codeView = $('#code-view');
 const codeHost = $('#code-host');
 const toolbarTreeOps = $('#tb-tree-ops');
+const compressBtn = $<HTMLButtonElement>('#compress-btn');
 const treeBar = $('#tree-bar');
 const treeBarOps = $('#tree-bar-ops');
 const codeBar = $('#code-bar');
@@ -355,7 +362,10 @@ function paintStatusForPane(): void {
 function placeTreeOps(p: Pane): void {
   const sourceBar = p === 'run' && runSource === 'code' ? codeBarOps : treeBarOps;
   const host = p === 'split' || p === 'run' ? sourceBar : toolbarTreeOps;
-  host.append(collapseBtn, treeCopyBtn, treeDownloadBtn);
+  // `compress` travels with them — it acts on the same document — and is
+  // appended LAST so the order is stable wherever the cluster lands. Left out
+  // of this list it stayed behind in the toolbar and the group came apart.
+  host.append(collapseBtn, treeCopyBtn, treeDownloadBtn, compressBtn);
 }
 
 // The source pane's tree/code switch: run mode only, and it stands in the bar
@@ -2211,6 +2221,14 @@ const codecPane = $('#codec');
 // One pair, not two cards: the JSON side and the payload side, with the
 // direction living in the buttons between them.
 const codecJson = $<HTMLTextAreaElement>('#codec-json');
+const codecFormatSwitch = $('#codec-format');
+/**
+ * What the encode side produces, and what its copy copies. It follows a decode
+ * — read a bytea cell and the chip moves to bytea, so the round trip closes
+ * without anyone choosing — but never moves on its own afterwards: a default
+ * that keeps overruling a deliberate choice is a default that fights you.
+ */
+let codecFormat: EncodeFormat = 'base64-zstd';
 const codecPayload = $<HTMLTextAreaElement>('#codec-payload');
 const codecTrace = $('#codec-trace');
 const codecFileInput = $<HTMLInputElement>('#codec-file-input');
@@ -2256,6 +2274,8 @@ function showDecodedPayload(
     codecJson.value = '';
     codecJson.placeholder = `decoded ${exactBytes(provenance.decodedBytes)} — kept out of the textarea so the page stays responsive`;
   }
+  // What it was IN is what a re-encode should return to.
+  adoptFormatFrom(provenance);
   setCodecTrace(provenanceTrace(provenance), 'ok');
   showToast(`decoded ${exactBytes(provenance.decodedBytes)}`);
 }
@@ -2315,9 +2335,10 @@ async function compressOpenDocument(): Promise<void> {
   }
   const documentRevision = currentDocumentRevision;
   const source = currentText;
-  let b64: string;
+  const format = codecFormat;
+  let out: string;
   try {
-    b64 = (await compressInWorker(source)).b64;
+    out = (await compressInWorker(source, format)).b64;
   } catch (err) {
     setCodecTrace(`compress failed · ${String(err)}`, 'bad');
     showToast(`compress failed: ${String(err)}`, 'bad');
@@ -2326,33 +2347,72 @@ async function compressOpenDocument(): Promise<void> {
   if (documentRevision !== currentDocumentRevision) return;
   codecJson.value = '';
   codecJson.placeholder = `the open document (${fmtBytes(source.length)}) — not rendered here on purpose`;
-  codecPayload.value = b64;
-  setCodecTrace(compressionTrace(source.length, b64.length), 'ok');
+  codecPayload.value = out;
+  setCodecTrace(compressionTrace(source.length, out.length, format), 'ok');
 }
 
-// The menu's `payload tools`: compress what is open, land on the page with the
-// result already in hand and on the clipboard.
-$('#zstd-btn').addEventListener('click', async () => {
+// The toolbar's `compress`, and the only door into this page from a document:
+// it compresses what is open, copies it, and shows the result — where the chips
+// are, in case base64 zstd was not the destination. One control instead of a
+// menu entry that opened a page AND a page that had to be found.
+$('#compress-btn').addEventListener('click', async () => {
   if (!currentText) return;
   showCodec();
   await compressOpenDocument();
   if (!codecPayload.value) return;
   try {
     await copyText(codecPayload.value);
-    showToast(`compressed · ${fmtBytes(codecPayload.value.length)} b64 copied`);
+    showToast(`copied · ${FORMAT_NAMES[codecFormat]} ${fmtBytes(codecPayload.value.length)}`);
   } catch {
     showToast('compressed — use copy on the payload side');
   }
 });
 
-// The line under the pair: the trip, both ends of it, and what it cost.
-function compressionTrace(sourceBytes: number, b64Bytes: number): string {
-  const ratio = sourceBytes > 0 ? Math.round((b64Bytes / sourceBytes) * 1000) / 10 : 0;
-  return `compressed ${fmtBytes(sourceBytes)} → base64 zstd ${fmtBytes(b64Bytes)} · ${ratio}% of the original`;
+const FORMAT_NAMES: Record<EncodeFormat, string> = {
+  'base64-zstd': 'base64 zstd',
+  'bytea-zstd': 'bytea',
+  base64: 'base64',
+};
+
+// The line under the pair: the trip, both ends of it, and what it cost. It
+// names the FORMAT because the three cost wildly different things — plain
+// base64 always grows the document by a third, and reading `→ 4.2 kB` without
+// knowing which trip produced it explains nothing.
+function compressionTrace(sourceBytes: number, outBytes: number, format: EncodeFormat): string {
+  const ratio = sourceBytes > 0 ? Math.round((outBytes / sourceBytes) * 1000) / 10 : 0;
+  const verb = format === 'base64' ? 'encoded' : 'compressed';
+  return `${verb} ${fmtBytes(sourceBytes)} → ${FORMAT_NAMES[format]} ${fmtBytes(outBytes)} · ${ratio}% of the original`;
 }
 
+function paintCodecFormat(): void {
+  for (const b of codecFormatSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', b.dataset.format === codecFormat);
+  }
+}
+
+// A decode says which form the payload was IN, and that is the form a re-encode
+// should return to. Moving the chip is how the page says so — visibly, where it
+// can be overridden — rather than remembering it somewhere the user cannot see.
+function adoptFormatFrom(metadata: store.DocProvenance | { format: string }): void {
+  const suggested = encodeFormatFor(metadata.format as Parameters<typeof encodeFormatFor>[0]);
+  if (!suggested) return;
+  codecFormat = suggested;
+  paintCodecFormat();
+}
+
+codecFormatSwitch.addEventListener('click', (e) => {
+  const format = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-format]')?.dataset.format;
+  if (!format || format === codecFormat) return;
+  codecFormat = format as EncodeFormat;
+  paintCodecFormat();
+  // The box below now holds a form the chips no longer claim. Re-encoding is
+  // the honest answer when there is something to re-encode; otherwise the chip
+  // simply stands for the next press.
+  if (codecJson.value.trim() || currentText) void runCompress();
+});
+
 // LEFT TO RIGHT. Reads the JSON side, fills the payload side.
-$('#codec-run-c').addEventListener('click', async () => {
+async function runCompress(): Promise<void> {
   const src = codecJson.value;
   if (!src.trim()) {
     // The one case where the empty box is not the whole story: the open
@@ -2362,13 +2422,16 @@ $('#codec-run-c').addEventListener('click', async () => {
     return;
   }
   try {
-    codecPayload.value = (await compressInWorker(src)).b64;
-    setCodecTrace(compressionTrace(src.length, codecPayload.value.length), 'ok');
+    const format = codecFormat;
+    codecPayload.value = (await compressInWorker(src, format)).b64;
+    setCodecTrace(compressionTrace(src.length, codecPayload.value.length, format), 'ok');
   } catch (err) {
     setCodecTrace(`compress failed · ${String(err)}`, 'bad');
     showToast(`compress failed: ${String(err)}`, 'bad');
   }
-});
+}
+
+$('#codec-run-c').addEventListener('click', () => void runCompress());
 
 // RIGHT TO LEFT. Reads the payload side, fills the JSON side.
 $('#codec-run-d').addEventListener('click', async () => {
@@ -2456,6 +2519,7 @@ payloadBadge.addEventListener('click', () => {
   // rendering a document that is already open in the app behind it.
   codecJson.value = '';
   codecJson.placeholder = 'the document open behind this page — decoded from the payload below';
+  adoptFormatFrom(currentProvenance);
   setCodecTrace(
     `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''} · ${provenanceTrace(currentProvenance)}`,
     'ok',
