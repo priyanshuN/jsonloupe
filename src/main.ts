@@ -414,7 +414,7 @@ const PASTE_ECHO_MAX = 2_000_000;
 // index.html is the only place the paths live, so a button built here gets the
 // same box, the same 1.5 stroke and the same currentColor ink as one written in
 // markup — which is the whole point of dropping the six characters.
-type IconName = 'back' | 'compare' | 'reload' | 'download' | 'warn' | 'theme';
+type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'warn' | 'theme';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function icon(name: IconName): SVGSVGElement {

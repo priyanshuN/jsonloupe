@@ -296,7 +296,7 @@ SPDX-License-Identifier: MIT -->
             <div class="codec-box-head">
               <label class="standing-label" for="codec-json">JSON or text</label>
               <span class="spacer"></span>
-              <button id="codec-copy-json" class="btn-quiet" type="button" title="Copy this JSON">copy</button>
+              <button id="codec-copy-json" class="btn-icon btn-quiet" type="button" title="Copy this JSON" aria-label="Copy this JSON"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
               <button id="codec-open-json" class="btn-quiet" type="button" title="Parse this JSON as a document">open as document</button>
             </div>
             <!-- main.ts extends this placeholder while a document is open:
@@ -331,7 +331,7 @@ SPDX-License-Identifier: MIT -->
                 <button type="button" data-format="base64" title="Base64 with no compression — when the other end cannot inflate">base64</button>
               </div>
               <span class="spacer"></span>
-              <button id="codec-copy-payload" class="btn-quiet" type="button" title="Copy the payload">copy</button>
+              <button id="codec-copy-payload" class="btn-icon btn-quiet" type="button" title="Copy the payload" aria-label="Copy the payload"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             </div>
             <textarea id="codec-payload" spellcheck="false"
               placeholder="KLUv/SAsxQAe… · \x28b52ffd… · 'quoted cell'"></textarea>
@@ -442,7 +442,7 @@ SPDX-License-Identifier: MIT -->
           <div id="ask-query-line" hidden>
             <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
             <button id="ask-query-run" class="primary" title="Run this query as a saved query">run</button>
-            <button id="ask-query-copy" class="btn-quiet" title="Copy this query">copy</button>
+            <button id="ask-query-copy" class="btn-icon btn-quiet" title="Copy this query" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
           </div>
           <details id="ask-disclosure" hidden>
             <summary>sent to model</summary>
@@ -486,7 +486,7 @@ SPDX-License-Identifier: MIT -->
             <span class="standing-label pane-label">code</span>
             <button id="code-apply" class="primary" title="Re-parse the edited JSON (Ctrl/Cmd+S)">apply changes</button>
             <button id="code-format" class="btn-quiet" title="Re-format / pretty-print">format</button>
-            <button id="code-copy" class="btn-quiet" title="Copy the editor contents">copy</button>
+            <button id="code-copy" class="btn-icon btn-quiet" title="Copy the editor contents" aria-label="Copy the editor contents"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             <button id="code-raw" class="btn-quiet" title="Show the exact original bytes (key order, whitespace, precision) vs the canonical form">source</button>
             <!-- The editor's status readout used to sit here, at the TOP of the
                  pane, sharing a row with `apply changes`. It is a status line,
@@ -577,7 +577,7 @@ SPDX-License-Identifier: MIT -->
               title="Add the functions from a playbook file">import</button>
             <input id="run-import-file" type="file" accept="application/json,.json" hidden />
             <button id="run-new" class="btn-quiet" type="button" hidden title="Write a new function">+ new</button>
-            <button id="run-copy" class="btn-quiet" type="button" title="Copy the whole result">copy</button>
+            <button id="run-copy" class="btn-icon btn-quiet" type="button" title="Copy the whole result" aria-label="Copy the whole result"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts
                  remembers which button opened it and downloads accordingly. -->
             <button id="run-dl" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
