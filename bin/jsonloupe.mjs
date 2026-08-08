@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // npx jsonloupe — serve the prebuilt app from this package, fully offline.
 //
 // The app is a static bundle (dist/); everything it does — parsing, diffing,
@@ -65,6 +67,17 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+// HSTS is intentionally absent here: this server is HTTP on loopback, where
+// HSTS has no effect. The public HTTPS deployment adds it at the edge; the
+// remaining headers protect the packaged local site too.
+const SECURITY_HEADERS = {
+  'content-security-policy': "default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:",
+  'permissions-policy': 'camera=(), geolocation=(), microphone=()',
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+};
+
 const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
   // normalize() collapses any ../ the URL smuggled in; the startsWith check
@@ -77,10 +90,13 @@ const server = createServer(async (req, res) => {
   }
   try {
     const body = await readFile(file);
-    res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
+    res.writeHead(200, {
+      ...SECURITY_HEADERS,
+      'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+    });
     res.end(body);
   } catch {
-    res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
+    res.writeHead(404, { ...SECURITY_HEADERS, 'content-type': 'text/plain' }).end('not found');
   }
 });
 

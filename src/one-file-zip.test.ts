@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The shell unpacks a one-table CSV result on the way to the download, so a
 // person who converted one table double-clicks a spreadsheet instead of an
 // archive. Getting that wrong hands them a file that does not open, so the
@@ -55,5 +57,36 @@ describe('unwrapping a converter zip', () => {
     // Not a zip at all, and a buffer too short to hold one.
     expect(onlyStoredZipEntry(new TextEncoder().encode('id\r\n1\r\n'))).toBeNull();
     expect(onlyStoredZipEntry(new Uint8Array(0))).toBeNull();
+  });
+
+  it('rejects each structural inconsistency before slicing entry bytes', () => {
+    const original = zipTextFiles([{ name: 'orders.csv', text: 'id\r\n1\r\n' }]);
+    const end = original.length - 22;
+
+    const badEndSignature = original.slice();
+    badEndSignature[end] = 0;
+    expect(onlyStoredZipEntry(badEndSignature)).toBeNull();
+
+    const badTotal = original.slice();
+    new DataView(badTotal.buffer).setUint16(end + 10, 2, true);
+    expect(onlyStoredZipEntry(badTotal)).toBeNull();
+
+    const commented = original.slice();
+    new DataView(commented.buffer).setUint16(end + 20, 1, true);
+    expect(onlyStoredZipEntry(commented)).toBeNull();
+
+    const badLocalSignature = original.slice();
+    badLocalSignature[0] = 0;
+    expect(onlyStoredZipEntry(badLocalSignature)).toBeNull();
+
+    const mismatchedSizes = original.slice();
+    new DataView(mismatchedSizes.buffer).setUint32(22, 999, true);
+    expect(onlyStoredZipEntry(mismatchedSizes)).toBeNull();
+
+    const pastEnd = original.slice();
+    const pastEndView = new DataView(pastEnd.buffer);
+    pastEndView.setUint32(18, 0xffffffff, true);
+    pastEndView.setUint32(22, 0xffffffff, true);
+    expect(onlyStoredZipEntry(pastEnd)).toBeNull();
   });
 });

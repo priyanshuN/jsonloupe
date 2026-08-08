@@ -1,9 +1,16 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
+import { fmtBytes, hasRawZstdMagic, payloadSniffNeedsDecode } from './intake';
 import appHtml from '../index.html?raw';
+import converterHtml from '../json-to-excel.html?raw';
 import readme from '../README.md?raw';
 import specHtml from '../spec.html?raw';
+import styleguideHtml from '../styleguide.html?raw';
 import packageText from '../package.json?raw';
+import staticServerSource from '../bin/jsonloupe.mjs?raw';
 import mcpLauncher from '../bin/jsonloupe-mcp.mjs?raw';
+import prepaintSource from '../public/prepaint.js?raw';
 import mcpSmokeSource from '../scripts/mcp-smoke.mjs?raw';
 import codeSource from './code.ts?raw';
 import convertViewSource from './convert-view.ts?raw';
@@ -16,6 +23,15 @@ import mcpOpsSource from './mcp/doc-ops.ts?raw';
 // complement behavioral engine/worker tests; they are not source snapshots.
 
 describe('intake and package regression contracts', () => {
+  it('formats all size bands and recognizes only complete raw Zstd magic', () => {
+    expect(fmtBytes(42)).toBe('42 B');
+    expect(fmtBytes(2048)).toBe('2.0 KB');
+    expect(fmtBytes(2 * 1024 * 1024)).toBe('2.0 MB');
+    expect(hasRawZstdMagic(new Uint8Array([0x28, 0xb5, 0x2f, 0xfd]))).toBe(true);
+    expect(hasRawZstdMagic(new Uint8Array([0x28, 0xb5, 0x2f]))).toBe(false);
+    expect(payloadSniffNeedsDecode({ recognized: true, format: 'json-text', wrapper: 'none', requiresWasm: false })).toBe(false);
+    expect(payloadSniffNeedsDecode({ recognized: true, format: 'json-text', wrapper: 'double-quoted-cell', requiresWasm: false })).toBe(true);
+  });
   it('stats and reads an MCP input through the same opened file handle', () => {
     expect(mcpOpsSource).toMatch(
       /handle = await open\(source\.path, 'r'\);[\s\S]*?handle\.stat\(\)[\s\S]*?handle\.readFile\(\)/,
@@ -59,9 +75,10 @@ describe('first-paint and navigation regression contracts', () => {
 
   it('applies the theme and returning-user gate before paint, with an about escape', () => {
     const head = appHtml.slice(0, appHtml.indexOf('</head>'));
-    expect(head).toContain("localStorage.getItem('wb-theme')");
-    expect(head).toContain("localStorage.getItem('wb-returning') === '1'");
-    expect(head).toContain("location.hash !== '#about'");
+    expect(head).toContain('<script src="/prepaint.js" data-returning="true"></script>');
+    expect(prepaintSource).toContain("localStorage.getItem('wb-theme')");
+    expect(prepaintSource).toContain("localStorage.getItem('wb-returning') === '1'");
+    expect(prepaintSource).toContain("location.hash !== '#about'");
     expect(mainSource).toContain("document.documentElement.classList.remove('returning')");
   });
 
@@ -73,8 +90,31 @@ describe('first-paint and navigation regression contracts', () => {
   });
 
   it('keeps the spec page theme-aware and names the cross-platform save shortcut', () => {
-    expect(specHtml).toContain("localStorage.getItem('wb-theme')");
+    expect(specHtml).toContain('<script src="/prepaint.js"></script>');
+    expect(prepaintSource).toContain("localStorage.getItem('wb-theme')");
     expect(specHtml).toContain('Ctrl/Cmd+S');
+  });
+});
+
+describe('deployment hardening contracts', () => {
+  const pages = [appHtml, converterHtml, specHtml, styleguideHtml];
+
+  it('ships a restrictive CSP fallback without inline executable scripts', () => {
+    for (const page of pages) {
+      expect(page).toContain('http-equiv="Content-Security-Policy"');
+      expect(page).toContain("default-src 'none'");
+      expect(page).toContain("object-src 'none'");
+      expect(page).toContain("script-src 'self'");
+      expect(page).not.toMatch(/script-src[^;]*'unsafe-(?:inline|eval)'/i);
+      expect(page).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
+    }
+  });
+
+  it('sends applicable hardening headers from the packaged loopback server', () => {
+    expect(staticServerSource).toContain("'content-security-policy'");
+    expect(staticServerSource).toContain("'x-content-type-options': 'nosniff'");
+    expect(staticServerSource).toContain("'x-frame-options': 'DENY'");
+    expect(staticServerSource).toContain("'referrer-policy': 'no-referrer'");
   });
 });
 

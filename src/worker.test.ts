@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
 import { handle } from './worker';
 import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { isLosslessNumber, stringify as llStringify } from 'lossless-json';
 import {
   canonicalExactNumeric,

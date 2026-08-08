@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Zstd ⇄ base64 codec, mirroring the Java backend convention:
 // Base64.encodeBase64String(Zstd.compress(bytes)) and the reverse.
 // The wasm module (~700 KB) is loaded lazily on first use so the app

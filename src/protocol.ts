@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Contract between the UI thread and the parser worker.
 // The UI never holds the parsed document — it only asks for row slices,
 // so the worker internals can be swapped (WASM/native) without UI changes.

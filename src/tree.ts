@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Virtualized tree: renders only the visible slice at fixed row height.
 // Row data comes from a worker asynchronously; stale responses are dropped
 // by epoch so fast scrolling never paints out-of-date slices.

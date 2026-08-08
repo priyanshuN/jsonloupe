@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The Node mirror of the browser's worker glue: `parentPort` in, `doc-ops` out.
 // Everything expensive — the parsed graph, the LosslessNumbers, the failure
 // modes of a hostile document — is confined to this thread, so one bad document

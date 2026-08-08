@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Zstd for Node, standing in for `@bokuweb/zstd-wasm` when the engine's codec is
 // bundled for the MCP server (the bundle aliases the package specifier here).
 //

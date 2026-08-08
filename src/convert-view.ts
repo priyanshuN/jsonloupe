@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The converter's UI. Three questions, left to right: what is in this document,
 // what will each table look like, and — the one that actually decides it — what
 // do the rows say.

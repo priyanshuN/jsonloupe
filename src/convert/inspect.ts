@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Detection (SPEC-converter.md §8). Runs at draft time only — nothing here
 // executes during a conversion. Every rule is ordered and every detector is
 // allowed to answer "unknown": a detector that guesses under uncertainty is

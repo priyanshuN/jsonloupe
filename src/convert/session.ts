@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Converter operations as the worker performs them.
 //
 // The division of labour follows the app's load-bearing rule: the worker owns

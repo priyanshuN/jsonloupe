@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // A DocHost backed by a real worker thread. The failure contract matters more
 // than the happy path: a thread that dies (a hostile document, an OOM) must
 // reject every request waiting on it and stay dead, rather than hang the server

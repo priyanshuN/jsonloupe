@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // jsonloupe as an MCP server: the third host for the same engine (the browser
 // is the host for eyes, `npx jsonloupe` the host for offline, this one for
 // agents). It speaks JSON-RPC over stdio and makes no network calls of any

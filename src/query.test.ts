@@ -1,6 +1,8 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
 import { LosslessNumber } from 'lossless-json';
-import { runQuery, type QueryResult } from './query';
+import { planQueryExport, runQuery, scanQuery, type QueryResult } from './query';
 
 const doc = {
   account: 'acme-logistics',
@@ -31,6 +33,11 @@ function value(r: QueryResult): number | string | null {
 }
 
 describe('paths', () => {
+  it('matches the root and recursive wildcard descendants', () => {
+    expect(matches(runQuery(doc, '$'))[0]).toEqual({ path: [], value: doc });
+    const descendants = matches(runQuery({ a: { b: 1 }, c: [2] }, '$..*'));
+    expect(descendants.map((match) => match.value)).toEqual(expect.arrayContaining([{ b: 1 }, 1, [2], 2]));
+  });
   it('root key', () => {
     expect(matches(runQuery(doc, '$.account'))[0].value).toBe('acme-logistics');
   });
@@ -46,6 +53,8 @@ describe('paths', () => {
   it('open slices', () => {
     expect(matches(runQuery(doc, '$.tasks[:2]')).length).toBe(2);
     expect(matches(runQuery(doc, '$.tasks[4:]')).length).toBe(2);
+    expect(matches(runQuery(doc, '$.tasks[:]')).length).toBe(6);
+    expect(matches(runQuery(doc, '$.tasks[-3:-1]')).map((m) => (m.value as { id: number }).id)).toEqual([4, 5]);
   });
   it('wildcard over array', () => {
     expect(matches(runQuery(doc, '$.tasks[*].id')).map((m) => m.value)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -117,8 +126,35 @@ describe('predicates', () => {
   it('in list', () => {
     expect(matches(runQuery(doc, "$.tasks[?(@.status in ['FAILED', 'DELIVERED'])]")).length).toBe(4);
   });
+  it('accepts every literal type in lists and comparisons', () => {
+    const values = { rows: [{ v: 1 }, { v: true }, { v: false }, { v: null }, { v: 'no' }] };
+    expect(value(runQuery(values, '$.rows[?(@.v in [1, true, false, null])] | count'))).toBe(4);
+    expect(value(runQuery(values, "$.rows[?(@.v == 'no')] | count"))).toBe(1);
+    expect(value(runQuery(values, '$.rows[?(@.v == true)] | count'))).toBe(1);
+    expect(value(runQuery(values, '$.rows[?(@.v == false)] | count'))).toBe(1);
+    expect(value(runQuery(values, '$.rows[?(@.v == null)] | count'))).toBe(1);
+  });
+  it('resolves indexed and quoted predicate paths, including negative indexes', () => {
+    const rows = { rows: [{ values: [{ 'display name': 'first' }, { 'display name': 'last' }] }, { values: [] }] };
+    expect(value(runQuery(rows, "$.rows[?(@.values[-1]['display name'] == 'last')] | count"))).toBe(1);
+    expect(value(runQuery(rows, "$.rows[?(@.values[9]['display name'] == 'last')] | count"))).toBe(0);
+  });
+  it('handles all four lexical string comparisons', () => {
+    const rows = { rows: [{ v: 'a' }, { v: 'b' }, { v: 1 }] };
+    expect(value(runQuery(rows, "$.rows[?(@.v > 'a')] | count"))).toBe(1);
+    expect(value(runQuery(rows, "$.rows[?(@.v >= 'b')] | count"))).toBe(1);
+    expect(value(runQuery(rows, "$.rows[?(@.v < 'b')] | count"))).toBe(1);
+    expect(value(runQuery(rows, "$.rows[?(@.v <= 'a')] | count"))).toBe(1);
+  });
+  it('returns false when string operators receive incompatible values', () => {
+    const rows = { rows: [{ v: 12 }, { v: ['x'] }, { v: 'plain' }] };
+    expect(value(runQuery(rows, "$.rows[?(@.v contains 'x')] | count"))).toBe(1);
+    expect(value(runQuery(rows, '$.rows[?(@.v startsWith 1)] | count'))).toBe(0);
+    expect(value(runQuery(rows, '$.rows[?(@.v endsWith false)] | count'))).toBe(0);
+  });
   it('regex', () => {
     expect(matches(runQuery(doc, '$.tasks[?(@.tags contains \'hub-1\' || @.status =~ /^pend/i)]')).length).toBe(3);
+    expect(matches(runQuery(doc, '$.tasks[?(@.status =~ /^FAIL\\w*$/)]')).length).toBe(3);
   });
   it('rejects stateful or potentially catastrophic regexes', () => {
     const stateful = runQuery(doc, '$.tasks[?(@.status =~ /FAIL/g)]');
@@ -142,6 +178,11 @@ describe('predicates', () => {
 });
 
 describe('pipes', () => {
+  it('rejects arguments that do not belong to scalar pipes', () => {
+    expect(runQuery(doc, '$.tasks[*] | count(@.id)')).toMatchObject({ ok: false, error: expect.stringContaining('does not take') });
+    expect(runQuery(doc, '$.tasks[*] | sum(@.id, @.eta)')).toMatchObject({ ok: false, error: expect.stringContaining('at most one') });
+    expect(runQuery(doc, '$.tasks[*] | pluck')).toMatchObject({ ok: false, error: expect.stringContaining('at least one') });
+  });
   it('count', () => {
     expect(value(runQuery(doc, '$.tasks[?(!@.routeId)] | count'))).toBe(5);
   });
@@ -166,6 +207,15 @@ describe('pipes', () => {
     if (!r.ok || r.kind !== 'rows') throw new Error('bad');
     expect(r.rows.map((x) => x[0]).sort()).toEqual(['DELIVERED', 'FAILED', 'PENDING']);
   });
+  it('keeps distinct scalar and structural types separate and enforces the cardinality cap', () => {
+    const mixed = { values: [undefined, null, true, false, 1, new LosslessNumber('1'), '1', { a: 1 }, [1], { a: 1 }] };
+    const result = runQuery(mixed, '$.values[*] | distinct', { cardinalityCap: 6, offset: 1, limit: 3 });
+    if (!result.ok || result.kind !== 'rows') throw new Error('bad');
+    expect(result.complete).toBe(false);
+    expect(result.truncated).toBe(true);
+    expect(result.total).toBe(6);
+    expect(result.rows).toHaveLength(3);
+  });
   it('group — the RCA query', () => {
     const r = runQuery(doc, "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)");
     if (!r.ok || r.kind !== 'groups') throw new Error('bad');
@@ -178,6 +228,13 @@ describe('pipes', () => {
     const r = runQuery(doc, '$.tasks[*] | group(@.routeId)');
     if (!r.ok || r.kind !== 'groups') throw new Error('bad');
     expect(r.groups.find((g) => g.key === '(absent)')?.count).toBe(5);
+  });
+  it('groups direct values and stops admitting new buckets at the cap', () => {
+    const result = runQuery({ values: ['a', 'a', 'b', 'c'] }, '$.values[*] | group', { cardinalityCap: 2 });
+    if (!result.ok || result.kind !== 'groups') throw new Error('bad');
+    expect(result.groups).toEqual([{ key: 'a', count: 2 }, { key: 'b', count: 1 }]);
+    expect(result.complete).toBe(false);
+    expect(result.truncated).toBe(true);
   });
   it('groups by several fields without flattening composite identities', () => {
     const result = runQuery(doc, '$.tasks[*] | group(@.status, @.failureReason)');
@@ -208,6 +265,34 @@ describe('pipes', () => {
     if (!result.ok || result.kind !== 'rows') throw new Error('bad');
     expect(result.rows).toHaveLength(10);
     expect(result.rows[0]).toEqual([19]);
+  });
+  it('ranks strings stably and skips mixed or unrankable keys', () => {
+    const ranked = { rows: [{ key: 'b', id: 1 }, { key: 'a', id: 2 }, { key: 'a', id: 3 }, { key: 4 }, { id: 5 }] };
+    const result = runQuery(ranked, '$.rows[*] | bottom(@.key, @.id)', { limit: 5 });
+    if (!result.ok || result.kind !== 'rows') throw new Error('bad');
+    expect(result.rows).toEqual([['a', 2], ['a', 3], ['b', 1]]);
+    expect(result.note).toContain('2 unrankable or type-mismatched values skipped');
+  });
+  it('supports an empty ranking window and rejects an oversized retained window', () => {
+    const ranked = { rows: [{ score: 1 }] };
+    const empty = runQuery(ranked, '$.rows[*] | top(@.score)', { limit: 0 });
+    if (!empty.ok || empty.kind !== 'rows') throw new Error('bad');
+    expect(empty.rows).toEqual([]);
+    expect(empty.truncated).toBe(true);
+    expect(runQuery(ranked, '$.rows[*] | top(@.score)', { offset: 4999, limit: 2 })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('at most 5000'),
+    });
+  });
+  it('reports empty, rounded-average, and unsupported exact-number aggregates', () => {
+    expect(value(runQuery({ rows: [{ v: 'x' }] }, '$.rows[*] | sum(@.v)'))).toBeNull();
+    const average = runQuery({ rows: [{ v: 1 }, { v: 2 }, { v: 2 }] }, '$.rows[*] | avg(@.v)');
+    if (!average.ok || average.kind !== 'value') throw new Error('bad');
+    expect(average.note).toContain('average rounded to 18 decimal places');
+    const extreme = runQuery({ rows: [{ v: new LosslessNumber('1e100001') }] }, '$.rows[*] | sum(@.v)');
+    if (!extreme.ok || extreme.kind !== 'value') throw new Error('bad');
+    expect(extreme.complete).toBe(false);
+    expect(extreme.note).toContain('extreme exponent');
   });
   it('pluck', () => {
     const r = runQuery(doc, "$.tasks[?(@.failureReason == 'NO_SLOT')] | pluck(@.id, @.eta, @.failureReason)");
@@ -259,6 +344,60 @@ describe('errors', () => {
     for (const q of ['$..', '$[?]', '$.a[1:2:3]', '$ | count()', '$.a =~', '$.a[?(@ =~ /(/)]']) {
       expect(() => runQuery(doc, q)).not.toThrow();
     }
+  });
+  it('reports lexer and parser edge errors precisely', () => {
+    const tooLong = 'a'.repeat(257);
+    for (const q of [
+      `$.tasks[?(@.status =~ /${tooLong}/)]`,
+      '$.tasks[?(@.status =~ /(a)\\1/)]',
+      '$.tasks[?(@.status =~ /unterminated)]',
+      '$.tasks[?(@.status =~ /[/)]',
+      '$.tasks[?(@.id in [@.eta])]',
+      '$.tasks[?(@.tags[true])]',
+      '$.tasks[?(@.tags.)]',
+      '$.tasks[1.5]',
+      '$.tasks | 1',
+      '$.tasks & $.slots',
+      '$.tasks = 1',
+      '$.tasks[?(@.eta == 1e9999)]',
+    ]) {
+      expect(runQuery(doc, q)).toMatchObject({ ok: false, error: expect.any(String), pos: expect.any(Number) });
+    }
+  });
+});
+
+describe('streaming and export plans', () => {
+  it('scans a valid query lazily and rejects parse errors or aggregate pipes', () => {
+    const scan = scanQuery(doc, '$.tasks[*].id');
+    if (!scan.ok) throw new Error(scan.error);
+    expect([...scan.matches].map((match) => match.value)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(scanQuery(doc, '$.tasks[')).toMatchObject({ ok: false });
+    expect(scanQuery(doc, '$.tasks[*] | count')).toMatchObject({ ok: false, error: expect.stringContaining('not an aggregate') });
+  });
+
+  it('exports bare matches and plucked tables without display-window truncation', () => {
+    const values = planQueryExport(doc, '$.tasks[*].id');
+    if (!values.ok || values.kind !== 'values') throw new Error('bad');
+    expect([...values.values]).toEqual([1, 2, 3, 4, 5, 6]);
+
+    const table = planQueryExport(doc, '$.tasks[*] | pluck(@.id, @.status)');
+    if (!table.ok || table.kind !== 'table') throw new Error('bad');
+    expect(table.columns).toEqual(['id', 'status']);
+    expect([...table.rows]).toHaveLength(6);
+  });
+
+  it('exports complete groups and distinct rows but rejects scalar results', () => {
+    const groups = planQueryExport(doc, '$.tasks[*] | group(@.status)');
+    if (!groups.ok || groups.kind !== 'table') throw new Error('bad');
+    expect(groups.columns).toEqual(['status', 'count']);
+
+    const distinct = planQueryExport(doc, '$.tasks[*].status | distinct');
+    if (!distinct.ok || distinct.kind !== 'table') throw new Error('bad');
+    expect(distinct.columns).toEqual(['value']);
+
+    expect(planQueryExport(doc, '$.tasks[*] | sum(@.eta)')).toMatchObject({ ok: false, error: expect.stringContaining('scalar') });
+    expect(planQueryExport(doc, '$.tasks[*] | pluck')).toMatchObject({ ok: false, error: expect.stringContaining('at least one') });
+    expect(planQueryExport(doc, '$.tasks[')).toMatchObject({ ok: false });
   });
 });
 

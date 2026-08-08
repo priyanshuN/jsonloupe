@@ -1,3 +1,5 @@
+/* Copyright (c) 2026 Priyanshu Nandan
+ * SPDX-License-Identifier: MIT */
 /* ============================================================================
    JSON Workbench — design tokens (dark default, light override) + components
    ============================================================================
@@ -509,6 +511,8 @@ html, body {
   font: var(--fs-base)/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
+
+html.returning #landing { display: none; }
 
 ::selection { background: var(--accent-soft); }
 

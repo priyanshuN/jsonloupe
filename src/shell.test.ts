@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 // Pulled in through Vite's ?raw rather than node:fs: this file lives under src/,
 // which tsconfig.json types for the browser and deliberately denies node types.

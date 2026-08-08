@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The sample is the first thing a visitor with no file of their own can click,
 // so it is the one document that has to argue for the whole tool in ten
 // seconds: an order export with its line items nested inside it, which the

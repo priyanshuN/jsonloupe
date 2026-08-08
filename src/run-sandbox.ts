@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Sandbox worker for the run panel — a shell around executeUserCode and nothing
 // else. It is EPHEMERAL: main.ts spawns one per run and terminates it on the
 // result or on the timeout, which is what keeps `while (true) {}` from wedging

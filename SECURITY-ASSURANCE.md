@@ -102,9 +102,16 @@ choice rather than being guessed.
 ### Make invariants executable
 
 Strict TypeScript, Biome's FLOSS security rules, the UI contract linter,
-CodeQL, dependency monitoring, property tests, an 80% statement-coverage floor,
+CodeQL, dependency monitoring, property tests, 90% statement and 80% branch
+coverage floors,
 and byte-for-byte build checks run in CI. Security-sensitive regressions
 therefore have both prose contracts and executable checks.
+
+The full suite is dynamic analysis under the OpenSSF definition: it executes
+the software with thousands of assertions, varies security-sensitive inputs
+with `fast-check`, and exceeds 80% branch coverage. The release workflow runs
+that same coverage-gated configuration before every npm production release;
+assertions are enabled throughout the run.
 
 ## Common weakness countermeasures
 
@@ -153,3 +160,8 @@ credential path, parser, output format, release channel, or trust boundary must
 update this assurance case and [SECURITY.md](SECURITY.md) in the same pull
 request. Security reviews use this document as their scope and record material
 residual risks rather than silently broadening the claims.
+
+Public-site response headers are specified and verified separately in
+[SECURITY-HEADERS.md](SECURITY-HEADERS.md). The in-page policy and packaged
+loopback server already enforce the compatible CSP; the Gold website criterion
+is not claimed until the edge sends all four required response headers.

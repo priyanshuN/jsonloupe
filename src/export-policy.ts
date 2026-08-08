@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 /** Complete exports are bounded even though they never enter the MCP response. */
 export const MAX_EXPORT_BYTES = 50_000_000;
 

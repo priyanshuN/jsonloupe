@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // A CSV conversion always comes back as a zip, because the CSV writer emits one
 // file per table and a zip is how several files travel as one download. When
 // the mapping produced a single table that reasoning stops applying: the person

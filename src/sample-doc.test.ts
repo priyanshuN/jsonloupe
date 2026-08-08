@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The sample is a claim: click this and you will see what the tool does. These
 // tests are that claim written down, because every part of it is a value that
 // an ordinary JavaScript number would quietly destroy — and the sample is the

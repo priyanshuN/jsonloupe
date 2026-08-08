@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // One request/response channel over a doc worker instance.
 //
 // There are two of these now: the document's worker, which lives as long as the

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Live smoke test for the MCP server: spawns the real built binary, speaks real
 // JSON-RPC over its stdio, and drives the flow the server exists for — open a
 // document far too big to paste into a model, then learn its shape, query it,

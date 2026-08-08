@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The converter spec: the declarative document the UI produces, the MCP server
 // drafts, and the engine executes. See SPEC-converter.md §4.
 //

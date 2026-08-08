@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Sinks: where converted rows land. The engine never materializes output, so a
 // sink is free to buffer (preview, tests), build a string (CSV), or assemble a
 // workbook (xlsx).

@@ -1,20 +1,31 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  convertToFile,
   diffAgainst,
   documentText,
   exportCsv,
+  exportResult,
   getSchema,
+  inspectConversion,
   loadDoc,
+  profile,
+  queryError,
+  runDocOp,
   runQuery,
   sample,
+  type AsyncEngine,
   type Engine,
   type OpError,
   type QueryResultView,
 } from './doc-ops';
 import { MAX_DOC_BYTES } from '../intake';
+import { compressToB64 } from '../codec';
+import type { DocRequest } from './pool';
 
 // These drive the document operations over a real engine, the same way
 // worker.test.ts drives `handle` — no threads, no MCP. `vi.resetModules()` gives
@@ -118,6 +129,14 @@ describe('loadDoc', () => {
     const r = await loadDoc(engine, { path });
     expect(r).toMatchObject({ ok: false });
     expect((r as { error: string }).error).toMatch(/beyond the ~200\.0 MB/);
+  });
+
+  it('requires a source and decodes a supported wrapped payload', async () => {
+    expect(await loadDoc(engine, {})).toEqual({ ok: false, error: 'load_doc needs a path or text', hint: undefined });
+    const compressed = await compressToB64('{"wrapped":true}');
+    const decoded = ok(await loadDoc(engine, { text: compressed }));
+    expect(decoded.decoded).toContain('base64-zstd');
+    expect(decoded.keys).toEqual(['wrapped']);
   });
 });
 
@@ -330,5 +349,163 @@ describe('exportCsv', () => {
     const r = (await exportCsv(engine, '$.tasks[*]', join(dir, 'never.csv'))) as { ok: false; hint: string };
     expect(r.ok).toBe(false);
     expect(r.hint).toContain('| pluck(@.id, @.status)');
+  });
+});
+
+describe('operation adapters and defensive result shapes', () => {
+  const responder = (reply: unknown): Engine => (() => reply) as Engine;
+
+  it('bounds and defaults every raw query result shape', () => {
+    const long = 'x'.repeat(250);
+    expect(runQuery(responder({
+      ok: true,
+      kind: 'matches',
+      matches: [{ pathText: '$.x', preview: long }],
+      complete: false,
+      truncated: true,
+    }), '$.x')).toMatchObject({
+      ok: true,
+      kind: 'matches',
+      total: 0,
+      offset: 0,
+      complete: false,
+      truncated: true,
+      matches: [{ path: '$.x', preview: expect.stringContaining('…') }],
+    });
+    expect(runQuery(responder({ ok: true, kind: 'value', value: null }), '$')).toMatchObject({
+      ok: true,
+      kind: 'value',
+      label: '',
+      value: 'null',
+    });
+    expect(runQuery(responder({ ok: true, kind: 'groups' }), '$')).toMatchObject({
+      ok: true,
+      kind: 'groups',
+      groups: [],
+      total: 0,
+    });
+    expect(runQuery(responder({ ok: true, kind: 'rows', rows: [[long, undefined, { a: 1 }]] }), '$')).toMatchObject({
+      ok: true,
+      kind: 'rows',
+      cols: [],
+      rows: [[expect.stringContaining('…'), 'null', '{"a":1}']],
+    });
+    expect(runQuery(responder({ ok: true, kind: 'surprise' }), '$')).toEqual({
+      ok: false,
+      error: "unexpected query result 'surprise'",
+      hint: undefined,
+    });
+  });
+
+  it('turns positioned profile errors into teaching errors', () => {
+    const positioned = profile(responder({ ok: false, error: 'bad predicate', pos: 4 }), '$[?(', [], 3);
+    expect(positioned).toMatchObject({ ok: false, error: 'bad predicate (at 4)', hint: expect.stringContaining('predicate closes') });
+    expect(profile(responder({ ok: false, error: 'plain failure' }), '$', [], 3)).toEqual({ ok: false, error: 'plain failure' });
+  });
+
+  it('rejects aggregate samples and unresolved match rows', () => {
+    expect(sample(responder({ ok: true, kind: 'value', value: 1 }), '$ | count', 1)).toMatchObject({
+      ok: false,
+      error: 'sample takes a path, not an aggregate pipe',
+    });
+
+    const missingSingle: Engine = ((message: { type: string }) => {
+      if (message.type === 'query') return { ok: true, kind: 'matches', total: 1, matches: [{ pathText: '$.x' }] };
+      if (message.type === 'queryReveal') return { rowIndex: -1 };
+      return { rows: [] };
+    }) as Engine;
+    expect(sample(missingSingle, '$.x', 1)).toMatchObject({ ok: false, error: 'could not resolve $.x in the document tree' });
+
+    const missingMultiple: Engine = ((message: { type: string }) => {
+      if (message.type === 'query') return {
+        ok: true,
+        kind: 'matches',
+        total: 2,
+        matches: [{ pathText: '$.x[0]' }, { pathText: '$.x[1]' }],
+      };
+      if (message.type === 'queryReveal') return { rowIndex: -1 };
+      return { rows: [] };
+    }) as Engine;
+    expect(sample(missingMultiple, '$.x[*]', 2)).toMatchObject({ ok: true, total: 2, values: [] });
+  });
+
+  it('normalizes sparse diff replies and diff failures', () => {
+    expect(diffAgainst(responder({ ok: false }), '{}', '')).toEqual({ ok: false, error: 'diff failed', hint: undefined });
+    const result = diffAgainst(responder({
+      ok: true,
+      added: [{ pathText: '$.a', right: '1' }],
+      removed: [{ pathText: '$.b', left: '2' }],
+      truncated: true,
+    }), '{}', '');
+    expect(result).toMatchObject({ ok: true, added: 1, removed: 1, changed: 0, truncated: true });
+  });
+
+  it('keeps export setup and streaming failures inside the operation', async () => {
+    const refused = await exportResult(responder({ ok: false }), '$', join(dir, 'no-jsonl.jsonl'), 'jsonl');
+    expect(refused).toEqual({ ok: false, error: 'JSONL export failed', hint: undefined });
+
+    let calls = 0;
+    const noChunk: Engine = (() => {
+      if (calls++ === 0) return { ok: true, exportId: 'e1' };
+      return { ok: true, done: true };
+    }) as Engine;
+    expect(await exportResult(noChunk, '$', join(dir, 'no-chunk.jsonl'), 'jsonl')).toMatchObject({
+      ok: false,
+      error: 'JSONL export failed',
+    });
+  });
+
+  it('validates converter-engine replies and derives row totals', async () => {
+    const failedInspect: AsyncEngine = async () => ({ error: 'inspection unavailable' });
+    expect(await inspectConversion(failedInspect)).toEqual({ ok: false, error: 'inspection unavailable', hint: undefined });
+
+    const badSpec: AsyncEngine = async () => ({
+      errors: [
+        { code: 'E_BAD_PATH', at: 'tables[0].anchor', message: 'bad anchor' },
+        { code: 'E_MISSING_KEY', at: 'tables[0].name', message: 'name missing' },
+      ],
+    });
+    expect(await convertToFile(badSpec, {} as never, join(dir, 'never.xlsx'))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('tables[0].anchor'),
+      hint: expect.stringContaining('tables[0].name'),
+    });
+
+    const incomplete: AsyncEngine = async () => ({ error: 'conversion unavailable' });
+    expect(await convertToFile(incomplete, {} as never, join(dir, 'never-2.xlsx'))).toEqual({
+      ok: false,
+      error: 'conversion unavailable',
+      hint: undefined,
+    });
+
+    const report = { tables: [{ name: 'a', rows: 2, skipped: 0 }, { name: 'b', rows: 3, skipped: 0 }], warnings: [] };
+    const successful: AsyncEngine = async () => ({ format: 'csv', bytes: new Uint8Array([1, 2]), report });
+    const outPath = join(dir, 'derived-rows.csv');
+    expect(await convertToFile(successful, {} as never, outPath)).toMatchObject({ ok: true, rows: 5, bytes: 2 });
+
+    expect(await convertToFile(successful, {} as never, join(dir, 'absent-parent', 'out.csv'))).toMatchObject({ ok: false });
+  });
+
+  it('routes unavailable converter and unknown document operations explicitly', async () => {
+    const inert = responder({ text: '{}' });
+    expect(await runDocOp(inert, { op: 'convertInspect' } as DocRequest)).toMatchObject({
+      ok: false,
+      error: 'converter operations are unavailable in this document host',
+    });
+    expect(await runDocOp(inert, { op: 'convertRun' } as DocRequest)).toMatchObject({
+      ok: false,
+      error: 'converter operations are unavailable in this document host',
+    });
+    expect(await runDocOp(inert, { op: 'unknown' } as DocRequest)).toMatchObject({
+      ok: false,
+      error: "unknown document operation 'unknown'",
+    });
+  });
+
+  it('offers predicate and quoting hints and stays quiet without a near miss', () => {
+    expect(queryError('$[?(@.x == 1', 'expected closing token', 99).hint).toContain('predicate closes');
+    expect(queryError('$.rows[?(@.name contains "x")]', 'bad string', 2).hint).toContain('single quotes');
+    const plain = queryError('$.rows[*]', 'unrelated failure', -5);
+    expect(plain.hint).not.toContain('suggestion:');
   });
 });

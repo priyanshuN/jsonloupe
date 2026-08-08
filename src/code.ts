@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Editable code view backed by CodeMirror 6, lazy-loaded on first open so the
 // app's cold start stays instant (same pattern as the zstd-wasm chunk). Every
 // CM module is pulled in via dynamic import() inside create(); the top-level

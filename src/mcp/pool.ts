@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // One document, one thread. The engine keeps a document in module state (in a
 // browser tab that is exactly right — one worker per tab), so N documents means
 // N module states, which in Node means N `worker_threads`. That also makes a

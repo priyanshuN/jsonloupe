@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Natural language → query translation. Privacy contract: only the question
 // and the document's SHAPE (field names, types, array lengths) are sent —
 // never values. The returned query string executes locally in the worker.

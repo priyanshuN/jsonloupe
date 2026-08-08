@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Loopback guard for the dev-only /__api-key endpoint (wired in vite.config.ts).
 //
 // Connect middlewares run before Vite's own allowed-hosts check, so without this

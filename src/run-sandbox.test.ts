@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const CAPABILITIES = [

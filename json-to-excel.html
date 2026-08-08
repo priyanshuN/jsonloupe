@@ -1,8 +1,11 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <link rel="canonical" href="https://jsonloupe.dev/json-to-excel.html" />
   <!-- The title, the description and the <h1> open with the same four words on
@@ -19,16 +22,7 @@
   <!-- Same pre-paint theme gate as index.html and spec.html: the stylesheet's
        bare :root is the dark palette, so without this a light-theme visitor
        gets slammed into dark for a frame. -->
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem('wb-theme');
-        if (t !== 'light' && t !== 'dark')
-          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-        document.documentElement.dataset.theme = t;
-      } catch (e) { /* private mode: no flash protection, nothing broken */ }
-    })();
-  </script>
+  <script src="/prepaint.js"></script>
 </head>
 <body>
   <!-- This is index.html's marketing landing, reused whole rather than
@@ -149,94 +143,6 @@ addresses     <span class="lp-str">order_id</span> · line1 · city · postcode<
     </footer>
   </section>
 
-  <script>
-    (function () {
-      // This page converts nothing. It collects the text and hands it to the
-      // app's converter — one implementation of the conversion, not two. With
-      // scripting off the buttons go quiet and the footer's plain link to the
-      // converter is the way through, which is why that link is an <a>.
-      var APP = './#convert';
-      // sessionStorage rather than localStorage: the handover is meant to
-      // survive one navigation, not outlive the tab. On a shared machine
-      // nobody's payload is left sitting on disk afterwards.
-      var HANDOFF = 'wb-convert-handoff';
-
-      var box = document.getElementById('paste-box');
-      var convert = document.getElementById('parse-btn');
-      var openFile = document.getElementById('open-btn');
-      var cta = document.getElementById('cta-open');
-      var err = document.getElementById('parse-error');
-
-      // Anything left from an earlier visit in this tab is stale by definition:
-      // the only reader is the app, and it reads once, on arrival. The same
-      // call doubles as the availability probe — a browser with storage blocked
-      // throws here, and this page needs to know that before it promises to
-      // carry anything.
-      var canCarry = true;
-      try { sessionStorage.removeItem(HANDOFF); } catch (e) { canCarry = false; }
-
-      function fail(message) {
-        err.textContent = message;
-        err.hidden = false;
-      }
-
-      // 'empty' | 'ok' | 'no-handoff' — the caller decides which of those is
-      // fatal. 'no-handoff' covers both a paste too large for the storage quota
-      // and a browser that refuses storage outright: from here they are the
-      // same fact, and they have the same two ways out.
-      function carry() {
-        var text = box.value.trim();
-        if (!text) return 'empty';
-        if (!canCarry) return 'no-handoff';
-        try {
-          sessionStorage.setItem(HANDOFF, text);
-          return 'ok';
-        } catch (e) {
-          return 'no-handoff';
-        }
-      }
-
-      function convertNow() {
-        err.hidden = true;
-        var carried = carry();
-        if (carried === 'empty') {
-          fail('paste some JSON first, or use “open a file instead”.');
-          box.focus();
-          return;
-        }
-        if (carried === 'no-handoff') {
-          // Saying so beats dropping the text quietly and landing them in an
-          // empty converter wondering where their file went.
-          fail('this browser would not hold that text long enough to carry it across. use “open a file instead” — the converter reads a file directly, at any size.');
-          return;
-        }
-        location.href = APP;
-      }
-
-      // The app's own file picker is better than a second one here, so both of
-      // these are a trip to the app. Whatever is in the box rides along if it
-      // fits; an empty box, or one that would not fit, is no reason to block
-      // the trip.
-      function openApp() {
-        err.hidden = true;
-        carry();
-        location.href = APP;
-      }
-
-      convert.addEventListener('click', convertNow);
-      openFile.addEventListener('click', openApp);
-      cta.addEventListener('click', openApp);
-      box.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-          e.preventDefault();
-          convertNow();
-        }
-      });
-      // preventScroll: below ~1100px the hero stacks and the paste panel sits
-      // under the copy, so a plain focus() would scroll the headline — the one
-      // line this page exists to show — off the top before it is read.
-      box.focus({ preventScroll: true });
-    })();
-  </script>
+  <script src="/converter-landing.js"></script>
 </body>
 </html>

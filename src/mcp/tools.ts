@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The tool surface. Bounded verbs, chosen so a client can run the whole
 // schema → query → refine → answer loop itself: the document stays here, only
 // its shape and capped results ever reach the model.
