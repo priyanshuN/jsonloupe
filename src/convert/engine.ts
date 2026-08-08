@@ -19,7 +19,19 @@ import {
   type FromPath,
   type TableSpec,
 } from './spec';
-import { cellText, parseBaseDate, parseGeo, parseNaive, renderNaive, today, type Naive } from './coerce';
+import {
+  cellText,
+  datetimeCell,
+  geoCell,
+  parseBaseDate,
+  parseGeo,
+  parseNaive,
+  renderNaive,
+  textCell,
+  today,
+  type Cell,
+  type Naive,
+} from './coerce';
 import { validateSpec } from './validate';
 import type { Inspection } from './inspect';
 
@@ -32,19 +44,33 @@ export interface Frame {
 export type SourceInput = { doc: unknown } | { text: string; format?: 'json' | 'jsonl' | 'csv' };
 
 export interface TableWriter {
-  writeRow(cells: string[]): void | Promise<void>;
+  writeRow(cells: Cell[]): void | Promise<void>;
   close(): void | Promise<void>;
 }
 
 export interface TableSink {
   openTable(t: { name: string; columns: string[] }): TableWriter | Promise<TableWriter>;
   finish?(): void | Promise<void>;
+  /**
+   * What the writer noticed that the walk could not: a CSV cell past the length
+   * a spreadsheet will hold is a property of the destination, not of the data.
+   * Reported through the same channel as everything else, because a warning the
+   * run keeps to itself is the failure this file exists to avoid.
+   */
+  outputWarnings?(): Warning[];
 }
 
 export interface Warning {
   table: string;
   column?: string;
-  code: 'BAD_DATETIME' | 'BAD_GEO' | 'BAD_BASEDATE' | 'DUP_PARENT_KEY';
+  code:
+    | 'BAD_DATETIME'
+    | 'BAD_GEO'
+    | 'BAD_BASEDATE'
+    | 'DUP_PARENT_KEY'
+    | 'CELL_TOO_LONG'
+    | 'TOO_MANY_ROWS'
+    | 'TOO_MANY_COLUMNS';
   count: number;
   sample?: string;
 }
@@ -54,8 +80,28 @@ export interface ConvertReport {
   warnings: Warning[];
 }
 
+/**
+ * One table as the preview sees it. `rows` is the sample the panel renders;
+ * everything beside it is measured over the WHOLE document, because the
+ * questions a user has before they download — how many rows do I get, how many
+ * did the mapping throw away, will this fit in a spreadsheet — are all about
+ * the file, not about the twenty rows on screen.
+ */
+export interface PreviewTable {
+  name: string;
+  columns: string[];
+  /** The sampled rows, as text. The preview shows values; it does not write them. */
+  rows: string[][];
+  /** Rows this table will produce. */
+  total: number;
+  /** Rows the mapping drops, because a column marked required had no value. */
+  skipped: number;
+  /** The longest cell anywhere in the table, header row included. */
+  widest: { column: string; chars: number } | null;
+}
+
 export interface PreviewResult {
-  tables: { name: string; columns: string[]; rows: string[][]; total: number }[];
+  tables: PreviewTable[];
   warnings: Warning[];
 }
 
@@ -263,8 +309,8 @@ function buildRow(
   arrayJoin: string,
   now: Date,
   warn: Warnings,
-): string[] | null {
-  const cells: string[] = [];
+): Cell[] | null {
+  const cells: Cell[] = [];
 
   if (t.spec.parent && t.parentLevel !== null) {
     const pf = frames[t.parentLevel];
@@ -276,15 +322,17 @@ function buildRow(
     } else {
       v = isRecord(pf?.value) ? pf.value[t.spec.parent.key] : undefined;
     }
-    cells.push(v === undefined || v === null ? onMissing : cellText(v, arrayJoin));
+    cells.push(v === undefined || v === null ? textCell(onMissing) : cellText(v, arrayJoin));
   }
 
   for (const col of t.columns) {
     const c = col.spec;
-    const miss = c.onMissing ?? onMissing;
+    const miss = textCell(c.onMissing ?? onMissing);
 
     if (c.const !== undefined) {
-      cells.push(String(c.const));
+      // A constant is text the user typed into the mapping, not a value the
+      // document carried, so it stays text even when it reads as a number.
+      cells.push(textCell(String(c.const)));
       continue;
     }
 
@@ -298,29 +346,29 @@ function buildRow(
     if (c.type === 'datetime') {
       const n = parseNaive(raw, c.parse ?? '');
       if (!n) {
-        warn.add(t.spec.name, 'BAD_DATETIME', c.name, cellText(raw, arrayJoin));
+        warn.add(t.spec.name, 'BAD_DATETIME', c.name, cellText(raw, arrayJoin).text);
         cells.push(miss);
         continue;
       }
       const filled = fillDate(n, c, col, frames, now, t.spec.name, warn);
       const out = renderNaive(filled, c.out ?? '');
       if (out === null) {
-        warn.add(t.spec.name, 'BAD_DATETIME', c.name, cellText(raw, arrayJoin));
+        warn.add(t.spec.name, 'BAD_DATETIME', c.name, cellText(raw, arrayJoin).text);
         cells.push(miss);
         continue;
       }
-      cells.push(out);
+      cells.push(datetimeCell(out, c.out ?? ''));
       continue;
     }
 
     if (c.type === 'geo') {
       const g = parseGeo(raw, c.form);
       if (!g) {
-        warn.add(t.spec.name, 'BAD_GEO', c.name, cellText(raw, arrayJoin));
+        warn.add(t.spec.name, 'BAD_GEO', c.name, cellText(raw, arrayJoin).text);
         cells.push(miss);
         continue;
       }
-      cells.push(String(c.part === 'lat' ? g.lat : g.lng));
+      cells.push(geoCell(c.part === 'lat' ? g.lat : g.lng));
       continue;
     }
 
@@ -447,11 +495,20 @@ export async function convert(
   }
 
   await sink.finish?.();
-  report.warnings = warn.list();
+  report.warnings = [...warn.list(), ...(sink.outputWarnings?.() ?? [])];
   return report;
 }
 
-/** The first N rows of every table, fully typed and formatted — what the UI renders live. */
+/**
+ * The first N rows of every table, fully typed and formatted — what the UI
+ * renders live.
+ *
+ * The walk covers the whole document even though only the first N rows are
+ * kept, so the counts and the widest cell come free. They are returned because
+ * everything they answer used to be answered by the download: a mapping that
+ * drops three thousand rows, or writes a cell no spreadsheet will hold, looked
+ * perfect in the preview and failed after the click.
+ */
 export async function preview(
   input: SourceInput,
   spec: ConvertSpec,
@@ -460,19 +517,44 @@ export async function preview(
   const limit = opts.rows ?? 20;
   const { root, tables, parentIndexes, onMissing, arrayJoin, now } = prepare(input, spec, opts);
   const warn = new Warnings();
-  const out: PreviewResult['tables'] = [];
+  const out: PreviewTable[] = [];
 
   for (const t of tables) {
     const rows: string[][] = [];
+    const columns = columnNames(t);
     let total = 0;
+    let skipped = 0;
+    // The header is a row of cells like any other, and a long column name hits
+    // the same ceiling a long value does.
+    let widestChars = -1;
+    let widestColumn = '';
+    const measure = (column: string, chars: number) => {
+      if (chars > widestChars) {
+        widestChars = chars;
+        widestColumn = column;
+      }
+    };
+    columns.forEach((c) => measure(c, c.length));
+
     const pIdx = parentIndexes.get(t.spec.name) ?? null;
     for (const frames of iterateRows(root, t.segs)) {
       const cells = buildRow(t, frames, pIdx, onMissing, arrayJoin, now, warn);
-      if (!cells) continue;
+      if (!cells) {
+        skipped++;
+        continue;
+      }
       total++;
-      if (rows.length < limit) rows.push(cells);
+      cells.forEach((cell, i) => measure(columns[i] ?? `column ${i + 1}`, cell.text.length));
+      if (rows.length < limit) rows.push(cells.map((cell) => cell.text));
     }
-    out.push({ name: t.spec.name, columns: columnNames(t), rows, total });
+    out.push({
+      name: t.spec.name,
+      columns,
+      rows,
+      total,
+      skipped,
+      widest: widestChars < 0 ? null : { column: widestColumn, chars: widestChars },
+    });
   }
   return { tables: out, warnings: warn.list() };
 }

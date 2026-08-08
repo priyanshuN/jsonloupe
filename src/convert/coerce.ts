@@ -57,13 +57,46 @@ export function toNum(v: unknown): number | null {
 }
 
 /**
+ * A value as it lands in a cell: the text, plus what the value WAS before it
+ * became text.
+ *
+ * The text is the whole answer for CSV. A spreadsheet has cell types, though,
+ * and without this tag the writer has no choice but to look at the finished
+ * text and guess — at which point the string "1.10" becomes the number 1.1 and
+ * a version has quietly lost a digit. The tag says what the document said, so
+ * nothing downstream has to re-guess it.
+ */
+export type Cell = { text: string; kind: 'text' | 'number' | 'datetime' };
+
+// A number is only worth handing over as a real number when its digits survive
+// a double exactly. Past fifteen of them an int64 id comes back rounded, and
+// those digits are the reason someone opened this tool — so it travels as text.
+const EXACT_AS_DOUBLE = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
+
+/** Text that was never anything else: constants, fill-ins for missing values. */
+export function textCell(text: string): Cell {
+  return { text, kind: 'text' };
+}
+
+function numberOrText(text: string): Cell {
+  return EXACT_AS_DOUBLE.test(text) ? { text, kind: 'number' } : { text, kind: 'text' };
+}
+
+/**
  * A value as it lands in a cell. Arrays of scalars fold into one joined cell
  * (§3.3); everything else goes through the shared CSV cell rule, so exact
  * int64 digits survive the trip.
+ *
+ * Only a value the document wrote as a number is tagged as one. A quoted
+ * "1.10", "007" or "50" stays text, because a string in has to be a string out
+ * — that is the losslessness claim on its most common path, and a joined array
+ * is a list, not an arithmetic value, however numeric its pieces look.
  */
-export function cellText(v: unknown, arrayJoin: string): string {
-  if (Array.isArray(v) && v.every(isScalar)) return v.map(csvCell).join(arrayJoin);
-  return csvCell(v);
+export function cellText(v: unknown, arrayJoin: string): Cell {
+  if (Array.isArray(v) && v.every(isScalar)) return textCell(v.map(csvCell).join(arrayJoin));
+  const text = csvCell(v);
+  if (isLosslessNumber(v) || typeof v === 'number') return numberOrText(text);
+  return textCell(text);
 }
 
 // ---------- datetime ----------
@@ -246,6 +279,17 @@ export function renderNaive(raw: Naive, out: string): string | null {
   return s;
 }
 
+/**
+ * The cell a datetime column produces, once `renderNaive` has done the
+ * formatting. An epoch output is a count, not a date on a calendar: tagging
+ * `1800` as a datetime would invite a spreadsheet to show it as half past six
+ * in 1905. Only the token-formatted forms carry the datetime tag, so the text
+ * behind that tag is always a written-out date or time.
+ */
+export function datetimeCell(text: string, out: string): Cell {
+  return isEpochToken(out) ? numberOrText(text) : { text, kind: 'datetime' };
+}
+
 // ---------- geo ----------
 
 const LABELLED = /lat\s*[:=]?\s*(-?\d+(?:\.\d+)?)[^\d\-]+(?:lng|lon|long)\s*[:=]?\s*(-?\d+(?:\.\d+)?)/i;
@@ -283,6 +327,16 @@ export function parseGeo(v: unknown, form?: GeoForm): GeoPoint | null {
   const m = PAIR.exec(s);
   if (m) return order(+m[1], +m[2], false);
   return null;
+}
+
+/**
+ * A latitude or longitude, as a cell. This one is a number whatever the source
+ * looked like — the pair may have arrived as the string "12.97, 77.59", but
+ * what comes out is a coordinate, and a coordinate stored as text cannot be
+ * mapped, sorted or averaged in the spreadsheet it is going to.
+ */
+export function geoCell(part: number): Cell {
+  return numberOrText(String(part));
 }
 
 /** `lngFirst` is the form's declared order; magnitude overrides it when it must. */

@@ -19,6 +19,15 @@ import type {
   Warning,
 } from './convert/index';
 
+/** A field a column could read, with what detection saw in it. */
+interface SourceOption {
+  path: string;
+  /** How often it is filled and up to three real values — for the open list. */
+  hint: string;
+  /** The same, cut to one value — for the row the list closes onto. */
+  short: string;
+}
+
 export interface SavedMapping {
   id: string;
   name: string;
@@ -56,6 +65,11 @@ const PREVIEW_ROWS = 12;
 const DEBOUNCE_MS = 120;
 // The strip's resting line for this pane: what to do when nothing is chosen yet.
 const RESTING_LEAD = 'Pick a table, adjust its columns, then download.';
+// Detection reads at most this many rows of a table before it stops counting
+// fields, so a presence figure is a share of what was looked at, not of the
+// whole document — and saying "92%" of a number nobody was shown would be a
+// figure the user cannot check. Mirrors ROW_CAP in convert/inspect.
+const SCAN_ROWS = 2000;
 const DATETIME_FORMATS = [
   'yyyy-MM-dd HH:mm:ss',
   'yyyy-MM-dd',
@@ -165,6 +179,144 @@ export function friendlyPath(anchor: string): string {
   return parts.length ? parts.join(' › ') : 'the whole document';
 }
 
+// The spreadsheet's ceilings, which belong to the file format rather than to
+// this app. They are repeated here rather than imported because everything the
+// panel imports from convert/ is a type: pulling in a runtime constant would
+// drag the whole engine into the page's bundle, and the engine lives in the
+// worker precisely so it is not there.
+const SHEET_MAX_ROWS = 1_048_576;
+const SHEET_MAX_COLUMNS = 16_384;
+const CELL_MAX_CHARS = 32_767;
+
+/** `a`, `a and b`, `a, b and c` — a sentence, not a comma-separated dump. */
+export function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/** Naming twenty columns helps nobody; naming two and counting the rest does. */
+function nameList(names: Iterable<string>): string {
+  const all = [...names];
+  if (all.length <= 2) return joinList(all);
+  return `${all.slice(0, 2).join(', ')} and ${all.length - 2} more`;
+}
+
+/**
+ * How often a field is actually there. `sampled` says the figure is over the
+ * rows detection read rather than the whole table, and it says so out loud —
+ * a share quoted against an invisible denominator is not checkable.
+ */
+export function presenceText(present: number, scanned: number, sampled = false): string {
+  if (scanned <= 0) return '';
+  const rows = `the first ${scanned.toLocaleString()} rows`;
+  if (present >= scanned) return sampled ? `in all of ${rows}` : 'in every row';
+  const share = Math.max(1, Math.round((present / scanned) * 100));
+  return sampled ? `in ${share}% of ${rows}` : `in ${share}% of rows`;
+}
+
+/** What a field holds, said the way the picker shows it: how often, then examples. */
+export function fieldHint(
+  present: number,
+  scanned: number,
+  sampled: boolean,
+  samples: string[],
+): string {
+  const shown = samples.slice(0, 3).map((s) => (s.length > 24 ? `${s.slice(0, 23)}…` : s));
+  const presence = presenceText(present, scanned, sampled);
+  if (!shown.length) return presence;
+  return presence ? `${presence} · ${shown.join(', ')}` : shown.join(', ');
+}
+
+/**
+ * `tables[1].columns[3].from` → which table, which column. Errors are addressed
+ * to the mapping that was previewed, and the mapping is what the user is
+ * looking at, so every error can be put on the row it is about.
+ */
+export function errorTarget(at: string): { table: number; column: number | null } | null {
+  const m = /^tables\[(\d+)\](?:\.columns\[(\d+)\])?/.exec(at);
+  if (!m) return null;
+  return { table: Number(m[1]), column: m[2] === undefined ? null : Number(m[2]) };
+}
+
+/**
+ * What a spreadsheet will refuse about this table, in the words of what the
+ * user did. The engine measures the whole document while it previews, so these
+ * are said before the download rather than thrown after it — a file that will
+ * not be written is worth knowing about while the mapping is still on screen.
+ */
+export function ceilingBreaches(table: {
+  columns: string[];
+  total: number;
+  widest: { column: string; chars: number } | null;
+}): string[] {
+  const said: string[] = [];
+  if (table.total > SHEET_MAX_ROWS) {
+    said.push(`too many rows for one sheet — ${table.total.toLocaleString()}`
+      + ` of ${SHEET_MAX_ROWS.toLocaleString()}`);
+  }
+  if (table.columns.length > SHEET_MAX_COLUMNS) {
+    said.push(`too many columns for one sheet — ${table.columns.length.toLocaleString()}`
+      + ` of ${SHEET_MAX_COLUMNS.toLocaleString()}`);
+  }
+  if (table.widest && table.widest.chars > CELL_MAX_CHARS) {
+    said.push(`${table.widest.column} is too long for one cell —`
+      + ` ${table.widest.chars.toLocaleString()} characters of ${CELL_MAX_CHARS.toLocaleString()}`);
+  }
+  return said;
+}
+
+/** The outcome, named: what comes out, how big, and that nothing else is required. */
+export function outcomeLine(out: {
+  tables: number;
+  rows: number;
+  format: 'xlsx' | 'csv';
+  problems: number;
+}): string {
+  if (out.problems) {
+    return `Not ready — ${out.problems} problem${out.problems === 1 ? '' : 's'} to fix, marked below.`;
+  }
+  const unit = out.format === 'csv' ? 'file' : 'sheet';
+  return `Ready — ${out.tables} ${unit}${out.tables === 1 ? '' : 's'},`
+    + ` ${out.rows.toLocaleString()} row${out.rows === 1 ? '' : 's'}.`
+    + ' Download, or change anything below.';
+}
+
+// What a spreadsheet app re-reads when it opens plain text: a long run of digits
+// becomes 1.23E+19, a leading zero disappears, and accented text depends on the
+// reader taking the file as UTF-8. These are read off the previewed cells, so
+// the warning names this document's columns rather than a general hazard list.
+const LONG_DIGITS = /^\d{16,}$/;
+const LEADING_ZERO = /^0\d+$/;
+const NON_ASCII = /[^\u0000-\u007f]/;
+
+/** What CSV costs *this* document, in one sentence, before the format is chosen. */
+export function csvCaution(tables: { columns: string[]; rows: readonly string[][] }[]): string {
+  const long = new Set<string>();
+  const zeros = new Set<string>();
+  const accented = new Set<string>();
+  for (const table of tables) {
+    for (const row of table.rows) {
+      for (let i = 0; i < row.length; i++) {
+        const column = table.columns[i];
+        const text = row[i];
+        if (!column || !text) continue;
+        if (LONG_DIGITS.test(text)) long.add(column);
+        else if (LEADING_ZERO.test(text)) zeros.add(column);
+        if (NON_ASCII.test(text)) accented.add(column);
+      }
+    }
+  }
+  const hazards: string[] = [];
+  if (long.size) hazards.push(`long numbers in ${nameList(long)}`);
+  if (zeros.size) hazards.push(`leading zeros in ${nameList(zeros)}`);
+  if (accented.size) hazards.push(`accented text in ${nameList(accented)}`);
+  if (!hazards.length) {
+    return 'CSV gives one file per table, and the spreadsheet app decides what every cell means as it opens them.';
+  }
+  return 'CSV is plain text, so the spreadsheet app decides what every cell means as it opens the file —'
+    + ` ${joinList(hazards)} can come back changed.`;
+}
+
 /** HTML date inputs use the user's local calendar day, not UTC. */
 export function dateInputValue(date: Date): string {
   const year = date.getFullYear();
@@ -210,6 +362,16 @@ export class ConvertView {
   private epoch = 0;
   private currentMappingId: string | null = null;
   private savedMappings: SavedMapping[] = [];
+  // The last answer the engine gave, kept because three things describe it: the
+  // outcome sentence, the preview note, and the CSV caution.
+  private lastPreview: PreviewResult | null = null;
+  private errors: SpecError[] = [];
+  // Where each column's problem line lives, so an error can be painted onto the
+  // rows without rebuilding them — a rebuild mid-preview takes the caret out of
+  // whatever field the user is still typing in.
+  private errorHosts = new Map<ColumnSpec, HTMLElement>();
+  private tableMetas = new Map<string, HTMLElement>();
+  private problemsHost: HTMLElement | null = null;
 
   constructor(
     private els: {
@@ -239,6 +401,10 @@ export class ConvertView {
       if (!b || !this.full) return;
       for (const x of this.els.format.querySelectorAll('button')) x.classList.toggle('on', x === b);
       this.full.output.format = b.dataset.fmt === 'csv' ? 'csv' : 'xlsx';
+      // Format is the one choice with a cost the user cannot see in the rows,
+      // so both lines that carry a cost are re-said the moment it changes.
+      this.renderOutcome();
+      this.renderPreviewNote();
     });
     this.els.missing.addEventListener('input', () => {
       if (!this.full) return;
@@ -261,6 +427,9 @@ export class ConvertView {
       void this.saveMapping();
     });
     this.els.forget.addEventListener('click', () => void this.forgetMapping());
+    document.getElementById('convert-mappings-btn')?.addEventListener('click', () => {
+      this.showMappingTools(!!document.getElementById('convert-mappings')?.hidden);
+    });
   }
 
   /** Fresh detection for the open document. Safe to call on every reveal. */
@@ -271,7 +440,15 @@ export class ConvertView {
     // document's preview while inspection is in flight.
     this.full = null;
     this.inspection = null;
-    this.els.count.textContent = 'looking…';
+    this.lastPreview = null;
+    this.errors = [];
+    this.errorHosts.clear();
+    this.tableMetas.clear();
+    this.problemsHost = null;
+    // A fresh document starts with the machinery folded away again, whatever
+    // the last one left open.
+    this.showMappingTools(false);
+    this.els.count.textContent = 'Looking through this document…';
     this.els.tables.replaceChildren();
     this.els.cols.replaceChildren();
     this.els.preview.replaceChildren();
@@ -328,7 +505,78 @@ export class ConvertView {
     this.els.addColumn.disabled = !this.full?.tables[this.selected];
     const convertible = !!this.effective()?.tables.length;
     this.els.spec.disabled = !convertible;
-    this.els.download.disabled = !convertible;
+    // A mapping the engine has already refused cannot produce a file, so the
+    // refusal is spent on the disabled button rather than on a toast after the
+    // click. The mapping itself stays downloadable — a broken one is exactly
+    // what someone wants to hand over when they are asking why it is broken.
+    this.els.download.disabled = !convertible || this.errors.length > 0;
+    this.renderOutcome();
+  }
+
+  /**
+   * The panel opens finished — mapping drafted, rows counted, download live —
+   * and then used to lead with a tally of what the detector found, which reads
+   * as a form waiting to be filled in. This says what the user is about to get,
+   * and that everything under it is optional.
+   */
+  private renderOutcome(): void {
+    const host = this.els.count;
+    if (!this.full) {
+      host.textContent = 'Looking through this document…';
+      return;
+    }
+    const effective = this.effective();
+    if (!effective?.tables.length) {
+      host.textContent = this.full.tables.length
+        ? 'Nothing is ticked, so there is nothing to download yet.'
+        : '';
+      return;
+    }
+    const format = this.full.output.format;
+    let text = outcomeLine({
+      tables: effective.tables.length,
+      rows: this.rowTotal(effective),
+      format,
+      problems: this.errors.length,
+    });
+    if (format === 'csv') text += ` ${csvCaution(this.previewedTables())}`;
+    host.textContent = text;
+  }
+
+  /**
+   * How many rows come out. The preview walks the whole document and counts the
+   * rows that survive it, which is exactly the number that lands in the file, so
+   * it wins wherever it exists; detection's count covers the moment before the
+   * first preview has come back.
+   */
+  private rowTotal(spec: ConvertSpec): number {
+    let total = 0;
+    for (const table of spec.tables) {
+      const previewed = this.lastPreview?.tables.find((item) => item.name === table.name);
+      if (previewed) {
+        total += previewed.total;
+        continue;
+      }
+      total += this.inspection?.tables.find((item) => item.anchor === table.anchor)?.rows ?? 0;
+    }
+    return total;
+  }
+
+  private previewedTables(): { columns: string[]; rows: readonly string[][] }[] {
+    return this.lastPreview?.tables.map((table) => ({ columns: table.columns, rows: table.rows })) ?? [];
+  }
+
+  /**
+   * Naming a mapping, reopening a saved one and bringing one in from a file are
+   * once-per-session work that stood in front of everyone who came here to get
+   * a spreadsheet once. The markup keeps them in a strip of their own; opening
+   * and closing it is behaviour, so it lives here.
+   */
+  private showMappingTools(open: boolean): void {
+    const strip = document.getElementById('convert-mappings');
+    const button = document.getElementById('convert-mappings-btn');
+    if (strip) strip.hidden = !open;
+    button?.setAttribute('aria-expanded', String(open));
   }
 
   private async refreshSavedMappings(selectId = this.currentMappingId): Promise<void> {
@@ -408,6 +656,9 @@ export class ConvertView {
       this.currentMappingId = saved.id;
       this.els.mappingName.value = saved.name;
       await this.refreshSavedMappings(saved.id);
+      // The list this landed in is normally folded away, so open it: a save
+      // whose result is hidden reads as a save that did not happen.
+      this.showMappingTools(true);
       this.cbs.toast('mapping saved in this browser');
     } catch (error) {
       this.cbs.toast(`mapping could not be saved: ${error instanceof Error ? error.message : String(error)}`, 'bad');
@@ -420,6 +671,7 @@ export class ConvertView {
       await this.cbs.removeMapping(this.currentMappingId);
       this.currentMappingId = null;
       await this.refreshSavedMappings(null);
+      this.showMappingTools(true);
       this.cbs.toast('saved mapping forgotten');
     } catch (error) {
       this.cbs.toast(`mapping could not be forgotten: ${error instanceof Error ? error.message : String(error)}`, 'bad');
@@ -439,6 +691,7 @@ export class ConvertView {
     }
     this.applyMapping(parsed as ConvertSpec, filename.replace(/\.json$/i, ''), null);
     this.els.saved.value = '';
+    this.showMappingTools(true);
   }
 
   /** Replace the selected table's output columns from a target CSV header row. */
@@ -467,8 +720,8 @@ export class ConvertView {
   private renderTables(): void {
     const host = this.els.tables;
     host.textContent = '';
+    this.tableMetas.clear();
     if (!this.full || !this.full.tables.length) {
-      this.els.count.textContent = '';
       host.append(this.cbs.emptyState(
         'No tables here',
         'This document has no repeating list of objects to flatten. Try a document with an array of objects in it.',
@@ -477,8 +730,6 @@ export class ConvertView {
       this.syncActions();
       return;
     }
-    const n = this.full.tables.length;
-    this.els.count.textContent = `${n} table${n === 1 ? '' : 's'} found`;
 
     this.full.tables.forEach((t, i) => {
       const row = el('div', 'convert-table' + (i === this.selected ? ' on' : ''));
@@ -505,6 +756,8 @@ export class ConvertView {
 
       const det = this.inspection?.tables.find((d) => d.anchor === t.anchor);
       const meta = el('span', 'convert-meta', det ? `${det.rows} row${det.rows === 1 ? '' : 's'}` : '');
+      meta.dataset.rows = meta.textContent ?? '';
+      this.tableMetas.set(t.name, meta);
       const where = el('div', 'convert-where', friendlyPath(t.anchor));
 
       const head = el('div', 'convert-table-head');
@@ -520,6 +773,7 @@ export class ConvertView {
       host.append(row);
     });
     this.syncActions();
+    this.paintErrors();
   }
 
   private renameTable(from: string, to: string): void {
@@ -548,6 +802,8 @@ export class ConvertView {
   private renderDetail(): void {
     const host = this.els.cols;
     host.textContent = '';
+    this.errorHosts.clear();
+    this.problemsHost = null;
     const t = this.full?.tables[this.selected];
     if (!t) {
       this.els.detailName.textContent = '';
@@ -562,6 +818,14 @@ export class ConvertView {
     // The strip says which table the columns below belong to, in the same
     // vocabulary the rail uses.
     this.cbs.setLead(friendlyPath(t.anchor));
+
+    // Problems that name no column of this table — the whole mapping's, or
+    // another table's — have nowhere else to be said, and an error the user
+    // cannot see is an error they fix by guessing.
+    this.problemsHost = el('div', 'convert-problems');
+    this.problemsHost.hidden = true;
+    this.problemsHost.setAttribute('role', 'alert');
+    host.append(this.problemsHost);
 
     // Rung 3 of the baseDate ladder made visible: where a time has no date to
     // borrow, the UI asks rather than quietly using the day of the conversion.
@@ -601,6 +865,63 @@ export class ConvertView {
       host.append(this.columnRow(t.name, c));
     }
     this.syncActions();
+    this.paintErrors();
+  }
+
+  /**
+   * Every error, on the row it names. The engine answers about the mapping it
+   * was given — the effective one, with unticked tables and columns already
+   * gone — so positions are read back through that, not through the full spec.
+   */
+  private paintErrors(): void {
+    const effective = this.effective();
+    const tables = effective?.tables ?? [];
+    const selected = this.full?.tables[this.selected];
+    const here = selected ? tables.findIndex((t) => t.name === selected.name) : -1;
+    const columns = here === -1 ? [] : tables[here].columns;
+
+    const byColumn = new Map<ColumnSpec, string[]>();
+    const elsewhere: string[] = [];
+    for (const error of this.errors) {
+      const line = error.hint ? `${error.message} — ${error.hint}` : error.message;
+      const target = errorTarget(error.at);
+      const column = target && target.column !== null ? columns[target.column] : undefined;
+      if (target && target.table === here && column) {
+        const list = byColumn.get(column) ?? [];
+        list.push(line);
+        byColumn.set(column, list);
+      } else {
+        const table = target ? tables[target.table] : undefined;
+        elsewhere.push(table ? `${table.name}: ${line}` : line);
+      }
+    }
+
+    for (const [column, host] of this.errorHosts) {
+      const list = byColumn.get(column) ?? [];
+      host.textContent = list.join(' · ');
+      host.title = list.join('\n');
+      host.hidden = list.length === 0;
+    }
+
+    if (this.problemsHost) {
+      this.problemsHost.replaceChildren(...elsewhere.map((line) => el('div', undefined, line)));
+      this.problemsHost.hidden = elsewhere.length === 0;
+    }
+
+    // The rail says which table to go to, because the column rows only ever
+    // show the table that is open.
+    const counts = new Map<string, number>();
+    for (const error of this.errors) {
+      const table = tables[errorTarget(error.at)?.table ?? -1];
+      if (table) counts.set(table.name, (counts.get(table.name) ?? 0) + 1);
+    }
+    for (const [name, meta] of this.tableMetas) {
+      const count = counts.get(name) ?? 0;
+      const rows = meta.dataset.rows ?? '';
+      const problems = count ? `${count} problem${count === 1 ? '' : 's'}` : '';
+      meta.textContent = [rows, problems].filter(Boolean).join(' · ');
+      meta.classList.toggle('bad', count > 0);
+    }
   }
 
   private columnRow(table: string, c: ColumnSpec): HTMLElement {
@@ -657,14 +978,31 @@ export class ConvertView {
     const listId = `convert-sources-${this.selected}-${Math.random().toString(36).slice(2)}`;
     list.id = listId;
     source.setAttribute('list', listId);
-    for (const candidate of this.sourceCandidates(table)) {
+    // A field is picked by looking at what is in it, not by reading its name and
+    // hoping. Detection already counted how often each one is filled and kept a
+    // few real values; the picker is where those belong.
+    const fields = this.sourceOptions(table);
+    for (const field of fields) {
       const option = el('option') as HTMLOptionElement;
-      option.value = candidate;
+      option.value = field.path;
+      if (field.hint) option.label = field.hint;
       list.append(option);
     }
+    // What the chosen field holds stays on the row after the list closes — the
+    // datalist disappears the moment it is used, and it was the thing telling
+    // the user they had picked the right field.
+    const hint = el('span', 'convert-col-fill');
+    const describe = (): void => {
+      const chosen = mode.value === 'constant'
+        ? undefined
+        : fields.find((field) => field.path === source.value.trim());
+      source.title = chosen?.hint ?? '';
+      hint.textContent = chosen?.short ?? '';
+    };
     source.addEventListener('input', () => {
       if (mode.value === 'constant') c.const = source.value;
       else c.from = source.value.trim();
+      describe();
       void this.refreshPreview();
     });
 
@@ -697,34 +1035,15 @@ export class ConvertView {
 
     row.append(chk, name, mode, source, list, up, down, remove);
     const options = this.columnOptions(c);
-    if (options) row.append(options);
+    options.prepend(hint);
+    describe();
+    row.append(options);
     if (this.offCols.has(key)) row.classList.add('off');
     return row;
   }
 
   private sourceCandidates(tableName: string): string[] {
-    const table = this.full?.tables.find((item) => item.name === tableName);
-    const detected = table && this.inspection?.tables.find((item) => item.anchor === table.anchor);
-    if (!detected || !this.inspection) return [];
-    const candidates: string[] = [];
-    const addFields = (source: DetectedTable, up: number) => {
-      const prefix = up ? `${'^'.repeat(up)}.` : '';
-      if (source.isMap) candidates.push(`${prefix}{key}`);
-      for (const field of source.fields) {
-        if (isScalarField(field)) candidates.push(`${prefix}${field.path}`);
-      }
-    };
-    addFields(detected, 0);
-    let parent = detected.parentAnchor
-      ? this.inspection.tables.find((item) => item.anchor === detected.parentAnchor)
-      : undefined;
-    for (let up = 1; parent && up <= 2; up++) {
-      addFields(parent, up);
-      parent = parent.parentAnchor
-        ? this.inspection.tables.find((item) => item.anchor === parent!.parentAnchor)
-        : undefined;
-    }
-    return [...new Set(candidates)];
+    return this.sourceOptions(tableName).map((option) => option.path);
   }
 
   private setColumnMode(c: ColumnSpec, mode: string, value: string): void {
@@ -765,8 +1084,14 @@ export class ConvertView {
     }
   }
 
-  private columnOptions(c: ColumnSpec): HTMLElement | null {
+  private columnOptions(c: ColumnSpec): HTMLElement {
     const host = el('div', 'convert-col-options');
+    // Claimed now and filled by paintErrors, so a problem can appear on this row
+    // without the row being rebuilt underneath whoever is typing in it.
+    const problem = el('span', 'convert-col-error');
+    problem.hidden = true;
+    this.errorHosts.set(c, problem);
+    host.append(problem);
     if (c.type === 'datetime') {
       host.append(this.optionSelect('read', c.parse ?? '', DATETIME_FORMATS, (value) => { c.parse = value; }));
       host.append(this.optionSelect('write', c.out ?? '', DATETIME_OUTPUTS, (value) => { c.out = value; }));
@@ -808,6 +1133,49 @@ export class ConvertView {
     skip.append(skipInput, document.createTextNode(' skip row'));
     host.append(missing, skip);
     return host;
+  }
+
+  /**
+   * Every field a column of this table could read, with what detection saw in
+   * it. Ancestor fields keep their `^` prefix — that is what the engine wants —
+   * but the hint beside them is what makes the choice, not the punctuation.
+   */
+  private sourceOptions(tableName: string): SourceOption[] {
+    const table = this.full?.tables.find((item) => item.name === tableName);
+    const detected = table && this.inspection?.tables.find((item) => item.anchor === table.anchor);
+    if (!detected || !this.inspection) return [];
+    const options: SourceOption[] = [];
+    const addFields = (source: DetectedTable, up: number): void => {
+      const prefix = up ? `${'^'.repeat(up)}.` : '';
+      const looked = Math.min(source.rows, SCAN_ROWS);
+      const sampled = source.rows > looked;
+      // The open list has room for three examples; the row the list closes onto
+      // shares its width with four controls, so it keeps one.
+      const add = (path: string, present: number, scanned: number, samples: string[]): void => {
+        options.push({
+          path,
+          hint: fieldHint(present, scanned, sampled, samples),
+          short: fieldHint(present, scanned, sampled, samples.slice(0, 1)),
+        });
+      };
+      if (source.isMap) add(`${prefix}{key}`, looked, looked, source.keySamples);
+      for (const field of source.fields) {
+        if (!isScalarField(field)) continue;
+        add(`${prefix}${field.path}`, field.present, Math.max(looked, field.present), field.samples);
+      }
+    };
+    addFields(detected, 0);
+    let parent = detected.parentAnchor
+      ? this.inspection.tables.find((item) => item.anchor === detected.parentAnchor)
+      : undefined;
+    for (let up = 1; parent && up <= 2; up++) {
+      addFields(parent, up);
+      parent = parent.parentAnchor
+        ? this.inspection.tables.find((item) => item.anchor === parent!.parentAnchor)
+        : undefined;
+    }
+    const seen = new Set<string>();
+    return options.filter((option) => !seen.has(option.path) && seen.add(option.path));
   }
 
   private optionSelect(
@@ -880,6 +1248,10 @@ export class ConvertView {
   private async doPreview(mine: number): Promise<void> {
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
+      this.errors = [];
+      this.lastPreview = null;
+      this.paintErrors();
+      this.syncActions();
       this.showPreviewNote('nothing selected');
       this.els.preview.replaceChildren(this.cbs.emptyState(
         'Nothing to preview',
@@ -898,6 +1270,7 @@ export class ConvertView {
       if (mine !== this.epoch) return;
       const message = error instanceof Error ? error.message : String(error);
       this.els.preview.textContent = '';
+      this.lastPreview = null;
       this.showPreviewNote(`preview failed: ${message}`, 'error');
       this.cbs.toast(`preview failed: ${message}`, 'bad');
       return;
@@ -906,26 +1279,69 @@ export class ConvertView {
 
     if ('errors' in res) {
       this.els.preview.textContent = '';
-      this.showPreviewNote(res.errors[0]?.message ?? 'this mapping is not valid', 'error');
+      this.errors = res.errors;
+      this.lastPreview = null;
+      // The note counts them; the rows below name them one by one. A mapping
+      // with four problems used to be fixed four round-trips at a time.
+      this.renderPreviewNote();
+      this.paintErrors();
+      this.syncActions();
       return;
     }
 
+    this.errors = [];
+    this.lastPreview = res;
+    this.paintErrors();
+    this.syncActions();
+    const name = this.full?.tables[this.selected]?.name;
+    const t = res.tables.find((x) => x.name === name) ?? res.tables[0];
+    this.renderPreviewNote();
+    if (!t) {
+      this.els.preview.textContent = '';
+      return;
+    }
+    this.renderGrid(t.columns, t.rows);
+  }
+
+  /**
+   * What this mapping will actually do to this document, before the click: how
+   * many rows, how many are dropped on the way, and anything the chosen output
+   * cannot hold.
+   */
+  private renderPreviewNote(): void {
+    if (this.errors.length) {
+      const n = this.errors.length;
+      this.showPreviewNote(`${n} problem${n === 1 ? '' : 's'} to fix, marked below`, 'error');
+      return;
+    }
+    const res = this.lastPreview;
+    if (!res) return;
     const name = this.full?.tables[this.selected]?.name;
     const t = res.tables.find((x) => x.name === name) ?? res.tables[0];
     if (!t) {
-      this.els.preview.textContent = '';
       this.showPreviewNote('this table is not included');
       return;
     }
-    const warn = res.warnings.filter((w) => w.table === t.name);
-    const warningCount = warn.reduce((total, item) => total + item.count, 0);
-    this.showPreviewNote(
-      `${t.total.toLocaleString()} row${t.total === 1 ? '' : 's'}`
-      + (warningCount
-        ? ` · ${warningCount.toLocaleString()} value${warningCount === 1 ? '' : 's'} need review`
-        : ''),
-    );
-    this.renderGrid(t.columns, t.rows);
+    const parts = [`${t.total.toLocaleString()} row${t.total === 1 ? '' : 's'}`];
+    // A dropped row is the one thing the preview cannot show, because what it
+    // shows is the rows that survived. Saying the number is the only way the
+    // user learns a skip-if-missing column is eating their document.
+    if (t.skipped) {
+      const dropped = t.skipped.toLocaleString();
+      parts.push(`${dropped} row${t.skipped === 1 ? '' : 's'} skipped`);
+    }
+    const warningCount = res.warnings
+      .filter((w) => w.table === t.name)
+      .reduce((total, item) => total + item.count, 0);
+    if (warningCount) {
+      parts.push(`${warningCount.toLocaleString()} value${warningCount === 1 ? '' : 's'} need review`);
+    }
+    // The ceilings are the spreadsheet's, so they are only a cost when a
+    // spreadsheet is what is being written. Saying them under CSV would warn
+    // about a limit the chosen output has no notion of.
+    const breaches = this.full?.output.format === 'xlsx' ? ceilingBreaches(t) : [];
+    parts.push(...breaches);
+    this.showPreviewNote(parts.join(' · '), breaches.length ? 'error' : '');
   }
 
   /** The preview's verdict, said twice: beside the rows it describes, and on the strip. */
@@ -935,7 +1351,11 @@ export class ConvertView {
     this.cbs.setNote(text, tone);
   }
 
-  private renderGrid(cols: string[], rows: string[][]): void {
+  // Rows are drawn from their text alone. The engine also knows what type each
+  // cell is, and that decides how a spreadsheet writes it — but on screen a
+  // string that looks like a number and a number are the same characters, so
+  // drawing them differently would invent a difference the file does not have.
+  private renderGrid(cols: string[], rows: readonly string[][]): void {
     const host = this.els.preview;
     host.textContent = '';
     const table = el('table', 'convert-grid');
@@ -976,7 +1396,16 @@ export class ConvertView {
     }
     const res = await this.cbs.run(spec);
     if ('errors' in res) {
-      this.cbs.toast(res.errors[0]?.message ?? 'this mapping is not valid', 'bad');
+      // The same treatment the preview's errors get: all of them, each on the
+      // column it names, rather than the first one in a toast that then leaves.
+      this.errors = res.errors;
+      this.paintErrors();
+      this.renderPreviewNote();
+      this.syncActions();
+      const n = res.errors.length;
+      this.cbs.toast(n
+        ? `${n} problem${n === 1 ? '' : 's'} to fix, marked on the columns`
+        : 'this mapping is not valid', 'bad');
       return;
     }
     const stem = this.cbs.docStem();
@@ -1026,5 +1455,10 @@ function warningLabel(warning: Warning): string {
     case 'BAD_GEO': return 'coordinate could not be read';
     case 'BAD_BASEDATE': return 'base date could not be read; today was used';
     case 'DUP_PARENT_KEY': return 'parent key was not unique';
+    // The three below are the destination's limits rather than the data's, so
+    // they say what the spreadsheet will do rather than what went wrong here.
+    case 'CELL_TOO_LONG': return 'too long for a spreadsheet cell; Excel will shorten it on open';
+    case 'TOO_MANY_ROWS': return 'more rows than a spreadsheet holds; Excel will stop at its limit';
+    case 'TOO_MANY_COLUMNS': return 'more columns than a spreadsheet holds; Excel will stop at its limit';
   }
 }

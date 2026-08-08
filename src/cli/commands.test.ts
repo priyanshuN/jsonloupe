@@ -82,6 +82,8 @@ describe('convert', () => {
     // anchors have nothing to match — proof the flag reached the reader. An
     // invalid spec exits 2, distinct from 1's "you held the CLI wrong".
     expect(await run(['convert', doc, '--spec', spec, '--format', 'csv'])).toBe(2);
-    expect(err.join('\n')).toContain('matches no collection');
+    // Asserting the anchor is named rather than the sentence around it: the
+    // wording is user-facing copy and free to improve, the path is the evidence.
+    expect(err.join('\n')).toContain('$.orders[]');
   });
 });

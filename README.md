@@ -23,9 +23,11 @@
 </p>
 
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
-querying JSON documents that are too big or too precise for ordinary viewers.
-Everything runs in your browser: documents are parsed in a web worker, stored in
-IndexedDB, and never uploaded anywhere. No backend, no account, no telemetry.
+querying JSON documents that are too big or too precise for ordinary viewers —
+and for turning them into spreadsheets: nested JSON goes in, linked tables come
+out, as one `.xlsx` or a zip of CSVs. Everything runs in your browser: documents
+are parsed in a web worker, stored in IndexedDB, and never uploaded anywhere. No
+backend, no account, no telemetry.
 
 ## Run it
 
@@ -53,6 +55,11 @@ auditable server in [bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and
   the worker, and opened as a document with a transformation trace. An encoder
   and a transport-size inspector (exact UTF-8 / Zstd / Base64 / envelope bytes
   against editable budgets) round-trip the other way.
+- **Nested JSON becomes a spreadsheet, on your machine.** Repeating arrays and
+  object maps become their own linked tables — `orders` and `order_items` joined
+  by `order_id`, never `items/0/sku` columns. You see real rows before anything
+  is written, and the mapping saves as a small file that produces the same
+  columns from next month's file, with no model involved.
 - **Semantic diff.** Side-by-side compare with identity-based array alignment
   (match by `id`, composite keys, or auto-detected), so reordered arrays don't
   drown you in false changes. Ignore noisy fields by key or path prefix.
@@ -87,10 +94,10 @@ flagged, with the original bytes preserved.
   weight on collapsed containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
-- **JSON → Excel / CSV converter** — repeating arrays and object maps become
-  linked tables, with real-row preview before download. Rename/reorder columns,
-  choose source fields and date/geo handling, import target CSV headers, and
-  save or share the deterministic mapping spec for the next file.
+- **JSON → Excel / CSV converter** — rename and reorder columns, choose source
+  fields, add constants, set date and coordinate handling, take the column names
+  from a target CSV header, and save or share the mapping for the next file.
+  ([below](#nested-json-to-linked-tables).)
 - **File handles** — drop `.json`/`.jsonl`/`.zst` files; reload re-reads from
   disk and shows what changed since the version you were looking at.
 - **Ask (optional, off by default)** — type an English question and it's
@@ -100,22 +107,50 @@ flagged, with the original bytes preserved.
   the page makes zero network requests. A disclosure panel shows exactly what
   would be sent. See [SECURITY.md](SECURITY.md).
 
-## Convert repeatable payloads
+## Nested JSON to linked tables
 
-Open a document and choose **convert**. jsonloupe detects candidate tables but
-does not run the guess blindly: the mapping and real-row preview stay visible
-while you edit them. Mappings can be kept in this browser, exported/imported as
-JSON, or drafted and executed headlessly:
+If a spreadsheet is the only thing you came for,
+[jsonloupe.dev/json-to-excel.html](https://jsonloupe.dev/json-to-excel.html) is
+that job on a page of its own: paste, convert, done.
+
+Open a document and choose **convert**. Every repeating array becomes its own
+table, joined back to its parent by the id that was already in the data — so
+this:
+
+```json
+{ "orders": [
+    { "id": 7, "cust": "ACME",
+      "items": [ { "sku": "A", "qty": 2 }, { "sku": "B", "qty": 1 } ] } ] }
+```
+
+comes out as two sheets rather than one row full of `items/0/sku` columns:
+
+```
+orders                    order_items
+id  cust                  order_id  sku  qty
+ 7  ACME                         7  A      2
+                                 7  B      1
+```
+
+jsonloupe finds those tables for you but never runs the guess blindly: the
+mapping and a preview of real rows stay on screen while you rename columns,
+choose which fields to keep, and say how dates and coordinates should be read.
+What you approve is saved as a small mapping file — keep it in this browser,
+export it, or use it from the command line:
 
 ```bash
-jsonloupe inspect payload.json
-jsonloupe draft payload.json -o payload.spec.json
+jsonloupe inspect payload.json          # what tables are in here?
+jsonloupe draft   payload.json -o payload.spec.json   # a first mapping, to read
 jsonloupe convert payload.json --spec payload.spec.json -o payload.xlsx
 ```
 
-One frozen spec produces the same columns through the browser, CLI, and MCP
-server. Excel limits and unreadable typed values fail or report explicitly;
-int64 identifiers remain text rather than being rounded by spreadsheet cells.
+The same mapping produces the same columns through the browser, the CLI, and the
+MCP server, with no model in the loop — that is the point of freezing it. What
+lands in the cells is what was in the document: dates arrive as real dates you
+can sort and subtract, numbers and coordinates as numbers, and text that only
+looks numeric stays text, so `"1.10"` keeps its trailing zero and an int64 id
+keeps every digit instead of being rounded. Excel's limits and values a column
+cannot read are reported or refused, never quietly written wrong.
 
 ## Use with AI agents
 
@@ -210,7 +245,9 @@ npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB
 npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
 ```
 
-Design and internals are documented in [SPEC.md](SPEC.md).
+Design and internals are documented in [SPEC.md](SPEC.md); the converter has its
+own [SPEC-converter.md](SPEC-converter.md), including what it deliberately
+refuses to do.
 
 ## License
 

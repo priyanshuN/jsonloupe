@@ -10,6 +10,15 @@ import { stringify as llStringify, isLosslessNumber } from 'lossless-json';
 // (and never truncate silently: a half CSV is worse than none).
 export const CSV_CAP = 50_000_000;
 
+// The byte-order mark, which is the only encoding signal a CSV file can carry.
+// The converter delivers its CSVs inside a zip, and a zip entry has no MIME
+// type and no charset field, so without this Excel on Windows falls back to the
+// system codepage and Müller opens as MÃ¼ller. It belongs to the delivered file,
+// not to the serializer: the viewer's own CSV export is a separate decision
+// about a separate file, and adding a marker to text on its way to a clipboard
+// or a pipe would show up as stray characters.
+export const UTF8_BOM = '\uFEFF';
+
 // A CSV cell: LosslessNumber → exact digit string (unfloated), null/undefined →
 // empty, nested object/array → its JSON (llStringify) folded into one cell,
 // everything else (string/number/boolean) stringified as-is.

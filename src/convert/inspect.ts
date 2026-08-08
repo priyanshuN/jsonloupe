@@ -231,9 +231,20 @@ function kindOf(v: unknown): Kind {
 
 const AGREE = 0.9;
 
+// ISO 8601 with its `T` gets its own entries rather than sharing the spaced
+// ones: the parse spec is a literal match, so a format written with a space
+// cannot read a `T`, and offering one produced a column the engine then refused
+// — which is why the commonest date shape in JSON used to arrive as text.
+//
+// A trailing `Z` or `+05:30` still stays text, and deliberately: reading one
+// correctly means converting it, and §2 rules out timezone math for v1. The
+// anchors below are what enforce that — widen them and the tool starts silently
+// dropping an offset it never accounted for.
 const DATE_PATTERNS: { re: RegExp; parse: string }[] = [
-  { re: /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}:\d{2}/, parse: 'yyyy-MM-dd HH:mm:ss' },
-  { re: /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}$/, parse: 'yyyy-MM-dd HH:mm' },
+  { re: /^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}:\d{2}$/, parse: 'yyyy-MM-ddTHH:mm:ss' },
+  { re: /^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}$/, parse: 'yyyy-MM-ddTHH:mm' },
+  { re: /^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}:\d{2}$/, parse: 'yyyy-MM-dd HH:mm:ss' },
+  { re: /^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$/, parse: 'yyyy-MM-dd HH:mm' },
   { re: /^\d{4}-\d{2}-\d{2}$/, parse: 'yyyy-MM-dd' },
   { re: /^\d{1,2}:\d{2}:\d{2}$/, parse: 'HH:mm:ss' },
   { re: /^\d{1,2}:\d{2}$/, parse: 'HH:mm' },
@@ -288,8 +299,12 @@ function suggestFor(path: string, rows: Record<string, unknown>[], samples: stri
   }
 
   // String datetime forms.
+  // Keep trying on a shape that matches but will not parse, rather than giving
+  // up: two entries can claim the same value, and only one of them executes.
   for (const { re, parse } of DATE_PATTERNS) {
-    if (agreement(samples, (s) => re.test(s)) >= AGREE) return propose(samples, parse, 'yyyy-MM-dd HH:mm:ss');
+    if (agreement(samples, (s) => re.test(s)) < AGREE) continue;
+    const proposed = propose(samples, parse, 'yyyy-MM-dd HH:mm:ss');
+    if (proposed) return proposed;
   }
 
   // dd/MM vs MM/dd — decided by evidence, or not at all (§8.3).

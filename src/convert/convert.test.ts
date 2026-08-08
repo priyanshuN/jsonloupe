@@ -394,6 +394,21 @@ describe('detection', () => {
     });
   });
 
+  it('reads ISO 8601 with its T, and still refuses one carrying an offset', () => {
+    // The commonest date shape in a JSON payload. It used to match the sniffer's
+    // regex and then fail the parse, because the format offered was written with
+    // a space — so the column arrived in the spreadsheet as text.
+    const iso = inspect({ doc: { rows: [{ at: '2026-08-01T09:00:00' }, { at: '2026-08-02T10:30:00' }] } });
+    expect(iso.tables[0].fields[0].suggest).toMatchObject({ parse: 'yyyy-MM-ddTHH:mm:ss', needsBaseDate: false });
+
+    // A trailing Z or +05:30 means the value is only correct once converted, and
+    // §2 rules out timezone math — so it stays the literal string it came in as.
+    for (const at of ['2026-08-01T09:00:00Z', '2026-08-01T09:00:00+05:30']) {
+      const zoned = inspect({ doc: { rows: [{ at }, { at }] } });
+      expect(zoned.tables[0].fields[0].suggest, at).toBeUndefined();
+    }
+  });
+
   it('infers minutes-of-day only with real evidence', () => {
     const good = inspect({ doc: { rows: [{ startTime: 540 }, { startTime: 1080 }] } });
     expect(good.tables[0].fields[0].suggest).toMatchObject({ parse: 'minutesOfDay' });
@@ -527,10 +542,15 @@ describe('exact digits survive the conversion', () => {
 // ---------------------------------------------------------------------- xlsx
 
 describe('xlsx output', () => {
+  // The writer works in typed cells, so a fixture has to say what the document
+  // said — which of these Excel can actually hold is still the writer's call.
+  const num = (text: string) => ({ text, kind: 'number' as const });
+  const str = (text: string) => ({ text, kind: 'text' as const });
+
   it('writes one sheet per table, with a readable zip container', () => {
     const bytes = buildXlsx([
-      { name: 'orders', columns: ['id'], rows: [['7']] },
-      { name: 'order_items', columns: ['order_id', 'sku'], rows: [['7', 'A']] },
+      { name: 'orders', columns: ['id'], rows: [[num('7')]] },
+      { name: 'order_items', columns: ['order_id', 'sku'], rows: [[num('7'), str('A')]] },
     ]);
     expect(bytes[0]).toBe(0x50); // 'P'
     expect(bytes[1]).toBe(0x4b); // 'K'
@@ -544,13 +564,13 @@ describe('xlsx output', () => {
   });
 
   it('keeps an int64 as text so Excel cannot round it', () => {
-    const text = new TextDecoder().decode(buildXlsx([{ name: 's', columns: ['id'], rows: [['9007199254740993'], ['42']] }]));
+    const text = new TextDecoder().decode(buildXlsx([{ name: 's', columns: ['id'], rows: [[num('9007199254740993')], [num('42')]] }]));
     expect(text).toContain('<is><t xml:space="preserve">9007199254740993</t></is>');
     expect(text).toContain('<v>42</v>');
   });
 
   it('escapes markup and sanitizes an illegal sheet name', () => {
-    const text = new TextDecoder().decode(buildXlsx([{ name: 'a/b:c', columns: ['x'], rows: [['<&>']] }]));
+    const text = new TextDecoder().decode(buildXlsx([{ name: 'a/b:c', columns: ['x'], rows: [[str('<&>')]] }]));
     expect(text).toContain('name="a_b_c"');
     expect(text).toContain('&lt;&amp;&gt;');
   });

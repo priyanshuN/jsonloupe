@@ -1,7 +1,8 @@
 # jsonloupe Converter — Specification
 
 **Status:** v1 implemented · design frozen 2026-08-02 · engine, sinks and CLI landed
-2026-08-03 · full mapping UI, persistence and MCP landed 2026-08-08 · **Branch:** `converter`
+2026-08-03 · full mapping UI, persistence and MCP landed 2026-08-08 · output-correctness pass
+(§11.1–§11.5) same day · **Branch:** `converter`
 
 Companion to [SPEC.md](SPEC.md). That document specifies the *viewer*; this one specifies the
 **converter addon** — a visual schema-mapper that turns nested JSON into flat tables a non-developer
@@ -55,6 +56,15 @@ The only piece needing genuine hand-design is the spec format, which is §4.
   cross-field expressions. Anything reaching for those is jq/JSONata territory and drags the tool
   developer-ward, away from the user it exists for. The escape hatch is §10.3, and it is v2.
 - **No JSON → JSON.** Reshaping JSON *is* transformation. Parked.
+- **No pivoting an attribute array into columns.** `custom_fields: [{"field": "colour", "value":
+  "red"}, …]` stays a table of field/value rows; it does not become one column per field name. The
+  refusal is not because a pivot is an expression — it is that the column list would have to be
+  *discovered from the data* and then frozen into the spec. Next month's file carries a new key, and
+  the frozen mapping either drops it silently or stops matching the spec the user approved. Either
+  way the promise that a saved mapping re-runs identically is gone, and determinism is the one
+  property this tool cannot trade (§1). It is the same objection as `items_0_sku` in §3.1: a shape
+  read out of one sample is a shape that breaks on the next one. Stating it here because its absence
+  otherwise reads as an oversight; it is a decision.
 - **No timezone math.** v1 datetimes are naive: what the string says is what comes out. Timezone
   conversion is v2, and it will be explicit (`fromTz`/`toTz`) or absent.
 - **No joins across files**, no multi-document merge, no incremental/append conversion.
@@ -652,12 +662,148 @@ two code paths and an async seam through the sink. A store-only zip is a valid x
 the §7 example writes a 3.1 KB workbook that `unzip -t` reports clean and LibreOffice opens with
 every cell intact.
 
-**Numbers stay text past 15 digits.** A cell is written as a real numeric cell only when its value
-fits a double exactly; an int64 id — the case this tool exists for — is written as an inline string,
-because Excel would round it and the digits are the whole point.
-
 Formula-injection escaping follows the viewer's existing CSV rule, including the numeric-literal
 exemption that protects exact int64 digits.
+
+### 11.1 A cell carries its type from the document, not from its text
+
+The engine handed the sinks rows of plain strings, and the xlsx writer decided each cell's type by
+looking at that string: anything matching a plain-number pattern became a numeric cell. A string
+cannot answer the question being asked of it. `1.10` the JSON number and `"1.10"` the JSON string
+arrive as the same four characters, and the writer chose *number* for both — so `"1.10"` opened as
+`1.1`, `"007"` as `7`, and a digit-only SKU or postcode became right-aligned arithmetic. A tool
+whose first promise is losslessness was breaking that promise on its most common path.
+
+A row is therefore no longer `string[]`. Each cell carries its text plus one of three kinds, decided
+where the value is read rather than where it is written:
+
+| kind | the value was | xlsx writes | CSV writes |
+|---|---|---|---|
+| `number` | a JSON **number** that a double holds exactly | a numeric cell | the text |
+| `datetime` | written out as a date or time by this column's `out` format (§5.1) | a date cell (§11.2) | the text |
+| `text` | everything else — including a **string** that looks numeric | an inline string | the text |
+
+**The text is identical in every case.** This adds type information; it reformats nothing. CSV
+ignores the kind outright, because a CSV has no cell types to put it in — which is also why CSV
+output is unchanged by all of this except for the byte-order mark in §11.4.
+
+**A string in is a string out.** `"1.10"` keeps its trailing zero, `"007"` its leading zeros. The
+inverse rule is unchanged and still load-bearing: a JSON number past 15 significant digits — an
+int64 id, the case this tool exists for — is written as text anyway, because a spreadsheet holds
+cell numbers as doubles and would round it, and the digits are the whole point. "Was it a number?"
+and "can a double hold it?" are two separate questions, and a cell is numeric only when both answer
+yes.
+
+Three cells are decided by where they came from rather than by what they look like, and each falls
+out of the same principle:
+
+- **A coordinate is a number**, whatever it arrived as. `geo` columns often read out of a string
+  (`"12.97, 77.59"`), but what the parse layer produces is a latitude — and a latitude stored as
+  text cannot be sorted, averaged or plotted in the spreadsheet it is on its way to. The value being
+  written is the parser's, not the document's, so the document's spelling does not govern it.
+- **An epoch output is a count, not a date.** `HH:mm` → `minutesOfDay` yields `1800`, a duration
+  (§5.1). Tagging that as a datetime would invite the spreadsheet to render it as an afternoon in
+  1905, so it is a plain number.
+- **A constant is text**, even when the user typed digits. It is a value from the mapping, not from
+  the document, and nothing about a fixed column value asks to be arithmetic. The same goes for the
+  string that fills a missing value.
+
+### 11.2 Datetime columns become real date cells
+
+A formatted timestamp written as a string sorts alphabetically, cannot be subtracted from another
+one, and cannot be re-formatted by the person who opened the file — which is most of what they
+wanted a spreadsheet for. So what a datetime column writes out as a date or a time is written as a
+date cell.
+
+This is safe here for a reason specific to this tool. A spreadsheet date cell is a number plus a
+display format: the serial counts days from 1899-12-30, and the fraction is the time of day. That
+serial is **naive** — it names a wall-clock instant with no zone attached and no
+conversion applied when the file is opened somewhere else. Which is exactly the rule §2 and §5.1
+already impose on every datetime in this format. Writing a serial therefore adds no timezone meaning
+the value did not already have: `09:00` in produces a cell reading 09:00 on every machine that opens
+it. The spreadsheet's model and this tool's model agree on the one point where disagreeing would be
+silent and wrong, and that agreement — not convenience — is what licenses the date cell.
+
+**The decision is per column, not per cell.** A column becomes dates only when every datetime value
+in it is one the writer can place beyond doubt; otherwise the whole column keeps its text. A column
+that sorts correctly for four rows in five is worse than one that never claimed to sort at all — the
+user has no way to see which rows lied. Four things force a column back to text, and each is a case
+where the finished text does not carry enough to be certain:
+
+- **An ambiguous day and month.** Nothing in `03/08/2026` says which number is the day, and choosing
+  wrong stores a date five months from the one on screen — invisibly, because the display format
+  then prints the original digits straight back. One value in the column with a component past 12
+  settles it for the column; with none, the text stays.
+- **A layout that varies down the column.** One format code covers a whole column, so mixed layouts
+  have no single code that is honest about all of them.
+- **Dates before 1900-03-01.** Excel's serial calendar contains a deliberate non-existent
+  1900-02-29, so its days and real days disagree below that point. The dates on the far side of that
+  disagreement stay text rather than land one day out.
+- **The overnight convention.** A bare `30:00` with no date to absorb its day offset means 6am
+  tomorrow (§5.1), and there is no serial for it. A serial has nowhere to keep that distinction, so
+  the string keeps it.
+
+The display format is derived from the text the column already produced, separators included, so the
+`out` format the user chose in the mapping is the format they see in the cell. The separators are
+escaped in the format code deliberately: an unescaped `/` in an Excel date code means *the reading
+machine's* date separator, which would quietly re-punctuate the user's chosen format for anyone who
+opened the file in another country.
+
+### 11.3 Sheet names collide case-insensitively
+
+Excel treats `Orders` and `orders` as the same sheet name. A workbook containing both is not a
+workbook it opens — it is one it offers to *repair*, and to the person this tool is for, a repair
+dialog is indistinguishable from the tool being broken.
+
+Everywhere table names are checked for uniqueness, they are therefore compared **without their
+capitals**, while the name the user sees keeps the case their own document used. Validation is the
+first of those places and the one that matters: a mapping with two tables whose names differ only in
+case is refused up front, naming both, rather than converting happily and failing at the moment the
+file is opened. That is §4.4 applied to a constraint that belongs to the *output* format rather than
+to the spec grammar — the doctrine does not change when the thing being refused is a workbook.
+
+This is not exotic input. Table naming takes the leaf name and prefixes the parent only on an exact
+collision (§13.1), so `Items` under one parent and `items` under another are two different names by
+that rule and would otherwise travel all the way to the writer.
+
+The writer keeps the same comparison for the names it has to invent, because it is also the place
+where two *different* names can become one: sheet names are cut to 31 characters, so two long table
+names sharing a prefix arrive identical. It applies Excel's other naming rules there too — the
+forbidden `[]:*?/\`, a leading or trailing apostrophe, and `History`, which Excel reserves for
+itself.
+
+### 11.4 The CSVs carry a UTF-8 byte-order mark
+
+Excel on Windows opens a double-clicked `.csv` in the system's legacy codepage unless the file
+starts with a BOM, which turns every accented name, currency symbol and CJK character into mojibake.
+The zip is what forces the decision. A CSV the user opens deliberately can still be brought in
+through Excel's import dialog, where the encoding is a dropdown they can fix; a CSV *extracted from a
+zip* and double-clicked never sees that dialog. Since one download beats one prompt per table, a zip
+is how this output travels — so each file inside it has to declare its own encoding. The same mark
+goes on a single-table conversion that comes out unwrapped, and on the files the CLI writes into a
+directory: they are double-clicked in exactly the same way, and an encoding rule that depended on how
+the file was delivered would be a rule nobody could keep in their head.
+
+The mark belongs to the delivered file, not to the CSV serializer. The viewer's own CSV export is a
+separate decision about a separate file, and text on its way to a clipboard or a pipe would carry the
+mark as stray characters. It is also the *only* change to the converter's CSV bytes: the serializer,
+the RFC 4180 quoting and the formula-injection rule are untouched, and the mark is not part of any
+cell.
+
+### 11.5 The workbook refuses; the CSV warns
+
+Excel's shape limits — 1,048,576 rows, 16,384 columns, 32,767 characters in a cell — are measured
+the same way for both outputs and answered differently, because the *consequence* of exceeding them
+differs. An xlsx that goes past them is a file Excel repairs or refuses, so the run stops and hands
+back nothing — the promise §9.4 makes about validation, kept at the writing end too. A CSV that goes
+past them is still a perfectly good file for a database loader or a script, and refusing it would
+punish that user for a spreadsheet's ceiling — but Excel *shortens* an over-long cell on import
+behind a notice nobody reads, so the run reports what it went past, once per table and kind with a
+count, rather than staying quiet.
+
+That is the same doctrine (§4.4), not an exception to it: the thing that must never happen is silent
+loss. Refusal is how you avoid it when the file itself would be broken, and a warning is how you
+avoid it when the file is fine and only one reader of it is lossy.
 
 ---
 
