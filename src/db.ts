@@ -364,6 +364,12 @@ export interface SavedScript {
   createdAt: number;
   updatedAt: number;
   uses: number;
+  /**
+   * The document paths this script was seen to read, learned from its first
+   * traced run (run-exec.ts). ABSENT means not learned yet — never "reads
+   * nothing" — so every reader of this field has to tell the two apart.
+   */
+  reads?: string[];
 }
 
 type SavedRecord = SavedQuery | SavedScript;
@@ -444,7 +450,9 @@ export async function saveScript(name: string, script: string): Promise<SavedScr
 // than silently writing a resurrected copy.
 export async function updateScript(
   id: string,
-  patch: { name?: string; script?: string },
+  // `reads: null` CLEARS what the script was seen to read — the caller edited
+  // its code, so the old reading describes a function that no longer exists.
+  patch: { name?: string; script?: string; reads?: string[] | null },
 ): Promise<SavedScript | null> {
   const all = await listScripts();
   const current = all.find((s) => s.id === id);
@@ -453,6 +461,7 @@ export async function updateScript(
     ...current,
     name: patch.name?.trim() || current.name,
     script: patch.script ?? current.script,
+    reads: patch.reads === null ? undefined : patch.reads ?? current.reads,
     updatedAt: Date.now(),
   };
   await putSaved(rec, all, true);

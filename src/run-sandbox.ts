@@ -31,8 +31,8 @@ if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessag
   (self as unknown as Worker).onmessage = (e: MessageEvent) => {
     // A dedicated worker only hears from the page that spawned it; there is no
     // origin to check. Shape-check instead so a malformed message is inert.
-    const d = e.data as { docText?: unknown; code?: unknown } | null;
+    const d = e.data as { docText?: unknown; code?: unknown; trace?: unknown } | null;
     if (!d || typeof d.docText !== 'string' || typeof d.code !== 'string') return;
-    post(executeUserCode(d.docText, d.code));
+    post(executeUserCode(d.docText, d.code, d.trace === true));
   };
 }

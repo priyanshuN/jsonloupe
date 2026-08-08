@@ -117,3 +117,56 @@ describe('executeUserCode', () => {
     expect(JSON.parse(res.resultText)).toHaveLength(300_000);
   });
 });
+
+// What a script READS, learned by running it — the reading run mode checks a
+// new document against before pressing a saved function over it.
+describe('executeUserCode · trace', () => {
+  it('says nothing about reads unless it was asked', () => {
+    const res = expectOk(executeUserCode(DOC, 'data.tasks.length'));
+    // Absent, NOT empty: "never traced" and "reads nothing" are different facts.
+    expect(res.reads).toBeUndefined();
+  });
+
+  it('records the paths a script touched', () => {
+    const res = expectOk(
+      executeUserCode(DOC, 'data.tasks.filter(t => t.status === "FAILED")', true),
+    );
+    expect(res.reads).toEqual(['tasks', 'tasks[].status']);
+  });
+
+  it('collapses every element of an array onto one path', () => {
+    const res = expectOk(executeUserCode(DOC, 'data.tasks.map(t => t.id)', true));
+    expect(res.reads).toEqual(['tasks', 'tasks[].id']);
+  });
+
+  it('records nothing for a script that never reads the document', () => {
+    const res = expectOk(executeUserCode(DOC, '1 + 1', true));
+    expect(res.reads).toEqual([]);
+  });
+
+  it('leaves the result identical to an untraced run', () => {
+    const code = 'data.tasks.filter(t => t.status === "FAILED").map(t => t.id)';
+    expect(expectOk(executeUserCode(DOC, code, true)).resultText)
+      .toBe(expectOk(executeUserCode(DOC, code)).resultText);
+  });
+
+  it('keeps array methods working through the recorder', () => {
+    // The methods arrive through the same trap as data; handing them back
+    // unbound would break `this` and take every script with it.
+    const res = expectOk(executeUserCode(DOC, 'data.tasks.map(t => t.id).join("-")', true));
+    expect(res.resultText).toBe('"1-2-3"');
+  });
+
+  it('learns what a script FOUND, not what it groped for', () => {
+    // `jobs` is absent here, so recording it would teach this function to
+    // demand it of every future document and report a mismatch forever.
+    const res = expectOk(executeUserCode(DOC, 'data.jobs ?? data.tasks', true));
+    expect(res.reads).toContain('tasks');
+    expect(res.reads).not.toContain('jobs');
+  });
+
+  it('records no machinery — a result on its way out is probed for toJSON', () => {
+    const res = expectOk(executeUserCode(DOC, 'data.tasks', true));
+    expect(res.reads?.some((p) => p.includes('toJSON'))).toBe(false);
+  });
+});

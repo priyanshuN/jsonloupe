@@ -4028,6 +4028,7 @@ const runStatus = $('#run-status');
 const runErrorEl = $('#run-error');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
+const runFitEl = $('#run-fit');
 const runHead = $('.run-head');
 const runNameEl = $('#run-name');
 const runNameInput = $<HTMLInputElement>('#run-name-input');
@@ -4080,6 +4081,12 @@ let runPendingLoadId: string | null = null;
 let runStaleWanted = false;
 /** Whether the library is long enough to be worth a search field (see below). */
 let runLibSearchWanted = false;
+/**
+ * The paths the loaded function was seen to read. `undefined` means it has
+ * never been traced — which is not "reads nothing", so the fit line stays quiet
+ * rather than claiming the document is wrong.
+ */
+let runLoadedReads: string[] | undefined;
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4191,10 +4198,14 @@ function setRunFace(face: 'functions' | 'result'): void {
 }
 
 // Rule 18's left edge: the row whose function is loaded is the selected one.
-function renderLibraryRow(rec: SavedScript): HTMLElement {
+function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
   const row = document.createElement('div');
   row.className = 'run-lib-row';
   row.classList.toggle('selected', rec.id === runLoadedId);
+  // Only a function that has been traced can be said to fit or not; one that
+  // never ran here says nothing either way.
+  const misfit = (rec.reads ?? []).filter((p) => missing.has(p));
+  row.classList.toggle('misfit', misfit.length > 0);
   row.dataset.id = rec.id;
 
   const open = document.createElement('button');
@@ -4213,7 +4224,15 @@ function renderLibraryRow(rec: SavedScript): HTMLElement {
 
   const meta = document.createElement('span');
   meta.className = 'run-lib-meta';
-  meta.textContent = relTime(rec.updatedAt);
+  // What the row's time slot is for is the more useful fact when there is one:
+  // that this function reads something the open document does not have.
+  if (misfit.length > 0) {
+    meta.classList.add('misfit-note');
+    meta.textContent = `reads ${fmtPaths(misfit)}`;
+    meta.title = `This document has no ${misfit.join(', ')}`;
+  } else {
+    meta.textContent = relTime(rec.updatedAt);
+  }
 
   const del = document.createElement('button');
   del.type = 'button';
@@ -4247,7 +4266,11 @@ async function renderLibrary(): Promise<void> {
     );
     return;
   }
-  runLibList.replaceChildren(...shown.map(renderLibraryRow));
+  // One question for the whole list rather than one per row: the union of every
+  // path any function reads, asked of the document once.
+  const union = [...new Set(shown.flatMap((s) => s.reads ?? []))];
+  const missing = new Set(await missingPaths(union));
+  runLibList.replaceChildren(...shown.map((s) => renderLibraryRow(s, missing)));
 }
 
 /** Has the editor drifted from the record it was loaded from? */
@@ -4282,14 +4305,55 @@ function setAuthoring(on: boolean): void {
   if (on) runEditor?.focus();
 }
 
+// ---------- what a function reads, against what this document has ----------
+//
+// A function outlives the documents it runs over, so one day it meets a file
+// whose orders are called something else and answers `[]` — which reads exactly
+// like "none today". run-exec.ts learns the paths a script touched on its first
+// run; the worker answers whether the open document has them (`hasPaths`); this
+// says so, in the head, BEFORE the run rather than after a plausible result.
+//
+// It is a remark, never a gate: the reading comes from one run over one
+// document, so a script that branches recorded only the branch it took. The
+// wording is about the SCRIPT for that reason — "this reads `orders`" — and the
+// run button is never disabled.
+
+/** How many missing paths are worth naming before the line is just noise. */
+const FIT_NAMED_MAX = 2;
+
+function fmtPaths(paths: string[]): string {
+  const named = paths.slice(0, FIT_NAMED_MAX).map((p) => `\`${p}\``).join(', ');
+  const rest = paths.length - FIT_NAMED_MAX;
+  return rest > 0 ? `${named} and ${fmtNumber(rest)} more` : named;
+}
+
+async function missingPaths(paths: string[]): Promise<string[]> {
+  if (paths.length === 0 || !currentText) return [];
+  const r = await call<{ missing: string[] }>({ type: 'hasPaths', paths });
+  return r?.missing ?? [];
+}
+
+async function paintRunFit(): Promise<void> {
+  const reads = runLoadedReads;
+  if (!reads || reads.length === 0 || !currentText) {
+    runFitEl.hidden = true;
+    return;
+  }
+  const missing = await missingPaths(reads);
+  runFitEl.hidden = missing.length === 0;
+  runFitEl.textContent = `this reads ${fmtPaths(missing)} — this document has none of that`;
+}
+
 /** Load a saved function into the editor, collapsed and clean. */
 function adoptScript(rec: SavedScript | null): void {
   runLoadedId = rec?.id ?? null;
+  runLoadedReads = rec?.reads;
   runLoadedSnapshot = { name: rec?.name ?? '', script: rec?.script ?? '' };
   runNameInput.value = runLoadedSnapshot.name;
   runEditor?.setDoc(runLoadedSnapshot.script);
   runPendingLoadId = null;
   paintRunHead();
+  void paintRunFit();
 }
 
 async function loadAndRun(id: string): Promise<void> {
@@ -4323,9 +4387,16 @@ async function saveCurrentScript(asNew: boolean): Promise<void> {
   }
   const typed = runNameInput.value.trim();
   const existing = await store.listScripts();
+  // New code, so what the OLD code was seen to read describes a function that
+  // no longer exists: cleared, and learned again on the next run.
+  const codeChanged = code !== runLoadedSnapshot.script.trim();
   let rec: SavedScript | null = null;
   if (!asNew && runLoadedId) {
-    rec = await store.updateScript(runLoadedId, { name: typed || undefined, script: code });
+    rec = await store.updateScript(runLoadedId, {
+      name: typed || undefined,
+      script: code,
+      ...(codeChanged ? { reads: null } : {}),
+    });
   }
   if (!rec) {
     const base = typed || deriveScriptName(code);
@@ -4412,6 +4483,10 @@ function resetRunState(hasUnsafeNumbers: boolean): void {
   setRunStatus('');
   resultDownloadName = '';
   clearRunResult();
+  // A new document is exactly when "does this function fit?" changes its answer
+  // — for the loaded one, and for every row in the library.
+  void paintRunFit();
+  if (activePane === 'run') void renderLibrary();
 }
 
 // Called from showPane on every exit, so there is one teardown rather than one
@@ -4499,7 +4574,7 @@ runSrcSwitch.addEventListener('click', (e) => {
   void showRunSource();
 });
 
-function executeInSandbox(docText: string, code: string): Promise<RunResult> {
+function executeInSandbox(docText: string, code: string, trace: boolean): Promise<RunResult> {
   return new Promise((resolve) => {
     const sandbox = new Worker(new URL('./run-sandbox.ts', import.meta.url), { type: 'module' });
     let timer = 0;
@@ -4521,7 +4596,7 @@ function executeInSandbox(docText: string, code: string): Promise<RunResult> {
       error: e.message || 'the sandbox worker could not be started',
       logs: [],
     });
-    sandbox.postMessage({ docText, code });
+    sandbox.postMessage({ docText, code, trace });
   });
 }
 
@@ -4532,12 +4607,17 @@ async function paintResultLabel(): Promise<void> {
   const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start: 0, count: 1 });
   const root = r?.rows[0];
   if (!root) return;
-  const count = root.type === 'object' || root.type === 'array'
-    ? ` ${fmtNumber(root.childCount)}`
-    : '';
+  const container = root.type === 'object' || root.type === 'array';
+  // An empty result and a real one used to look identical: `array 0` next to a
+  // pane with nothing in it reads as "none today" when the likelier story is
+  // that the script was written for another shape. Say which one it is.
+  if ((container && root.childCount === 0) || root.type === 'null') {
+    runResultLabel.textContent = `nothing came back · ${root.type}`;
+    return;
+  }
   // The switch beside it already says `result`; saying it again here put the
   // word twice on one strip. What the label is for is what CAME BACK.
-  runResultLabel.textContent = `${root.type}${count}`;
+  runResultLabel.textContent = `${root.type}${container ? ` ${fmtNumber(root.childCount)}` : ''}`;
 }
 
 // Hand the result to its own worker and read it back as a document. The guard
@@ -4602,15 +4682,30 @@ async function runScript(): Promise<void> {
   // one mid-flight; the result belongs to the old document, so it is dropped
   // rather than rendered under the new one.
   const documentRevision = currentDocumentRevision;
+  // Tracing costs a Proxy trap on every property read, so it is asked for once:
+  // on the first run of a saved function, or the first after its code changed
+  // (saving new code clears what the old code was seen to read).
+  const trace = runLoadedId !== null && runLoadedReads === undefined;
   runInFlight = true;
   runExecBtn.disabled = true;
   runErrorEl.hidden = true;
   setRunStatus('running…');
-  const res = await executeInSandbox(currentText, code);
+  const res = await executeInSandbox(currentText, code, trace);
   runInFlight = false;
   runExecBtn.disabled = false;
   if (documentRevision !== currentDocumentRevision) return;
+  if (res.ok && res.reads && runLoadedId) await learnReads(runLoadedId, res.reads);
   await renderRunResult(res);
+}
+
+// What the run just taught us about the function, kept on its record. Guarded
+// on the id it started with: a run is slow enough for the user to have loaded
+// something else, and the reading belongs to the script that produced it.
+async function learnReads(id: string, reads: string[]): Promise<void> {
+  await store.updateScript(id, { reads });
+  if (runLoadedId !== id) return;
+  runLoadedReads = reads;
+  void renderLibrary();
 }
 
 runExecBtn.addEventListener('click', () => void runScript());

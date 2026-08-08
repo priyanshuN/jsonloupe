@@ -25,6 +25,12 @@ export interface RunOk {
   resultText: string;
   logs: string[];
   ms: number;
+  /**
+   * The document paths this script actually read, when the run was asked to
+   * trace (see `watch`). Absent on an untraced run — which is not the same as
+   * an empty list, and callers must not read it as "reads nothing".
+   */
+  reads?: string[];
 }
 
 export interface RunErr {
@@ -35,6 +41,72 @@ export interface RunErr {
 }
 
 export type RunResult = RunOk | RunErr;
+
+// ---------- what a script reads ----------
+//
+// A function outlives the document it was written against, so the day comes
+// when it is pressed over a file that has no `orders` in it. The loud version
+// of that is fine — a TypeError, said plainly. The quiet version is not: a
+// document whose orders are called something else answers `[]`, which reads
+// exactly like "none today".
+//
+// So a script LEARNS what it reads, by being handed the document through a
+// Proxy that records the paths it touches. No tagging, no static analysis, no
+// second language to declare a contract in: one real run is the contract.
+//
+// Two limits, both deliberate. DEPTH: only the top levels are wrapped, so a
+// hot inner loop runs against raw objects — the paths worth checking a document
+// against are shallow anyway. TRACE IS OPT-IN: every property read costs a trap
+// call, so main.ts asks for it on a script's first run and never again.
+//
+// What it cannot know: a script that branches (`data.orders ?? data.jobs`)
+// records only the branch it took today. That is why the reading is a REMARK
+// about the script, never a gate in front of the run.
+
+const WATCH_DEPTH = 2;
+
+// Array indices are not paths — `orders[0].sku` and `orders[7].sku` are one
+// thing — and neither are the methods that arrive through the same trap.
+function isIndexKey(key: string): boolean {
+  return /^\d+$/.test(key);
+}
+
+/** Recording stops the moment the script returns — see `executeUserCode`. */
+interface Trace { seen: Set<string>; on: boolean }
+
+function watch<T>(value: T, trace: Trace, path = '', depth = 0): T {
+  if (depth >= WATCH_DEPTH || value === null || typeof value !== 'object') return value;
+  const arr = Array.isArray(value);
+  return new Proxy(value as object, {
+    get(target, key, receiver) {
+      // Symbols (Symbol.iterator, Symbol.toPrimitive) are protocol, not data.
+      if (typeof key !== 'string') return Reflect.get(target, key, receiver);
+      const child = Reflect.get(target, key) as unknown;
+      // ONLY OWN PROPERTIES ARE PATHS, and this is load-bearing twice over.
+      // Inherited names are machinery, not data: `JSON.stringify` probes every
+      // value for `toJSON` on the way out, which recorded `tasks[].toJSON` as
+      // something the document had to provide. And a MISSING key is not a path
+      // either — `data.jobs ?? data.tasks` would otherwise teach the script to
+      // demand `jobs` of every future document and report a mismatch for the
+      // one branch it never took. A function learns what it FOUND.
+      if (!Object.prototype.hasOwnProperty.call(target, key)) return child;
+      // Methods are handed back untouched — a method call reads the function
+      // through this proxy, so `this` is already the proxy and iteration keeps
+      // running through the traps. Binding it to the raw target (the first
+      // version of this) is what made `map`/`filter` callbacks receive
+      // unwrapped elements, so nothing below the array was ever recorded.
+      if (typeof child === 'function') return child;
+      if (arr) {
+        if (!isIndexKey(key)) return child; // length, and anything else structural
+        // Every element stands for the same path: the array's own, marked [].
+        return watch(child, trace, `${path}[]`, depth);
+      }
+      const here = path ? `${path}.${key}` : key;
+      if (trace.on) trace.seen.add(here);
+      return watch(child, trace, here, depth + 1);
+    },
+  }) as T;
+}
 
 // console arguments are arbitrary values, and a log line is not worth failing a
 // run over: anything that will not serialize falls back to String().
@@ -76,8 +148,11 @@ function compileScript(code: string): ((data: unknown) => unknown) | { error: st
  * Run `code` — an expression, or the body of `(data) => { … }` — over the
  * document in `docText`. Never throws: every failure comes back as
  * `{ ok: false }` with a message the producer strip can show verbatim.
+ *
+ * With `trace`, the script is handed the document through the recording Proxy
+ * above and the result carries the paths it read.
  */
-export function executeUserCode(docText: string, code: string): RunResult {
+export function executeUserCode(docText: string, code: string, trace = false): RunResult {
   const logs: string[] = [];
   let dropped = false;
   const record = (prefix: string) => (...args: unknown[]): void => {
@@ -113,12 +188,18 @@ export function executeUserCode(docText: string, code: string): RunResult {
   console.warn = record('warn: ');
   console.error = record('error: ');
 
+  const tracer: Trace = { seen: new Set<string>(), on: true };
   let result: unknown;
   try {
-    result = fn(data);
+    result = fn(trace ? watch(data, tracer) : data);
   } catch (error) {
     return { ok: false, error: errorText(error), logs };
   } finally {
+    // The script is done, so the reading is done. Its result may still be full
+    // of proxies, and JSON.stringify below walks every one of them — without
+    // this, a script that read `tasks[].status` and returned whole rows would
+    // learn that it also reads `tasks[].id`, because the SERIALIZER read it.
+    tracer.on = false;
     Object.assign(console, saved);
   }
 
@@ -147,5 +228,8 @@ export function executeUserCode(docText: string, code: string): RunResult {
     resultText,
     logs,
     ms: Math.round(performance.now() - started),
+    // Sorted so a re-run over the same document produces the same list, and a
+    // stored one can be compared without normalising it first.
+    ...(trace ? { reads: [...tracer.seen].sort() } : {}),
   };
 }

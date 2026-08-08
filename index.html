@@ -497,6 +497,11 @@ SPDX-License-Identifier: MIT -->
                    the way the tree ops move between bars. -->
               <button id="run-exec" type="button" class="primary" title="Run this script over the document (Ctrl/Cmd+Enter)">run</button>
             </div>
+            <!-- What this function was seen to read, against what the open
+                 document actually has. A remark about the script, never a gate
+                 in front of the run: it can only know the branch the last run
+                 took. -->
+            <div id="run-fit" hidden></div>
             <div id="run-lossy" hidden>
               <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>this document has numbers plain JS cannot hold exactly — the script sees them rounded
             </div>

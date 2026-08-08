@@ -2241,6 +2241,27 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    rows you were typing in collapse to one. */
 #run-producer > * { flex-shrink: 0; }
 
+/* Rule 15 tier 2 — ink AND a hairline: this function reads something the open
+   document does not have, which you want to notice BEFORE reading a plausible
+   empty result as an answer. Not tier 3: the run is not blocked and the reading
+   can be incomplete (it knows only the branch the last run took), so it must
+   not dress as a failure. */
+#run-fit {
+  display: flex;
+  align-items: center;
+  /* The strip is a column, so a block child would stretch the hairline across
+     the whole pane and read as a banner. It is a remark: it is as wide as what
+     it says, like the `unsaved` and `re-run` marks. */
+  align-self: flex-start;
+  max-width: 100%;
+  gap: var(--gap-1);
+  padding: 2px var(--gap-2);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font-size: var(--fs-body);
+}
+
 /* Rule 15 tier 1, INK ONLY: the script sees plain JS numbers, which is expected
    and permanent rather than something to respond to. It reads --warn because
    that is what --warn means, and it is a line rather than a toast because it is
@@ -2468,6 +2489,12 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* Rule 15 tier 1 in a LIST: ink only. A row that reads something this document
+   lacks is worth seeing while scanning, but it is still a perfectly good
+   function — dimming the name or barring the row would read as broken. The
+   head's tier 2 line carries the weight once the function is loaded. */
+.run-lib-row.misfit .run-lib-name { color: var(--text-dim); }
+.run-lib-meta.misfit-note { color: var(--warn); }
 /* Rule 20: HOVER REVEALS, IT NEVER REFLOWS. The gutter is reserved on every
    row, always, and the control fades in — and it answers to :focus-within too,
    because hover is not a state a keyboard can enter. */
