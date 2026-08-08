@@ -7,7 +7,7 @@
 // No MCP concepts appear in this file, and no engine logic either. It is the
 // glue that turns "sample 5 values at $.tasks" into reveal → rows → nodeValue.
 
-import { link, lstat, open, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { link, lstat, open, rename, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { stringify as llStringify } from 'lossless-json';
@@ -23,10 +23,12 @@ import {
 import type { NodeType, Row } from '../protocol';
 import type { ProfileResult } from '../profile';
 import { QUERY_GRAMMAR, QUERY_PIPES } from '../query-grammar';
+import type { ConvertReport, ConvertSpec, DraftHints, Inspection, SpecError } from '../convert';
 import type { DocRequest } from './pool';
 
 /** The `handle(msg)` seam, narrowed to what these operations send through it. */
 export type Engine = (msg: { type: string } & Record<string, unknown>) => object;
+export type AsyncEngine = (msg: { type: string } & Record<string, unknown>) => Promise<object>;
 
 export interface OpError {
   ok: false;
@@ -98,6 +100,21 @@ export interface CsvResult {
   rows: number;
   bytes: number;
   atomic: true;
+}
+
+export interface ConversionInspectionResult {
+  ok: true;
+  inspection: Inspection;
+  spec: ConvertSpec;
+}
+
+export interface ConversionFileResult {
+  ok: true;
+  outPath: string;
+  format: 'xlsx' | 'csv';
+  bytes: number;
+  rows: number;
+  report: ConvertReport;
 }
 
 /** Top-level keys are a fingerprint, not a listing: enough to aim the next call. */
@@ -580,13 +597,70 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+// ---------- converter ----------
+
+export async function inspectConversion(
+  engine: AsyncEngine,
+  hints?: DraftHints,
+): Promise<ConversionInspectionResult | OpError> {
+  const result = await engine({ type: 'convertInspect', hints }) as {
+    error?: string;
+    inspection?: Inspection;
+    spec?: ConvertSpec;
+  };
+  if (!result.inspection || !result.spec) return fail(result.error ?? 'converter inspection failed');
+  return { ok: true, inspection: result.inspection, spec: result.spec };
+}
+
+export async function convertToFile(
+  engine: AsyncEngine,
+  spec: ConvertSpec,
+  outPath: string,
+  overwrite = false,
+): Promise<ConversionFileResult | OpError> {
+  const result = await engine({ type: 'convertRun', spec }) as {
+    error?: string;
+    errors?: SpecError[];
+    format?: 'xlsx' | 'csv';
+    bytes?: Uint8Array;
+    rows?: number;
+    report?: ConvertReport;
+  };
+  if (result.errors?.length) {
+    return fail(
+      `mapping has ${result.errors.length} problem(s): ${result.errors[0].at} — ${result.errors[0].message}`,
+      result.errors.slice(1, 6).map((item) => `${item.at}: ${item.message}`).join('\n') || undefined,
+    );
+  }
+  if (!result.bytes || !result.format || !result.report) return fail(result.error ?? 'conversion failed');
+  try {
+    await writeFile(outPath, result.bytes, { flag: overwrite ? 'w' : 'wx' });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return fail(`output already exists: ${outPath}`, 'pass overwrite=true only when replacement is intended.');
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+  return {
+    ok: true,
+    outPath,
+    format: result.format,
+    bytes: result.bytes.byteLength,
+    rows: result.rows ?? result.report.tables.reduce((total, table) => total + table.rows, 0),
+    report: result.report,
+  };
+}
+
 // ---------- the op table ----------
 
 /**
  * Every request a document can be asked, in one place, so the worker thread and
  * the in-process host used by the tests answer identically by construction.
  */
-export async function runDocOp(engine: Engine, request: DocRequest): Promise<unknown> {
+export async function runDocOp(
+  engine: Engine,
+  request: DocRequest,
+  asyncEngine?: AsyncEngine,
+): Promise<unknown> {
   switch (request.op) {
     case 'load':
       return loadDoc(engine, { path: request.path as string, text: request.text as string });
@@ -621,6 +695,19 @@ export async function runDocOp(engine: Engine, request: DocRequest): Promise<unk
         request.format as 'csv' | 'jsonl',
         request.overwrite === true,
       );
+    case 'convertInspect':
+      return asyncEngine
+        ? inspectConversion(asyncEngine, request.hints as DraftHints | undefined)
+        : fail('converter operations are unavailable in this document host');
+    case 'convertRun':
+      return asyncEngine
+        ? convertToFile(
+            asyncEngine,
+            request.spec as ConvertSpec,
+            request.outPath as string,
+            request.overwrite === true,
+          )
+        : fail('converter operations are unavailable in this document host');
     default:
       return fail(`unknown document operation '${request.op}'`);
   }

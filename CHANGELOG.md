@@ -4,6 +4,51 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **Nested JSON becomes a reusable spreadsheet workflow.** The browser detects
+  repeatable arrays/maps as linked tables, previews real rows, and now exposes
+  the full mapping: target/source columns, ordering, constants, date/time and
+  coordinate parsing, missing-value policy, and parent links. Mappings persist
+  locally, import/export as JSON, and can take a target CSV header as their
+  desired shape. Downloads finish with row, skipped-row, and warning counts.
+- **The same converter now runs through MCP.** `inspect → draft_spec →
+  convert` lets an agent draft the small reviewable spec while the deterministic
+  engine handles every source row outside model context. Output files are not
+  replaced without explicit intent, packed coordinates draft both latitude and
+  longitude, and XLSX/ZIP hard limits fail before a corrupt workbook is emitted.
+- **The spreadsheet job has a page of its own.** `/json-to-excel.html` says what
+  the tool does without booting the app first, and hands whatever is pasted into
+  it to the same converter — one implementation of the conversion, not two. The
+  sample document offered on the landing page is now an order export with its
+  line items nested inside it, two order ids a float would collapse onto the
+  same value, and prices written with the trailing zero a money column needs —
+  the values this tool exists for, rather than a toy object. A conversion that
+  produces a single CSV downloads as that file instead of as a zip holding it.
+- **What lands in a cell is what was in the document.** Cells now carry their
+  type from the JSON rather than from how their text happens to look. A number
+  is a number, a latitude read out of `"12.97, 77.59"` is a number you can plot,
+  and a string that merely looks numeric stays a string — `"1.10"` keeps its
+  trailing zero, `"007"` its leading ones, and a digit-only SKU stops being
+  treated as arithmetic. Int64 identifiers are still written as text, because a
+  spreadsheet would round them. Converted dates arrive as real dates you can
+  sort, subtract and re-format, in the layout the mapping chose — but only where
+  the whole column can be read beyond doubt: a column of `03/08/2026` with
+  nothing in it to say which number is the day keeps its text rather than
+  silently store a date five months off.
+- **Two more ways the file could arrive broken are closed.** Sheet names
+  differing only in case are the collision Excel treats them as: a mapping
+  carrying both is refused before it converts, naming both tables, instead of
+  producing a workbook Excel offers to repair. And the exported CSVs declare
+  their UTF-8 encoding, so accented and CJK text survives being double-clicked
+  open on Windows. A CSV that goes past what Excel will read — too many rows or
+  columns, a cell it would shorten on import — is still written, because it is
+  a perfectly good file for a loader or a script, but the run now says which
+  limit it went past rather than leaving that to be found later.
+- **A refused mapping explains itself in the reader's words.** Validation now
+  says what is wrong with the mapping — "this table is called `Items` and
+  another is called `items`, a spreadsheet reads those as the same name" —
+  instead of naming the key that failed and leaving the reader to work out
+  which of their own decisions it refers to. The error codes behind the
+  messages are unchanged, so anything routing on them still can.
 - **The MCP is now the shortest path, not a Python fallback.** Query responses
   return only 10 details by default and support summary-only (`limit=0`) plus
   `offset`/`limit` paging; counts and projected totals stream past the old

@@ -68,13 +68,17 @@ export default defineConfig({
   base: '/',
   plugins: [keyServer()],
   build: {
-    // Static entries: the app/landing, the standalone spec page, and the
-    // styleguide (the contract's stare page — rule 23).
+    // Static entries: the app/landing, the standalone spec page, the styleguide
+    // (the contract's stare page — rule 23), and the converter landing. The
+    // converter page is its own entry rather than a section of index.html
+    // because it has to be a URL a search result can point at, and because it
+    // must paint its pitch without booting the app.
     rollupOptions: {
       input: {
         main: join(root, 'index.html'),
         spec: join(root, 'spec.html'),
         styleguide: join(root, 'styleguide.html'),
+        jsonToExcel: join(root, 'json-to-excel.html'),
       },
     },
   },

@@ -12,6 +12,10 @@ import type {
   CompareError,
 } from './protocol';
 import { SemanticCompareView, type CompareRow } from './compare-view';
+import { ConvertView } from './convert-view';
+import type { ConvertReport, ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
+import { onlyStoredZipEntry } from './one-file-zip';
+import { SAMPLE_DOC, SAMPLE_DOC_TITLE } from './sample-doc';
 import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
@@ -156,6 +160,9 @@ const tableViewportEl = $('#table-viewport');
 const tableSpacer = $('#table-spacer');
 const tableLayer = $('#table-layer');
 
+const convertView = $('#convert-view');
+const convertBtn = $('#convert-btn');
+
 const modeSwitch = $('#mode-switch');
 const paneArea = $('#pane-area');
 const splitDivider = $<HTMLElement>('#split-divider');
@@ -261,7 +268,7 @@ function addStatusTrailChip(chip: HTMLElement): void {
   renderStatus();
 }
 
-type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic' | 'run';
+type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic' | 'run' | 'convert';
 let activePane: Pane = 'tree';
 function showPane(p: Pane): void {
   activePane = p;
@@ -278,6 +285,7 @@ function showPane(p: Pane): void {
   diffView.hidden = p !== 'diff';
   semanticView.hidden = p !== 'semantic';
   tableView.hidden = p !== 'table';
+  convertView.hidden = p !== 'convert';
   viewer.classList.toggle('semantic-open', p === 'semantic');
   // style.css reads this to decide which strips a layout is allowed: the tree
   // ops group upstairs when the tree stands alone, the split strip when it does
@@ -507,11 +515,56 @@ function sanitizeFilePart(s: string, max: number): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);
 }
 
+// Two names for one document, and they are deliberately not the same string.
+// docStem is the filename half — sanitized and capped, safe to hand to a
+// download — while docTitle is what a human reads. A document called `route
+// json (prod).json` is `route_json_prod` in a filename and `route json (prod)`
+// in a label, and sanitizing the one a person sees is how a saved mapping ends
+// up named after a file path.
+function docStem(): string {
+  return sanitizeFilePart(currentTitle.replace(/\.[^.]*$/, ''), 60) || 'data';
+}
+
+function docTitle(): string {
+  return currentTitle.replace(/\.[^.]+$/, '').trim() || 'document';
+}
+
 // Filename from the open doc's title + a path/suffix, e.g. orders_users.csv.
 function csvFilename(suffix: string): string {
-  const base = sanitizeFilePart((currentTitle || 'data').replace(/\.[^.]*$/, ''), 60) || 'data';
   const tail = sanitizeFilePart(suffix, 40);
-  return `${base}${tail ? '_' + tail : ''}.csv`;
+  return `${docStem()}${tail ? '_' + tail : ''}.csv`;
+}
+
+// Same mechanism as downloadText, for anything that is bytes rather than text
+// (a workbook, a zip of CSVs) or carries its own filename already.
+function downloadBlob(filename: string, data: Uint8Array | string, mime: string): void {
+  const part: BlobPart = typeof data === 'string' ? data : new Uint8Array(data);
+  const url = URL.createObjectURL(new Blob([part], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Everything the converter hands out goes through here. A mapping with one
+// table still arrives as a zip — one CSV per table is what the writer does —
+// and a zip holding a single file is a chore, not a container: it stands
+// between the person and the double-click they came for. The file inside is
+// sent on under the name it already has, so it is exactly what unpacking would
+// have given them. Anything else — several tables, a workbook, the mapping
+// itself — is untouched.
+function downloadConvertResult(filename: string, data: Uint8Array | string, mime: string): void {
+  if (mime === 'application/zip' && typeof data !== 'string') {
+    const only = onlyStoredZipEntry(data);
+    if (only && only.name.toLowerCase().endsWith('.csv')) {
+      downloadBlob(only.name, only.bytes, 'text/csv;charset=utf-8');
+      return;
+    }
+  }
+  downloadBlob(filename, data, mime);
 }
 
 async function exportCsv(source: 'table' | 'query', suffix: string): Promise<void> {
@@ -1498,6 +1551,131 @@ async function renderBaselineList(): Promise<boolean> {
 
 compareBtn.addEventListener('click', () => void showBaselinePicker());
 
+// ---------- converter ----------
+
+// The worker keeps the document; this view keeps the spec. Every call ships the
+// spec down and gets rows back, so the parsed document still never crosses.
+const converter = new ConvertView(
+  {
+    count: $('#convert-count'),
+    tables: $('#convert-tables'),
+    detailName: $('#convert-detail-name'),
+    detailSrc: $('#convert-detail-src'),
+    cols: $('#convert-cols'),
+    previewNote: $('#convert-preview-note'),
+    formatNote: $('#convert-format-note'),
+    preview: $('#convert-preview'),
+    format: $('#convert-format'),
+    mappingName: $<HTMLInputElement>('#convert-map-name'),
+    saved: $<HTMLSelectElement>('#convert-saved'),
+    save: $<HTMLButtonElement>('#convert-save'),
+    forget: $<HTMLButtonElement>('#convert-forget'),
+    missing: $<HTMLInputElement>('#convert-missing'),
+    arrayJoin: $<HTMLInputElement>('#convert-array-join'),
+    addColumn: $<HTMLButtonElement>('#convert-add-column'),
+    spec: $<HTMLButtonElement>('#convert-spec'),
+    download: $<HTMLButtonElement>('#convert-dl'),
+    report: $('#convert-report'),
+  },
+  {
+    inspect: () => call<{ inspection: Inspection; spec: ConvertSpec }>({ type: 'convertInspect' }),
+    preview: (spec, rows) =>
+      call<PreviewResult | { errors: SpecError[] }>({ type: 'convertPreview', spec, rows }),
+    run: (spec) =>
+      call<
+        { errors: SpecError[] }
+        | { format: 'xlsx' | 'csv'; bytes: Uint8Array; rows: number; report: ConvertReport }
+      >({
+        type: 'convertRun',
+        spec,
+      }),
+    listMappings: () => store.listConvertSpecs(),
+    saveMapping: (name, spec, id) => store.saveConvertSpec(name, spec, id),
+    removeMapping: (id) => store.removeConvertSpec(id),
+    touchMapping: (id) => store.touchConvertSpec(id),
+    download: downloadConvertResult,
+    toast: showToast,
+    emptyState,
+    // The bottom strip is the shell's, so the converter is handed the two
+    // setters and nothing more. Its lead goes down as plain text rather than a
+    // path: `problems › jobs` is the view's own vocabulary for an anchor, and
+    // the path treatment is reserved for real JSON paths.
+    setLead: (text) => setStatusLead(text),
+    setNote: setStatusNote,
+    docTitle,
+    docStem,
+  },
+);
+
+function openConverter(): void {
+  showPane('convert');
+  // The strip is left to the view: open() lays down the pane's resting line
+  // before its first await and keeps it live from there, which is more than the
+  // shell can do from out here — it knows which table is selected and this does
+  // not. The counts stay in the converter's own bar, as the table view's do.
+  void converter.open().catch((err: Error) => showToast(err.message, 'bad'));
+}
+
+convertBtn.addEventListener('click', openConverter);
+
+// The converter has no address of its own: it is a button on a document that is
+// already open, so nothing outside the app can send anyone to it. `#convert` is
+// that address. It opens the converter the moment there is something to
+// convert, and when there is nothing yet it waits — an empty converter answers
+// no question a visitor arriving from a link has.
+const CONVERT_ROUTE = '#convert';
+let convertRouteWaiting = false;
+
+function enterConvertRoute(): void {
+  if (!viewer.hidden && currentText) {
+    convertRouteWaiting = false;
+    openConverter();
+    return;
+  }
+  // Arrived before the file did. The paste box is where the answer to that is,
+  // and the route is remembered so the trip is not wasted: see openText, which
+  // is the one place that knows a document has landed.
+  convertRouteWaiting = true;
+  pasteBox.focus();
+  showToast('paste a document and it will open in the converter');
+}
+
+// A link from the landing page lands on the same page, so following it from
+// inside the app changes the address without reloading anything.
+window.addEventListener('hashchange', () => {
+  if (location.hash === CONVERT_ROUTE) enterConvertRoute();
+});
+
+$('#convert-close').addEventListener('click', () => showTree());
+$('#convert-spec').addEventListener('click', () => converter.downloadSpec());
+$('#convert-import').addEventListener('click', () => $<HTMLInputElement>('#convert-import-file').click());
+$<HTMLInputElement>('#convert-import-file').addEventListener('change', async (event) => {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    converter.importSpecText(await file.text(), file.name);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'bad');
+  }
+});
+$('#convert-target').addEventListener('click', () => $<HTMLInputElement>('#convert-target-file').click());
+$<HTMLInputElement>('#convert-target-file').addEventListener('change', async (event) => {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    converter.importTargetHeadersText(await file.text(), file.name);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'bad');
+  }
+});
+$('#convert-dl').addEventListener('click', () => {
+  void converter.downloadResult().catch((err: Error) => showToast(err.message, 'bad'));
+});
+
 baselineRecents.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
   const row = target.closest<HTMLElement>('.doc-row');
@@ -1720,6 +1898,13 @@ async function openText(
 
   tree.setTotal(res.totalRows);
   treeViewport.scrollTop = 0;
+  // Someone came in on #convert before there was a document — from the landing
+  // page, or straight into a cold tab. This is the document they came to
+  // convert, whether it arrived seconds or minutes later.
+  if (convertRouteWaiting) {
+    convertRouteWaiting = false;
+    openConverter();
+  }
   return true;
 }
 
@@ -4226,8 +4411,7 @@ runDownloadBtn.addEventListener('click', () => setDownloadSubject('result', runD
 // not a payload to unwrap.
 runOpenBtn.addEventListener('click', () => {
   if (!runResultText) return;
-  const base = currentTitle.replace(/\.[^.]+$/, '').trim();
-  void openText(runResultText, `${base || 'document'} · result.json`, null, null, null, true);
+  void openText(runResultText, `${docTitle()} · result.json`, null, null, null, true);
 });
 
 // ---------- keyboard ----------
@@ -4335,21 +4519,7 @@ paintThemeSwitch();
 // ---------- sample ----------
 
 $('#sample-btn').addEventListener('click', () => {
-  const sample = {
-    referenceId: 'demo-001',
-    routingType: 'food',
-    hubId: 34,
-    createdAt: 1752796800000,
-    active: true,
-    stops: [
-      { seq: 1, orderId: 'A1042', lat: 12.9716, lng: 77.5946, window: { from: '09:00', to: '12:00' }, weightKg: 3.5 },
-      { seq: 2, orderId: 'A1043', lat: 12.9611, lng: 77.6387, window: { from: '10:00', to: '13:00' }, weightKg: 1.2 },
-      { seq: 3, orderId: 'A1044', lat: 12.9345, lng: 77.6066, window: null, weightKg: 0.8 },
-    ],
-    settings: { maxStops: 25, allowSplit: false, vehicleType: 'BIKE' },
-    embeddedPayload: '{"note":"strings that look like JSON get a {…} un-stringify badge"}',
-  };
-  openText(JSON.stringify(sample, null, 2), 'sample.json', null).catch((error) => {
+  openText(SAMPLE_DOC, SAMPLE_DOC_TITLE, null).catch((error) => {
     showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
   });
 });
@@ -4363,6 +4533,10 @@ async function boot(): Promise<void> {
   // The head's pre-paint gate hid the landing when localStorage said this is a
   // returning user; it must come off on every path once the real state is known.
   const ungate = (): void => document.documentElement.classList.remove('returning');
+  // Read once, before anything opens: whichever document this boot ends up on —
+  // the stored one below, or one pasted minutes from now — is the one the
+  // converter opens on.
+  const wantsConverter = location.hash === CONVERT_ROUTE;
   await renderRecents(); // sidebar is populated the same either way
   if (location.hash === '#about') {
     ungate();
@@ -4375,7 +4549,8 @@ async function boot(): Promise<void> {
     // or deleted since the last visit) so the gate doesn't hide it next load.
     try { localStorage.removeItem('wb-returning'); } catch { /* private mode */ }
     ungate();
-    pasteBox.focus();
+    if (wantsConverter) enterConvertRoute();
+    else pasteBox.focus();
     return;
   }
   // Docs exist but the flag may predate this feature — prime it for next load.
@@ -4385,7 +4560,13 @@ async function boot(): Promise<void> {
   // Set before the open so that if the record's body is gone we land on the
   // compact paste view rather than the pitch (or a blank screen).
   landing.classList.add('landing--app');
-  if (await openStoredDoc(lastUsed.id) !== 'opened') pasteBox.focus();
+  if (wantsConverter) convertRouteWaiting = true;
+  // A body that has gone missing leaves the route armed on purpose: they came
+  // to convert something, and the paste box is the only way left to give it.
+  if (await openStoredDoc(lastUsed.id) !== 'opened') {
+    if (wantsConverter) enterConvertRoute();
+    else pasteBox.focus();
+  }
   ungate();
 }
 

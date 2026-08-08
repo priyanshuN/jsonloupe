@@ -23,9 +23,11 @@
 </p>
 
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
-querying JSON documents that are too big or too precise for ordinary viewers.
-Everything runs in your browser: documents are parsed in a web worker, stored in
-IndexedDB, and never uploaded anywhere. No backend, no account, no telemetry.
+querying JSON documents that are too big or too precise for ordinary viewers —
+and for turning them into spreadsheets: nested JSON goes in, linked tables come
+out, as one `.xlsx` or a zip of CSVs. Everything runs in your browser: documents
+are parsed in a web worker, stored in IndexedDB, and never uploaded anywhere. No
+backend, no account, no telemetry.
 
 ## Run it
 
@@ -53,6 +55,11 @@ auditable server in [bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and
   the worker, and opened as a document with a transformation trace. An encoder
   and a transport-size inspector (exact UTF-8 / Zstd / Base64 / envelope bytes
   against editable budgets) round-trip the other way.
+- **Nested JSON becomes a spreadsheet, on your machine.** Repeating arrays and
+  object maps become their own linked tables — `orders` and `order_items` joined
+  by `order_id`, never `items/0/sku` columns. You see real rows before anything
+  is written, and the mapping saves as a small file that produces the same
+  columns from next month's file, with no model involved.
 - **Semantic diff.** Side-by-side compare with identity-based array alignment
   (match by `id`, composite keys, or auto-detected), so reordered arrays don't
   drown you in false changes. Ignore noisy fields by key or path prefix.
@@ -87,6 +94,10 @@ flagged, with the original bytes preserved.
   weight on collapsed containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
+- **JSON → Excel / CSV converter** — rename and reorder columns, choose source
+  fields, add constants, set date and coordinate handling, take the column names
+  from a target CSV header, and save or share the mapping for the next file.
+  ([below](#nested-json-to-linked-tables).)
 - **File handles** — drop `.json`/`.jsonl`/`.zst` files; reload re-reads from
   disk and shows what changed since the version you were looking at.
 - **Ask (optional, off by default)** — type an English question and it's
@@ -95,6 +106,51 @@ flagged, with the original bytes preserved.
   Anthropic or OpenRouter key; with no key configured the feature is inert and
   the page makes zero network requests. A disclosure panel shows exactly what
   would be sent. See [SECURITY.md](SECURITY.md).
+
+## Nested JSON to linked tables
+
+If a spreadsheet is the only thing you came for,
+[jsonloupe.dev/json-to-excel.html](https://jsonloupe.dev/json-to-excel.html) is
+that job on a page of its own: paste, convert, done.
+
+Open a document and choose **convert**. Every repeating array becomes its own
+table, joined back to its parent by the id that was already in the data — so
+this:
+
+```json
+{ "orders": [
+    { "id": 7, "cust": "ACME",
+      "items": [ { "sku": "A", "qty": 2 }, { "sku": "B", "qty": 1 } ] } ] }
+```
+
+comes out as two sheets rather than one row full of `items/0/sku` columns:
+
+```
+orders                    order_items
+id  cust                  order_id  sku  qty
+ 7  ACME                         7  A      2
+                                 7  B      1
+```
+
+jsonloupe finds those tables for you but never runs the guess blindly: the
+mapping and a preview of real rows stay on screen while you rename columns,
+choose which fields to keep, and say how dates and coordinates should be read.
+What you approve is saved as a small mapping file — keep it in this browser,
+export it, or use it from the command line:
+
+```bash
+jsonloupe inspect payload.json          # what tables are in here?
+jsonloupe draft   payload.json -o payload.spec.json   # a first mapping, to read
+jsonloupe convert payload.json --spec payload.spec.json -o payload.xlsx
+```
+
+The same mapping produces the same columns through the browser, the CLI, and the
+MCP server, with no model in the loop — that is the point of freezing it. What
+lands in the cells is what was in the document: dates arrive as real dates you
+can sort and subtract, numbers and coordinates as numbers, and text that only
+looks numeric stays text, so `"1.10"` keeps its trailing zero and an int64 id
+keeps every digit instead of being rounded. Excel's limits and values a column
+cannot read are reported or refused, never quietly written wrong.
 
 ## Use with AI agents
 
@@ -111,8 +167,9 @@ have to be decoded first, int64 and decimal digits that must survive the whole
 pipeline exactly, identity-keyed semantic diff between two documents, and MCP
 hosts that have no shell to run jq in.
 
-Eight tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
-`diff_docs`, `export_csv`, `export_result`. For one question, pass `filePath`
+Eleven tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
+`diff_docs`, `export_csv`, `export_result`, plus `inspect`, `draft_spec`, and
+`convert` for the spreadsheet path above. For one question, pass `filePath`
 straight to a tool; it opens the document and returns a reusable `docId` in the
 same call. For a sequence of questions, call `load_doc` once and reuse that
 `docId`. Query details default to 10 rows (use `limit=0` for summary only, or
@@ -131,6 +188,11 @@ run_query d1 "$.tasks[*] | top(@.delayMinutes, @.id, @.status)" limit=5
 sample d1 "$.tasks[0]"           → the whole element, id 9007199254740993 intact
 export_result d1 "…| pluck(@.id, @.failureReason)" format=csv out=failed.csv
                                   → complete, atomic, rows + UTF-8 bytes only
+inspect d1                       → candidate tables, fields, types, deterministic suggestions
+draft_spec d1 outPath=tasks.spec.json
+                                  → reviewable mapping on disk
+convert d1 specPath=tasks.spec.json outPath=tasks.xlsx
+                                  → workbook path + row/skipped/warning counts, never its rows
 ```
 
 The common schema → profile → query loop is deliberately cheaper than loading
@@ -183,7 +245,9 @@ npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB
 npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
 ```
 
-Design and internals are documented in [SPEC.md](SPEC.md).
+Design and internals are documented in [SPEC.md](SPEC.md); the converter has its
+own [SPEC-converter.md](SPEC-converter.md), including what it deliberately
+refuses to do.
 
 ## License
 
