@@ -7,7 +7,7 @@
 // No MCP concepts appear in this file, and no engine logic either. It is the
 // glue that turns "sample 5 values at $.tasks" into reveal → rows → nodeValue.
 
-import { link, lstat, open, readFile, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
+import { link, lstat, open, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { stringify as llStringify } from 'lossless-json';
@@ -189,12 +189,22 @@ async function readSource(
   if (source.text !== undefined) return decodeIfWrapped(source.text, source.text.length);
   if (!source.path) return fail('load_doc needs a path or text');
 
-  const info = await stat(source.path);
-  // Refuse by declared size before the file is read into memory at all.
-  if (info.size > MAX_DOC_BYTES) return fail(oversizeMessage(info.size));
-  const bytes = await readFile(source.path);
-  if (hasRawZstdMagic(bytes)) return decodeBytes(bytes, info.size);
-  return decodeIfWrapped(bytes.toString('utf8'), info.size);
+  // One handle answers both questions, so the size that is checked and the bytes
+  // that are read are the same inode: a path swapped in between cannot smuggle a
+  // 4 GB file past a 2 KB stat. (That inode can still grow under us; loadDoc's
+  // post-read length check is the backstop for it.)
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(source.path, 'r');
+    const info = await handle.stat();
+    // Refuse by declared size before the file is read into memory at all.
+    if (info.size > MAX_DOC_BYTES) return fail(oversizeMessage(info.size));
+    const bytes = await handle.readFile();
+    if (hasRawZstdMagic(bytes)) return decodeBytes(bytes, info.size);
+    return decodeIfWrapped(bytes.toString('utf8'), info.size);
+  } finally {
+    if (handle) await handle.close().catch(() => undefined);
+  }
 }
 
 async function decodeIfWrapped(
