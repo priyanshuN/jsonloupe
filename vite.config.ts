@@ -4,7 +4,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isLoopbackRequest } from './src/devKeyGuard';
+import { isLoopbackRequest } from './src/devKeyGuard.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 
