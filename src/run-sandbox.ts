@@ -9,7 +9,7 @@
 // Same reasoning as worker.ts for the missing origin check: a dedicated worker
 // can only receive messages from the page that constructed it.
 
-import { executeUserCode } from './run-exec';
+import { executeUserCode, executeUserScripts } from './run-exec';
 
 const post = (d: unknown): void => (self as unknown as Worker).postMessage(d);
 
@@ -31,8 +31,22 @@ if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessag
   (self as unknown as Worker).onmessage = (e: MessageEvent) => {
     // A dedicated worker only hears from the page that spawned it; there is no
     // origin to check. Shape-check instead so a malformed message is inert.
-    const d = e.data as { docText?: unknown; code?: unknown } | null;
-    if (!d || typeof d.docText !== 'string' || typeof d.code !== 'string') return;
-    post(executeUserCode(d.docText, d.code));
+    const d = e.data as
+      | { docText?: unknown; code?: unknown; scripts?: unknown; trace?: unknown }
+      | null;
+    if (!d || typeof d.docText !== 'string') return;
+    const trace = d.trace === true;
+    // A batch: several saved functions over one parse of the document.
+    if (Array.isArray(d.scripts)) {
+      const scripts = d.scripts.filter(
+        (s): s is { name: string; code: string } =>
+          !!s && typeof s.name === 'string' && typeof s.code === 'string',
+      );
+      if (scripts.length !== d.scripts.length) return; // malformed stays inert
+      post(executeUserScripts(d.docText, scripts, trace));
+      return;
+    }
+    if (typeof d.code !== 'string') return;
+    post(executeUserCode(d.docText, d.code, trace));
   };
 }

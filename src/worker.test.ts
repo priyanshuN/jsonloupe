@@ -648,6 +648,40 @@ describe('schema', () => {
   });
 });
 
+// ---------- does this document have the paths a script reads? ----------
+
+describe('hasPaths', () => {
+  interface Fit { present: string[]; missing: string[] }
+  const fit = (paths: string[]): Fit => h<Fit>({ type: 'hasPaths', paths });
+
+  it('answers for a top-level key and for one inside an array', () => {
+    parse('{"tasks":[{"status":"FAILED"}]}');
+    expect(fit(['tasks', 'tasks[].status'])).toEqual({
+      present: ['tasks', 'tasks[].status'],
+      missing: [],
+    });
+  });
+
+  it('names what the document does not have', () => {
+    parse('{"jobs":[{"state":"OK"}]}');
+    expect(fit(['tasks', 'tasks[].status', 'jobs']).missing).toEqual(['tasks', 'tasks[].status']);
+  });
+
+  it('will not call an element path missing when the array is empty', () => {
+    // An empty array cannot answer for its elements, and calling that "missing"
+    // would be a claim about the document that is not true.
+    parse('{"tasks":[]}');
+    expect(fit(['tasks[].status']).missing).toEqual([]);
+  });
+
+  it('refuses an inherited key, and a path reached through the wrong type', () => {
+    parse('{"tasks":{"status":"OK"}}');
+    // `tasks` is an object here, so a script that iterated it read nothing.
+    expect(fit(['tasks[].status']).missing).toEqual(['tasks[].status']);
+    expect(fit(['toString', 'constructor']).missing).toEqual(['toString', 'constructor']);
+  });
+});
+
 // ---------- unpack ----------
 
 describe('unpack', () => {

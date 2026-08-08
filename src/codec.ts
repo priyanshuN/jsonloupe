@@ -834,6 +834,54 @@ export async function compressToB64(text: string, level = 3): Promise<string> {
   return bytesToB64(await compressToBytes(text, level));
 }
 
+/**
+ * The forms the encode side can produce.
+ *
+ * Decoding has always been permissive — you receive whatever the world hands
+ * you — while encoding knew exactly one destination, so a document pulled OUT
+ * of a Postgres column could not be put back in the shape it came from. These
+ * are the three that a text field can hold; raw `.zst` is bytes and belongs to
+ * a download, not a textarea.
+ */
+export type EncodeFormat = 'base64-zstd' | 'bytea-zstd' | 'base64';
+
+/** `\x…` lowercase hex, exactly as PostgreSQL renders and accepts bytea. */
+export function bytesToBytea(bytes: Uint8Array): string {
+  let hex = '';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return `\\x${hex}`;
+}
+
+export async function encodePayload(
+  text: string,
+  format: EncodeFormat,
+  level = 3,
+): Promise<string> {
+  if (format === 'base64') return bytesToB64(utf8Encoder.encode(text));
+  const bytes = await compressToBytes(text, level);
+  return format === 'bytea-zstd' ? bytesToBytea(bytes) : bytesToB64(bytes);
+}
+
+/**
+ * Which encode format answers a decoded payload — so the round trip closes by
+ * default: what you pulled out of a Postgres column goes back as bytea without
+ * anyone choosing. It maps the format the DECODER reported, and answers null
+ * for inputs that were never an encoded payload at all (plain JSON text), where
+ * there is nothing to return to and the standing choice should stand.
+ */
+export function encodeFormatFor(decoded: PayloadFormat): EncodeFormat | null {
+  switch (decoded) {
+    case 'postgres-bytea-zstd':
+      return 'bytea-zstd';
+    case 'base64-zstd':
+    case 'base64url-zstd':
+    case 'raw-zstd':
+      return 'base64-zstd';
+    default:
+      return null;
+  }
+}
+
 export async function decompressFromB64(b64: string): Promise<string> {
   const decoded = decodeBase64(b64);
   if (!('bytes' in decoded)) throw new Error(decoded.error);

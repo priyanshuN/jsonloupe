@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
-import { executeUserCode, type RunOk } from './run-exec';
+import { executeUserCode, executeUserScripts, type RunOk } from './run-exec';
 
 const DOC = JSON.stringify({
   tasks: [
@@ -115,5 +115,140 @@ describe('executeUserCode', () => {
   it('returns a large result whole, uncapped', () => {
     const res = expectOk(executeUserCode(DOC, 'new Array(300000).fill(1)'));
     expect(JSON.parse(res.resultText)).toHaveLength(300_000);
+  });
+});
+
+// What a script READS, learned by running it — the reading run mode checks a
+// new document against before pressing a saved function over it.
+describe('executeUserCode · trace', () => {
+  it('says nothing about reads unless it was asked', () => {
+    const res = expectOk(executeUserCode(DOC, 'data.tasks.length'));
+    // Absent, NOT empty: "never traced" and "reads nothing" are different facts.
+    expect(res.reads).toBeUndefined();
+  });
+
+  it('records the paths a script touched', () => {
+    const res = expectOk(
+      executeUserCode(DOC, 'data.tasks.filter(t => t.status === "FAILED")', true),
+    );
+    expect(res.reads).toEqual(['tasks', 'tasks[].status']);
+  });
+
+  it('collapses every element of an array onto one path', () => {
+    const res = expectOk(executeUserCode(DOC, 'data.tasks.map(t => t.id)', true));
+    expect(res.reads).toEqual(['tasks', 'tasks[].id']);
+  });
+
+  it('records nothing for a script that never reads the document', () => {
+    const res = expectOk(executeUserCode(DOC, '1 + 1', true));
+    expect(res.reads).toEqual([]);
+  });
+
+  it('leaves the result identical to an untraced run', () => {
+    const code = 'data.tasks.filter(t => t.status === "FAILED").map(t => t.id)';
+    expect(expectOk(executeUserCode(DOC, code, true)).resultText)
+      .toBe(expectOk(executeUserCode(DOC, code)).resultText);
+  });
+
+  it('keeps array methods working through the recorder', () => {
+    // The methods arrive through the same trap as data; handing them back
+    // unbound would break `this` and take every script with it.
+    const res = expectOk(executeUserCode(DOC, 'data.tasks.map(t => t.id).join("-")', true));
+    expect(res.resultText).toBe('"1-2-3"');
+  });
+
+  it('learns what a script FOUND, not what it groped for', () => {
+    // `jobs` is absent here, so recording it would teach this function to
+    // demand it of every future document and report a mismatch forever.
+    const res = expectOk(executeUserCode(DOC, 'data.jobs ?? data.tasks', true));
+    expect(res.reads).toContain('tasks');
+    expect(res.reads).not.toContain('jobs');
+  });
+
+  it('records no machinery — a result on its way out is probed for toJSON', () => {
+    const res = expectOk(executeUserCode(DOC, 'data.tasks', true));
+    expect(res.reads?.some((p) => p.includes('toJSON'))).toBe(false);
+  });
+});
+
+// Several saved functions over ONE document — the day's answers as one report.
+describe('executeUserScripts', () => {
+  const batch = (scripts: { name: string; code: string }[], trace = false) =>
+    executeUserScripts(DOC, scripts, trace);
+
+  it('keys every answer by its function name', () => {
+    const res = batch([
+      { name: 'failed', code: 'data.tasks.filter(t => t.status === "FAILED").length' },
+      { name: 'ids', code: 'data.tasks.map(t => t.id)' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({ failed: 2, ids: [1, 2, 3] });
+    expect(res.entries.map((e) => [e.name, e.ok])).toEqual([['failed', true], ['ids', true]]);
+  });
+
+  it('keeps a failed function in the report as null, and says why', () => {
+    // The shape has to be the same every day even when one of them breaks —
+    // otherwise yesterday's report and today's cannot be compared at all.
+    const res = batch([
+      { name: 'good', code: 'data.tasks.length' },
+      { name: 'bad', code: 'data.nope.length' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({ good: 3, bad: null });
+    expect(res.entries[1]).toMatchObject({ name: 'bad', ok: false });
+    expect(res.entries[1].error).toContain('TypeError');
+  });
+
+  it('costs one key, not the report, when a result will not serialize', () => {
+    const res = batch([
+      { name: 'cyclic', code: 'const a = {}; a.self = a; return a' },
+      { name: 'fine', code: 'data.tasks.length' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({ cyclic: null, fine: 3 });
+  });
+
+  it('keeps a function named __proto__ in the report like any other', () => {
+    // The keys are names the user typed. On a plain object this assignment runs
+    // the prototype setter instead of creating a property, so the entry would
+    // disappear from its own report.
+    const res = batch([
+      { name: '__proto__', code: 'data.tasks.length' },
+      { name: 'constructor', code: '1 + 1' },
+      { name: 'ordinary', code: '7' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    // Asserted key by key on purpose: `{ __proto__: 3 }` written as a literal
+    // sets the prototype of the EXPECTATION rather than a property, so the
+    // obvious version of this test passes against the bug it exists to catch.
+    const report = JSON.parse(res.resultText) as Record<string, unknown>;
+    expect(Object.keys(report).sort()).toEqual(['__proto__', 'constructor', 'ordinary']);
+    expect(report['__proto__']).toBe(3);
+    expect(report.constructor).toBe(2);
+    expect(report.ordinary).toBe(7);
+  });
+
+  it('fails as a whole only when the document itself cannot be read', () => {
+    const res = executeUserScripts('{"a": 1,}', [{ name: 'any', code: 'data.a' }]);
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('plain JSON') });
+  });
+
+  it('names which function wrote which console line', () => {
+    const res = batch([
+      { name: 'first', code: 'console.log("hello"); return 1' },
+      { name: 'second', code: 'console.warn("careful"); return 2' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.logs).toEqual(['first: hello', 'second warn: careful']);
+  });
+
+  it('learns what each function reads, separately', () => {
+    const res = batch([
+      { name: 'statuses', code: 'data.tasks.map(t => t.status)' },
+      { name: 'count', code: 'data.tasks.length' },
+    ], true);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.entries[0].reads).toEqual(['tasks', 'tasks[].status']);
+    expect(res.entries[1].reads).toEqual(['tasks']);
   });
 });

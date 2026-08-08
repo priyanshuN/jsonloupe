@@ -21,10 +21,11 @@ import { SAMPLE_DOC, SAMPLE_DOC_TITLE } from './sample-doc';
 import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
-  compressToB64,
   decodeJsonPayload,
+  encodeFormatFor,
   sniffPayloadText,
   type DecodeJsonPayloadOptions,
+  type EncodeFormat,
   type PayloadDecodeError,
   type PayloadDecodeMetadata,
   type PayloadInput,
@@ -47,8 +48,10 @@ import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayl
 import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
-import { scriptChipLabel } from './run-script';
-import type { RunResult } from './run-exec';
+import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
+import type { SavedScript } from './db';
+import type { RunResult, BatchResult } from './run-exec';
+import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
@@ -79,6 +82,26 @@ function call<T>(msg: Record<string, unknown>): Promise<T> {
 type WorkerPayloadDecodeResult =
   | { ok: true; text: string; metadata: PayloadDecodeMetadata }
   | { ok: false; error: PayloadDecodeError; metadata: PayloadDecodeMetadata };
+
+// Zstd is WASM, and the page cannot compile WASM: its own CSP is
+// `script-src 'self'` with no `wasm-unsafe-eval`, so a main-thread
+// WebAssembly.instantiate is refused and the promise behind it never settles —
+// which is exactly how `compress` came to do nothing at all, silently, while
+// decoding (already in the worker) always worked. Both directions live in the
+// worker now, where the policy allows it and a 40 MB compress is off the UI
+// thread besides.
+async function compressInWorker(
+  text: string,
+  format: EncodeFormat = 'base64-zstd',
+): Promise<{ b64: string; sourceBytes: number }> {
+  const res = await call<{ ok: boolean; b64?: string; sourceBytes?: number; error?: string }>({
+    type: 'compressPayload',
+    text,
+    format,
+  });
+  if (!res.ok || typeof res.b64 !== 'string') throw new Error(res.error ?? 'compress failed');
+  return { b64: res.b64, sourceBytes: res.sourceBytes ?? text.length };
+}
 
 function decodePayloadInWorker(
   input: PayloadInput,
@@ -171,6 +194,7 @@ const splitDivider = $<HTMLElement>('#split-divider');
 const codeView = $('#code-view');
 const codeHost = $('#code-host');
 const toolbarTreeOps = $('#tb-tree-ops');
+const compressBtn = $<HTMLButtonElement>('#compress-btn');
 const treeBar = $('#tree-bar');
 const treeBarOps = $('#tree-bar-ops');
 const codeBar = $('#code-bar');
@@ -338,7 +362,10 @@ function paintStatusForPane(): void {
 function placeTreeOps(p: Pane): void {
   const sourceBar = p === 'run' && runSource === 'code' ? codeBarOps : treeBarOps;
   const host = p === 'split' || p === 'run' ? sourceBar : toolbarTreeOps;
-  host.append(collapseBtn, treeCopyBtn, treeDownloadBtn);
+  // `compress` travels with them — it acts on the same document — and is
+  // appended LAST so the order is stable wherever the cluster lands. Left out
+  // of this list it stayed behind in the toolbar and the group came apart.
+  host.append(collapseBtn, treeCopyBtn, treeDownloadBtn, compressBtn);
 }
 
 // The source pane's tree/code switch: run mode only, and it stands in the bar
@@ -387,7 +414,7 @@ const PASTE_ECHO_MAX = 2_000_000;
 // index.html is the only place the paths live, so a button built here gets the
 // same box, the same 1.5 stroke and the same currentColor ink as one written in
 // markup — which is the whole point of dropping the six characters.
-type IconName = 'back' | 'compare' | 'reload' | 'download' | 'warn' | 'theme';
+type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'search' | 'filter' | 'warn' | 'theme';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function icon(name: IconName): SVGSVGElement {
@@ -1885,7 +1912,7 @@ async function openText(
   filterOn = false;
   filterScrollSnapshot = null;
   filterBtn.classList.remove('on');
-  filterBtn.textContent = 'filter';
+  paintFilterBtn(null);
   tree.resetSelection();
   // showPane repaints the strip; with nothing selected that is the resting line.
   showPane('tree');
@@ -1994,6 +2021,15 @@ async function importFiles(
     } catch (error) {
       showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'bad');
       continue;
+    }
+    // A playbook is a file OF this app, not a file FOR it: dropping one means
+    // "add these functions", not "read this JSON". It is additive and every
+    // imported function is one `×` away, which is what makes deciding for the
+    // user acceptable here — nothing is replaced and nothing is lost.
+    if (looksLikePlaybook(payload.text)) {
+      if (await importPlaybookText(payload.text, file.name)) continue;
+      // Not actually a playbook after all — fall through and open it, so a
+      // document that merely mentions the word still reads as a document.
     }
     if (i === entries.length - 1) {
       await openText(
@@ -2182,10 +2218,18 @@ function goLanding(): void {
 // ---------- zstd ⇄ base64 codec panel ----------
 
 const codecPane = $('#codec');
-const codecInC = $<HTMLTextAreaElement>('#codec-in-c');
-const codecOutC = $<HTMLTextAreaElement>('#codec-out-c');
-const codecInD = $<HTMLTextAreaElement>('#codec-in-d');
-const codecOutD = $<HTMLTextAreaElement>('#codec-out-d');
+// One pair, not two cards: the JSON side and the payload side, with the
+// direction living in the buttons between them.
+const codecJson = $<HTMLTextAreaElement>('#codec-json');
+const codecFormatSwitch = $('#codec-format');
+/**
+ * What the encode side produces, and what its copy copies. It follows a decode
+ * — read a bytea cell and the chip moves to bytea, so the round trip closes
+ * without anyone choosing — but never moves on its own afterwards: a default
+ * that keeps overruling a deliberate choice is a default that fights you.
+ */
+let codecFormat: EncodeFormat = 'base64-zstd';
+const codecPayload = $<HTMLTextAreaElement>('#codec-payload');
 const codecTrace = $('#codec-trace');
 const codecFileInput = $<HTMLInputElement>('#codec-file-input');
 let codecDecodedText = '';
@@ -2197,12 +2241,14 @@ function showCodec(): void {
   landing.hidden = true;
   viewer.hidden = true;
   codecPane.hidden = false;
+  paintCodecJsonPlaceholder();
 }
 
+// What the last press did, under the pair it acted on: the trip and its sizes
+// for a success, the bytes and the reason for a failure. It is one line for
+// both directions because there is one conversation here, not two.
 function setCodecTrace(text: string, state: 'ok' | 'bad' | null): void {
   codecTrace.textContent = text;
-  // It rides the output box's label row now, so a long trace ellipsizes there
-  // and keeps the whole of itself in the tooltip.
   codecTrace.title = text;
   codecTrace.hidden = !text;
   codecTrace.classList.toggle('ok', state === 'ok');
@@ -2217,13 +2263,19 @@ function showDecodedPayload(
   codecDecodedText = text;
   codecDecodedTitle = decodedDocumentTitle(title);
   codecDecodedProvenance = provenance;
+  // A decode fills the JSON side — the direction the button drew. A huge one
+  // still never reaches the textarea: `open as document` and `copy` work off
+  // the text itself, so the box says what is being held instead of rendering
+  // 40 MB into the DOM.
   if (text.length <= PASTE_ECHO_MAX) {
-    codecOutD.value = text;
-    codecOutD.placeholder = '';
+    codecJson.value = text;
+    codecJson.placeholder = '';
   } else {
-    codecOutD.value = '';
-    codecOutD.placeholder = `decoded ${exactBytes(provenance.decodedBytes)} — kept out of the textarea so the page stays responsive`;
+    codecJson.value = '';
+    codecJson.placeholder = `decoded ${exactBytes(provenance.decodedBytes)} — kept out of the textarea so the page stays responsive`;
   }
+  // What it was IN is what a re-encode should return to.
+  adoptFormatFrom(provenance);
   setCodecTrace(provenanceTrace(provenance), 'ok');
   showToast(`decoded ${exactBytes(provenance.decodedBytes)}`);
 }
@@ -2248,12 +2300,12 @@ async function decodeInPayloadTools(
   if (!decoded.ok) {
     codecDecodedText = '';
     codecDecodedProvenance = null;
-    codecOutD.value = '';
+    codecJson.value = '';
     const bytes = firstBytesHex(input);
     // Bytes lead, wordy message last: the trace ellipsizes at the label row's
     // right edge, and the clue must survive the cut — the prose can go.
     setCodecTrace(
-      `${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
+      `decode failed · ${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
       'bad',
     );
     showToast(decoded.error.message, 'bad');
@@ -2273,95 +2325,172 @@ $('#codec-close').addEventListener('click', () => {
   else goLanding();
 });
 
-$('#zstd-btn').addEventListener('click', async () => {
-  if (!currentText) return;
-  const documentRevision = currentDocumentRevision;
-  const source = currentText;
-  let b64: string;
-  try {
-    b64 = await compressToB64(source);
-  } catch (err) {
-    showToast(`compress failed: ${String(err)}`, 'bad');
-    return;
-  }
-  if (documentRevision !== currentDocumentRevision) return;
-  showCodec();
-  codecInC.value = '';
-  codecInC.placeholder = `compressed the open doc (${fmtBytes(source.length)} → ${fmtBytes(b64.length)} b64)`;
-  codecOutC.value = b64;
-  try {
-    await copyText(b64);
-    showToast(`compressed ${fmtBytes(source.length)} → ${fmtBytes(b64.length)} · copied`);
-  } catch {
-    showToast(`compressed ${fmtBytes(source.length)} → ${fmtBytes(b64.length)} — use "copy result"`);
-  }
-});
-
-$('#codec-run-c').addEventListener('click', async () => {
-  const src = codecInC.value;
-  if (!src.trim()) {
-    showToast('paste something to compress');
-    return;
-  }
-  try {
-    codecOutC.value = await compressToB64(src);
-    showToast(`${fmtBytes(src.length)} → ${fmtBytes(codecOutC.value.length)} b64`);
-  } catch (err) {
-    showToast(`compress failed: ${String(err)}`, 'bad');
-  }
-});
-
-$('#codec-use-current').addEventListener('click', async () => {
+// Compressing the open document is the one act that skips the pair entirely:
+// the JSON side would have to hold a 40 MB string to show you what it already
+// knows. It fills the payload side and says what it did.
+async function compressOpenDocument(): Promise<void> {
   if (!currentText) {
     showToast('no document open');
     return;
   }
   const documentRevision = currentDocumentRevision;
   const source = currentText;
+  const format = codecFormat;
+  let out: string;
   try {
-    codecInC.value = '';
-    codecInC.placeholder = `using the open doc (${fmtBytes(source.length)}) — not rendered here on purpose`;
-    const encoded = await compressToB64(source);
-    if (documentRevision !== currentDocumentRevision) return;
-    codecOutC.value = encoded;
-    showToast(`${fmtBytes(source.length)} → ${fmtBytes(encoded.length)} b64`);
+    out = (await compressInWorker(source, format)).b64;
   } catch (err) {
+    setCodecTrace(`compress failed · ${String(err)}`, 'bad');
     showToast(`compress failed: ${String(err)}`, 'bad');
+    return;
+  }
+  if (documentRevision !== currentDocumentRevision) return;
+  codecJson.value = '';
+  codecJson.placeholder = `the open document (${fmtBytes(source.length)}) — not rendered here on purpose`;
+  codecPayload.value = out;
+  setCodecTrace(compressionTrace(source.length, out.length, format), 'ok');
+}
+
+// The toolbar's `compress`, and the only door into this page from a document:
+// it compresses what is open, copies it, and shows the result — where the chips
+// are, in case base64 zstd was not the destination. One control instead of a
+// menu entry that opened a page AND a page that had to be found.
+$('#compress-btn').addEventListener('click', async () => {
+  if (!currentText) return;
+  showCodec();
+  await compressOpenDocument();
+  if (!codecPayload.value) return;
+  try {
+    await copyText(codecPayload.value);
+    showToast(`copied · ${FORMAT_NAMES[codecFormat]} ${fmtBytes(codecPayload.value.length)}`);
+  } catch {
+    showToast('compressed — use copy on the payload side');
   }
 });
 
-$('#codec-copy-c').addEventListener('click', async () => {
-  if (!codecOutC.value) return;
-  await copyText(codecOutC.value);
-  showToast('base64 zstd copied');
+const FORMAT_NAMES: Record<EncodeFormat, string> = {
+  'base64-zstd': 'base64 zstd',
+  'bytea-zstd': 'bytea',
+  base64: 'base64',
+};
+
+// The line under the pair: the trip, both ends of it, and what it cost. It
+// names the FORMAT because the three cost wildly different things — plain
+// base64 always grows the document by a third, and reading `→ 4.2 kB` without
+// knowing which trip produced it explains nothing.
+function compressionTrace(sourceBytes: number, outBytes: number, format: EncodeFormat): string {
+  const ratio = sourceBytes > 0 ? Math.round((outBytes / sourceBytes) * 1000) / 10 : 0;
+  const verb = format === 'base64' ? 'encoded' : 'compressed';
+  return `${verb} ${fmtBytes(sourceBytes)} → ${FORMAT_NAMES[format]} ${fmtBytes(outBytes)} · ${ratio}% of the original`;
+}
+
+function paintCodecFormat(): void {
+  for (const b of codecFormatSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', b.dataset.format === codecFormat);
+  }
+}
+
+// A decode says which form the payload was IN, and that is the form a re-encode
+// should return to. Moving the chip is how the page says so — visibly, where it
+// can be overridden — rather than remembering it somewhere the user cannot see.
+function adoptFormatFrom(metadata: store.DocProvenance | { format: string }): void {
+  const suggested = encodeFormatFor(metadata.format as Parameters<typeof encodeFormatFor>[0]);
+  if (!suggested) return;
+  codecFormat = suggested;
+  paintCodecFormat();
+}
+
+codecFormatSwitch.addEventListener('click', (e) => {
+  const format = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-format]')?.dataset.format;
+  if (!format || format === codecFormat) return;
+  codecFormat = format as EncodeFormat;
+  paintCodecFormat();
+  // The box below now holds a form the chips no longer claim. Re-encoding is
+  // the honest answer when there is something to re-encode; otherwise the chip
+  // simply stands for the next press.
+  if (codecJson.value.trim() || currentText) void runCompress();
 });
 
-$('#codec-run-d').addEventListener('click', async () => {
-  const src = codecInD.value;
+// LEFT TO RIGHT. Reads the JSON side, fills the payload side.
+async function runCompress(): Promise<void> {
+  const src = codecJson.value;
   if (!src.trim()) {
-    showToast('paste a payload to decode');
+    // The one case where the empty box is not the whole story: the open
+    // document may be standing in for it (see compressOpenDocument).
+    if (currentText) return void compressOpenDocument();
+    showToast('paste JSON on the left to compress');
+    return;
+  }
+  try {
+    const format = codecFormat;
+    codecPayload.value = (await compressInWorker(src, format)).b64;
+    setCodecTrace(compressionTrace(src.length, codecPayload.value.length, format), 'ok');
+  } catch (err) {
+    setCodecTrace(`compress failed · ${String(err)}`, 'bad');
+    showToast(`compress failed: ${String(err)}`, 'bad');
+  }
+}
+
+$('#codec-run-c').addEventListener('click', () => void runCompress());
+
+// RIGHT TO LEFT. Reads the payload side, fills the JSON side.
+$('#codec-run-d').addEventListener('click', async () => {
+  const src = codecPayload.value;
+  if (!src.trim()) {
+    showToast('paste a payload on the right to decode');
     return;
   }
   await decodeInPayloadTools(src, 'pasted payload');
 });
 
-$('#codec-copy-d').addEventListener('click', async () => {
-  if (!codecDecodedText) return;
-  await copyText(codecDecodedText);
-  showToast('decoded JSON copied');
+// An empty left box is not a mistake while a document is open — it is the one
+// input this side cannot hold, since rendering 40 MB into a textarea wedges the
+// page. So the placeholder says it, where and exactly when it applies, instead
+// of a button whose label never could.
+function paintCodecJsonPlaceholder(): void {
+  codecJson.placeholder = currentText
+    ? `{"orders": […]} · or leave this empty to compress the open document (${fmtBytes(currentText.length)})`
+    : '{"orders": […]}';
+}
+
+// Emptying the box is what makes the hint true again, so that is when it comes
+// back. Without this the box keeps whatever note the last press left on it —
+// "the open document … not rendered here on purpose" long after the user has
+// typed over it and cleared it, which describes a state that no longer exists.
+codecJson.addEventListener('input', () => {
+  if (!codecJson.value) paintCodecJsonPlaceholder();
 });
 
-$('#codec-open-d').addEventListener('click', async () => {
-  if (!codecDecodedText) {
-    showToast('decode a payload first');
+// Copy on BOTH sides: whichever one just filled is the one you came for, and
+// having to leave the page to get at it was the whole complaint.
+$('#codec-copy-payload').addEventListener('click', async () => {
+  if (!codecPayload.value) return;
+  await copyText(codecPayload.value);
+  showToast('payload copied');
+});
+
+$('#codec-copy-json').addEventListener('click', async () => {
+  // A decode too large to render lives in codecDecodedText, not in the box.
+  const text = codecJson.value || codecDecodedText;
+  if (!text) return;
+  await copyText(text);
+  showToast('JSON copied');
+});
+
+$('#codec-open-json').addEventListener('click', async () => {
+  const text = codecJson.value || codecDecodedText;
+  if (!text) {
+    showToast('decode a payload, or paste JSON, first');
     return;
   }
+  // Provenance belongs to a decode; JSON typed in by hand has none.
+  const decoded = text === codecDecodedText;
   await openText(
-    codecDecodedText,
-    codecDecodedTitle,
+    text,
+    decoded ? codecDecodedTitle : 'pasted.json',
     null,
     null,
-    codecDecodedProvenance,
+    decoded ? codecDecodedProvenance : null,
     true,
   );
 });
@@ -2386,8 +2515,11 @@ payloadBadge.addEventListener('click', () => {
   codecDecodedText = currentText;
   codecDecodedTitle = currentTitle;
   codecDecodedProvenance = currentProvenance;
-  codecOutD.value = '';
-  codecOutD.placeholder = 'Current decoded document — use “open as document” to return to it.';
+  // This document IS the decoded side, so the JSON box says so rather than
+  // rendering a document that is already open in the app behind it.
+  codecJson.value = '';
+  codecJson.placeholder = 'the document open behind this page — decoded from the payload below';
+  adoptFormatFrom(currentProvenance);
   setCodecTrace(
     `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''} · ${provenanceTrace(currentProvenance)}`,
     'ok',
@@ -2964,6 +3096,20 @@ let filterOn = false;
 // scroll position is main-side), restored when the filter is cleared.
 let filterScrollSnapshot: number | null = null;
 
+// The funnel says what the control DOES and never changes; the count says what
+// it did, and only exists while the filter is on. Rebuilt rather than assigned
+// as text, because the glyph is a child element and `textContent` would delete
+// it — which is exactly what the old `filter (37)` string did to any icon put
+// beside it.
+function paintFilterBtn(matches: number | null): void {
+  filterBtn.replaceChildren(icon('filter'));
+  filterBtn.setAttribute('aria-pressed', String(matches !== null));
+  if (matches === null) return;
+  const count = document.createElement('span');
+  count.textContent = `${fmtNumber(matches)}${matches >= 2000 ? '+' : ''}`;
+  filterBtn.appendChild(count);
+}
+
 async function setFilter(query: string): Promise<void> {
   // Snapshot scroll only on ENTERING filter from the unfiltered tree; don't
   // re-snapshot on repeated filter edits while already filtered.
@@ -2971,7 +3117,7 @@ async function setFilter(query: string): Promise<void> {
   const r = await call<{ totalRows: number; matches: number }>({ type: 'filter', query });
   filterOn = !!query;
   filterBtn.classList.toggle('on', filterOn);
-  filterBtn.textContent = filterOn ? `filter (${r.matches}${r.matches >= 2000 ? '+' : ''})` : 'filter';
+  paintFilterBtn(filterOn ? r.matches : null);
   showPane('tree');
   searchPanel.hidden = true;
   tree.resetSelection();
@@ -4027,8 +4173,25 @@ const runStatus = $('#run-status');
 const runErrorEl = $('#run-error');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
-const runSaved = $('#run-saved');
-const runSaveChip = $<HTMLButtonElement>('#run-save');
+const runFitEl = $('#run-fit');
+const runBatchEl = $('#run-batch');
+const runPickedBtn = $<HTMLButtonElement>('#run-picked');
+const runHead = $('.run-head');
+const runNameEl = $('#run-name');
+const runNameInput = $<HTMLInputElement>('#run-name-input');
+const runDirtyEl = $('#run-dirty');
+const runEditBtn = $<HTMLButtonElement>('#run-edit');
+const runSaveBtn = $<HTMLButtonElement>('#run-save');
+const runSaveAsBtn = $<HTMLButtonElement>('#run-save-as');
+const runFaceSwitch = $('#run-face-switch');
+const runLibrary = $('#run-library');
+const runLibList = $('#run-lib-list');
+const runLibCount = $('#run-lib-count');
+const runLibSearch = $<HTMLInputElement>('#run-lib-search');
+const runNewBtn = $<HTMLButtonElement>('#run-new');
+const runExportBtn = $<HTMLButtonElement>('#run-export');
+const runImportBtn = $<HTMLButtonElement>('#run-import');
+const runImportInput = $<HTMLInputElement>('#run-import-file');
 const runSrcSwitch = $('#run-src-switch');
 const runResultLabel = $('#run-result-label');
 const runStaleBadge = $('#run-stale');
@@ -4046,6 +4209,50 @@ let runResultText = '';
 let runResultChannel: WorkerChannel | null = null;
 /** Which pane the left half is showing. Whatever the user arrived from. */
 let runSource: 'tree' | 'code' = 'tree';
+/** Which face the right column is showing: the library, or the last result. */
+let runFace: 'functions' | 'result' = 'result';
+/** True while the editor is open. Picking a function needs no editor at all. */
+let runAuthoring = false;
+/** The library record the editor is bound to — what `save` writes back to. */
+let runLoadedId: string | null = null;
+/** What that record held when it was loaded, so `unsaved` means something. */
+let runLoadedSnapshot = { name: '', script: '' };
+/**
+ * The row a click is asking to load while the editor has unsaved changes. The
+ * first press refuses and says so, a second press on the SAME row goes through:
+ * work is never lost by a stray click, and no dialog stands in the way either.
+ */
+let runPendingLoadId: string | null = null;
+/**
+ * Whether the result on screen has been outlived by its document. It is state
+ * rather than a `hidden` flag now that the library can cover the result bar:
+ * flipping back to the result must restore the badge, not clear the fact.
+ */
+let runStaleWanted = false;
+/** Whether the library is long enough to be worth a search field (see below). */
+let runLibSearchWanted = false;
+/**
+ * The paths the loaded function was seen to read. `undefined` means it has
+ * never been traced — which is not "reads nothing", so the fit line stays quiet
+ * rather than claiming the document is wrong.
+ */
+let runLoadedReads: string[] | undefined;
+/**
+ * The functions ticked for a batch. Empty is the ordinary state and the whole
+ * point of it: with nothing ticked, a row press is still the entire interaction
+ * — one function, one answer. Ticking is what turns the library into a report.
+ */
+const runPicked = new Set<string>();
+/**
+ * What produced the result on screen, when it was not a single script: a batch
+ * says `report · 3 functions` where one script says `array 2`. Empty for a
+ * single run, which lets the label describe the value itself.
+ */
+let runResultKind = '';
+/** How many functions the library holds, so the bar can hide what is moot. */
+let runLibraryCount = 0;
+/** What the bar's count says when nothing is ticked — restored on the last untick. */
+let runLibCountResting = 'functions';
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4121,66 +4328,407 @@ function setRunStatus(msg: string): void {
   runStatus.textContent = msg;
 }
 
-// ---------- saved scripts: the ask panel's chips, over the same store ----------
+// ---------- the library: functions you keep, and the column's two faces ----------
 //
-// A script you kept is the same object to the user as a question you kept — it
-// wears the same chip, deletes the same way, and outlives the document it was
-// written against — so it shares the ask panel's markup, its stylesheet and its
-// object store (db.ts). Pressing one loads it AND runs it: re-running is the
-// only reason it was kept.
+// The document is what changes daily; the handful of functions you run over it
+// is what holds still. So the library — not an empty editor — is what run mode
+// opens on, and a function is a NAMED thing you own rather than the first line
+// of some code: named, so five of them are told apart at a glance; bound to its
+// record, so editing one corrects it instead of minting a near-duplicate beside
+// it. Pressing one loads it AND runs it, which is the only reason it was kept.
+//
+// The library and the result share the column and are never both on screen:
+// before a run there is no result, and after one the result wants the height.
 
-/** As many as the ask panel shows — a chip row is a shortcut, not an archive. */
-const SCRIPT_CHIPS_SHOWN = 12;
+/** Below this the list is short enough to read whole; a search field is noise. */
+const LIBRARY_SEARCH_MIN = 8;
 
-async function renderScriptChips(): Promise<void> {
-  const saved = await store.listScripts();
-  // `+ save` leads the row and is never re-created, so it keeps focus across a
-  // re-render (deleting a chip with the keyboard lands you back on it).
-  runSaved.replaceChildren(runSaveChip);
-  for (const s of saved.slice(0, SCRIPT_CHIPS_SHOWN)) {
-    const chip = document.createElement('span');
-    chip.className = 'ask-chip';
-    chip.dataset.id = s.id;
-    chip.title = s.script;
-    const label = document.createElement('span');
-    label.textContent = scriptChipLabel(s.script);
-    const del = document.createElement('button');
-    del.className = 'chip-del';
-    del.textContent = '×';
-    del.title = 'Forget this script';
-    chip.append(label, del);
-    runSaved.appendChild(chip);
+function setRunFace(face: 'functions' | 'result'): void {
+  runFace = face;
+  const showing = face === 'functions';
+  runLibrary.hidden = !showing;
+  runViewport.hidden = showing || !runResultText;
+  runEmpty.hidden = showing || !!runResultText;
+  // One bar, serving whichever face is up: the result's ops act on a document
+  // that is not on screen while the library is, and the library's controls mean
+  // nothing while it is not.
+  for (const el of [runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = showing;
+  runLibCount.hidden = !showing;
+  runNewBtn.hidden = !showing;
+  runImportBtn.hidden = !showing;
+  // Nothing to export until there is something in the library.
+  runExportBtn.hidden = !showing || runLibraryCount === 0;
+  runPickedBtn.hidden = !showing || runPicked.size === 0;
+  runLibSearch.hidden = !showing || runLibSearchWanted === false;
+  if (showing) runStaleBadge.hidden = true;
+  else runStaleBadge.hidden = !runResultText || !runStaleWanted;
+  for (const b of runFaceSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', b.dataset.face === face);
   }
 }
 
-async function saveCurrentScript(): Promise<void> {
+// Rule 18's left edge: the row whose function is loaded is the selected one.
+function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'run-lib-row';
+  row.classList.toggle('selected', rec.id === runLoadedId);
+  // Only a function that has been traced can be said to fit or not; one that
+  // never ran here says nothing either way.
+  const misfit = (rec.reads ?? []).filter((p) => missing.has(p));
+  row.classList.toggle('misfit', misfit.length > 0);
+  row.dataset.id = rec.id;
+
+  // Rule 7's one checkbox. It is always drawn rather than revealed on hover:
+  // a tick that hides when the pointer leaves cannot be counted by eye.
+  //
+  // And it stands in a COLUMN that is entirely its own, full row height: the
+  // box itself is 14px, so every near-miss around it used to land on the row
+  // and RUN the function — the most expensive possible outcome for a slip
+  // aimed at the cheapest possible act. The zone is the target; the box is
+  // just what the zone draws.
+  const zone = document.createElement('span');
+  zone.className = 'run-lib-pickzone';
+  const pick = document.createElement('input');
+  pick.type = 'checkbox';
+  pick.className = 'chk run-lib-pick';
+  pick.checked = runPicked.has(rec.id);
+  pick.title = `Include ${rec.name} in a batch`;
+  pick.setAttribute('aria-label', `Include ${rec.name} in a batch`);
+  zone.appendChild(pick);
+
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'run-lib-open';
+  open.title = rec.script;
+  const name = document.createElement('span');
+  name.className = 'run-lib-name';
+  name.textContent = rec.name;
+  // No note field yet: the script's first line is what the function has to say
+  // about itself, and it is already the best one-liner available.
+  const note = document.createElement('span');
+  note.className = 'run-lib-note';
+  note.textContent = scriptChipLabel(rec.script);
+  open.append(name, note);
+
+  const meta = document.createElement('span');
+  meta.className = 'run-lib-meta';
+  // What the row's time slot is for is the more useful fact when there is one:
+  // that this function reads something the open document does not have.
+  if (misfit.length > 0) {
+    meta.classList.add('misfit-note');
+    meta.textContent = `reads ${fmtPaths(misfit)}`;
+    meta.title = `This document has no ${misfit.join(', ')}`;
+  } else {
+    meta.textContent = relTime(rec.updatedAt);
+  }
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'run-lib-del btn-icon btn-mini btn-quiet';
+  del.textContent = '×';
+  del.title = `Forget ${rec.name}`;
+  del.setAttribute('aria-label', `Forget ${rec.name}`);
+
+  row.append(zone, open, meta, del);
+  return row;
+}
+
+// The bar says what the library is, or — once anything is ticked — what a press
+// is about to run. The button carries the count so the number and the act are
+// one control rather than a label beside a verb.
+function paintPickState(total: number): void {
+  const picked = runPicked.size;
+  runPickedBtn.hidden = picked === 0;
+  runPickedBtn.textContent = `run ${fmtNumber(picked)}`;
+  // Both directions: unticking the last one has to put the bar back to what it
+  // said before, or it keeps claiming a selection that is gone.
+  runLibCount.textContent = picked > 0
+    ? `${fmtNumber(picked)} of ${fmtNumber(total)} picked`
+    : runLibCountResting;
+}
+
+async function renderLibrary(): Promise<void> {
+  const all = await store.listScripts();
+  const term = runLibSearch.value.trim().toLowerCase();
+  const shown = term
+    ? all.filter((s) => `${s.name}\n${s.script}`.toLowerCase().includes(term))
+    : all;
+
+  runLibraryCount = all.length;
+  runExportBtn.hidden = runFace !== 'functions' || all.length === 0;
+  runLibSearchWanted = all.length >= LIBRARY_SEARCH_MIN;
+  runLibSearch.hidden = !runLibSearchWanted || runFace !== 'functions';
+  if (all.length === 0) runLibCountResting = 'functions';
+  else if (term) runLibCountResting = `${fmtNumber(shown.length)} of ${fmtNumber(all.length)}`;
+  else runLibCountResting = `${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`;
+  runLibCount.textContent = runLibCountResting;
+
+  if (shown.length === 0) {
+    runLibList.replaceChildren(
+      all.length === 0
+        ? emptyState('no functions yet', 'Press `+ new`, write one, and save it — it will be here for the next document.')
+        : emptyState('nothing matches', 'Clear the search to see the whole library.'),
+    );
+    return;
+  }
+  // One question for the whole list rather than one per row: the union of every
+  // path any function reads, asked of the document once.
+  const union = [...new Set(shown.flatMap((s) => s.reads ?? []))];
+  const missing = new Set(await missingPaths(union));
+  runLibList.replaceChildren(...shown.map((s) => renderLibraryRow(s, missing)));
+  // A tick on a function that has since been deleted would keep a batch that
+  // cannot run: the picks are only ever what the library still holds.
+  for (const id of runPicked) if (!all.some((s) => s.id === id)) runPicked.delete(id);
+  paintPickState(all.length);
+}
+
+/** Has the editor drifted from the record it was loaded from? */
+function runIsDirty(): boolean {
+  if (!runAuthoring) return false;
+  const script = runEditor?.getDoc() ?? '';
+  return script.trim() !== runLoadedSnapshot.script.trim()
+    || runNameInput.value.trim() !== runLoadedSnapshot.name.trim();
+}
+
+// The head bar: the constant. Which function is loaded, whether it has drifted,
+// and the one action that makes sense in the state you are in — `run` while you
+// are picking, `save` while you are writing.
+function paintRunHead(): void {
+  const dirty = runIsDirty();
+  runNameEl.hidden = runAuthoring;
+  runNameInput.hidden = !runAuthoring;
+  runNameEl.textContent = runLoadedSnapshot.name || 'untitled';
+  runDirtyEl.hidden = !dirty;
+  runEditBtn.hidden = runAuthoring;
+  runSaveBtn.hidden = !runAuthoring;
+  runSaveAsBtn.hidden = !runAuthoring || !runLoadedId;
+  runEditorHost.hidden = !runAuthoring;
+  // One `run` button in two homes, moved rather than duplicated: docked in the
+  // field while the field exists, on the head bar while it does not.
+  (runAuthoring ? runEditorHost : runHead).appendChild(runExecBtn);
+}
+
+function setAuthoring(on: boolean): void {
+  runAuthoring = on;
+  paintRunHead();
+  if (on) runEditor?.focus();
+}
+
+// ---------- what a function reads, against what this document has ----------
+//
+// A function outlives the documents it runs over, so one day it meets a file
+// whose orders are called something else and answers `[]` — which reads exactly
+// like "none today". run-exec.ts learns the paths a script touched on its first
+// run; the worker answers whether the open document has them (`hasPaths`); this
+// says so, in the head, BEFORE the run rather than after a plausible result.
+//
+// It is a remark, never a gate: the reading comes from one run over one
+// document, so a script that branches recorded only the branch it took. The
+// wording is about the SCRIPT for that reason — "this reads `orders`" — and the
+// run button is never disabled.
+
+/** How many missing paths are worth naming before the line is just noise. */
+const FIT_NAMED_MAX = 2;
+
+function fmtPaths(paths: string[]): string {
+  const named = paths.slice(0, FIT_NAMED_MAX).map((p) => `\`${p}\``).join(', ');
+  const rest = paths.length - FIT_NAMED_MAX;
+  return rest > 0 ? `${named} and ${fmtNumber(rest)} more` : named;
+}
+
+async function missingPaths(paths: string[]): Promise<string[]> {
+  if (paths.length === 0 || !currentText) return [];
+  const r = await call<{ missing: string[] }>({ type: 'hasPaths', paths });
+  return r?.missing ?? [];
+}
+
+async function paintRunFit(): Promise<void> {
+  const reads = runLoadedReads;
+  if (!reads || reads.length === 0 || !currentText) {
+    runFitEl.hidden = true;
+    return;
+  }
+  const missing = await missingPaths(reads);
+  runFitEl.hidden = missing.length === 0;
+  runFitEl.textContent = `this reads ${fmtPaths(missing)} — this document has none of that`;
+}
+
+/** Load a saved function into the editor, collapsed and clean. */
+function adoptScript(rec: SavedScript | null): void {
+  runLoadedId = rec?.id ?? null;
+  runLoadedReads = rec?.reads;
+  runLoadedSnapshot = { name: rec?.name ?? '', script: rec?.script ?? '' };
+  runNameInput.value = runLoadedSnapshot.name;
+  runEditor?.setDoc(runLoadedSnapshot.script);
+  runPendingLoadId = null;
+  paintRunHead();
+  void paintRunFit();
+}
+
+async function loadAndRun(id: string): Promise<void> {
+  const rec = (await store.listScripts()).find((s) => s.id === id);
+  if (!rec) return;
+  // Two presses to discard: the first says what is at stake, the second obeys.
+  if (runIsDirty() && runPendingLoadId !== id) {
+    runPendingLoadId = id;
+    setRunStatus(`unsaved changes to \`${runLoadedSnapshot.name || 'this script'}\` — press again to discard them`);
+    return;
+  }
+  // The editor holds the script a run reads, so a row press needs it mounted
+  // even though nothing is about to be typed into it. Without this a library
+  // press on a tab whose lazy chunk never loaded runs the EMPTY editor and
+  // blames the user for not writing an expression.
+  await ensureRunEditor();
+  if (!runEditor) return;
+  setRunStatus('');
+  adoptScript(rec);
+  setAuthoring(false);
+  void store.touchSaved(id);
+  await renderLibrary();
+  await runScript();
+}
+
+async function saveCurrentScript(asNew: boolean): Promise<void> {
   const code = runEditor?.getDoc().trim() ?? '';
   if (!code) {
     setRunStatus('nothing to save yet — write a script first');
     return;
   }
-  await store.saveScript(code);
-  await renderScriptChips();
-  showToast('script saved');
+  const typed = runNameInput.value.trim();
+  const existing = await store.listScripts();
+  // New code, so what the OLD code was seen to read describes a function that
+  // no longer exists: cleared, and learned again on the next run.
+  const codeChanged = code !== runLoadedSnapshot.script.trim();
+  let rec: SavedScript | null = null;
+  if (!asNew && runLoadedId) {
+    rec = await store.updateScript(runLoadedId, {
+      name: typed || undefined,
+      script: code,
+      ...(codeChanged ? { reads: null } : {}),
+    });
+  }
+  if (!rec) {
+    const base = typed || deriveScriptName(code);
+    // A fork never overwrites what it was forked from, so it takes the first
+    // free name rather than asking for one.
+    const name = asNew ? uniqueScriptName(base, existing.map((s) => s.name)) : base;
+    rec = await store.saveScript(name, code);
+  }
+  adoptScript(rec);
+  await renderLibrary();
+  showToast(`saved · ${rec.name}`);
 }
 
-runSaved.addEventListener('click', async (e) => {
+runFaceSwitch.addEventListener('click', (e) => {
+  const face = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-face]')?.dataset.face;
+  if (face !== 'functions' && face !== 'result') return;
+  setRunFace(face);
+  if (face === 'functions') void renderLibrary();
+});
+
+runLibSearch.addEventListener('input', () => void renderLibrary());
+
+runLibList.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
-  if (target.closest('#run-save')) return void saveCurrentScript();
-  const chip = target.closest<HTMLElement>('.ask-chip');
-  const id = chip?.dataset.id;
+  const id = target.closest<HTMLElement>('.run-lib-row')?.dataset.id;
   if (!id) return;
-  if (target.closest('.chip-del')) {
-    await store.removeSaved(id);
-    await renderScriptChips();
+  // Ticking is not running: it says what a later press will cover, and the
+  // result on screen stays whatever it already was. Anywhere in the column
+  // counts — a click on the padding around the box has to mean the same thing
+  // as a click on the box, or the column is decoration rather than a target.
+  const zone = target.closest('.run-lib-pickzone');
+  if (zone) {
+    const box = zone.querySelector<HTMLInputElement>('.run-lib-pick');
+    if (!box) return;
+    // The box toggles itself when it is what was hit; the padding does not.
+    if (target !== box) box.checked = !box.checked;
+    if (box.checked) runPicked.add(id);
+    else runPicked.delete(id);
+    paintPickState(runLibraryCount);
     return;
   }
-  const saved = (await store.listScripts()).find((s) => s.id === id);
-  if (!saved || !runEditor) return;
-  runEditor.setDoc(saved.script);
-  void store.touchSaved(id);
-  await runScript();
+  if (target.closest('.run-lib-del')) {
+    await store.removeSaved(id);
+    if (id === runLoadedId) runLoadedId = null;
+    await renderLibrary();
+    paintRunHead();
+    return;
+  }
+  await loadAndRun(id);
 });
+
+runNewBtn.addEventListener('click', () => {
+  adoptScript(null);
+  setRunFace('result');
+  setAuthoring(true);
+});
+
+// ---------- the library as a file ----------
+//
+// Everything in run mode so far lives in this browser's IndexedDB, which means
+// it is one cleared storage away from gone and cannot be handed to anyone. A
+// playbook is the portable form: the functions, their learned reads, and
+// nothing else — never the document (playbook.ts says why).
+
+async function exportPlaybook(): Promise<void> {
+  const all = await store.listScripts();
+  if (all.length === 0) return;
+  const text = serializePlaybook({
+    playbookVersion: PLAYBOOK_VERSION,
+    functions: all.map((s) => ({
+      name: s.name,
+      script: s.script,
+      ...(s.reads ? { reads: s.reads } : {}),
+    })),
+  });
+  downloadText(text, 'jsonloupe-playbook.json', 'application/json');
+  showToast(`exported ${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`);
+}
+
+/**
+ * Add a playbook's functions to the library.
+ *
+ * MERGE, NEVER REPLACE, and a name collision keeps BOTH — the incoming one
+ * lands as `slow orders 2`, the same way a fork does. Overwriting a function
+ * someone wrote is the one outcome here that cannot be undone, so it is the one
+ * thing import will not do; a duplicate, by contrast, is one `×` away.
+ */
+async function importPlaybookText(text: string, fileName: string): Promise<boolean> {
+  const res = parsePlaybook(text);
+  if (!res.ok) {
+    showToast(`${fileName}: ${res.error}`, 'bad');
+    return false;
+  }
+  const taken = (await store.listScripts()).map((s) => s.name);
+  let renamed = 0;
+  for (const fn of res.playbook.functions) {
+    const name = uniqueScriptName(fn.name, taken);
+    if (name !== fn.name) renamed++;
+    taken.push(name);
+    await store.saveScript(name, fn.script, fn.reads);
+  }
+  await renderLibrary();
+  const count = res.playbook.functions.length;
+  showToast(
+    `imported ${fmtNumber(count)} function${count === 1 ? '' : 's'}${renamed ? ` · ${fmtNumber(renamed)} renamed to keep yours` : ''}`,
+  );
+  return true;
+}
+
+runExportBtn.addEventListener('click', () => void exportPlaybook());
+runImportBtn.addEventListener('click', () => runImportInput.click());
+runImportInput.addEventListener('change', async () => {
+  const file = runImportInput.files?.[0];
+  // Cleared either way, so picking the same file twice still fires `change`.
+  runImportInput.value = '';
+  if (!file) return;
+  await importPlaybookText(await file.text(), file.name);
+});
+
+runEditBtn.addEventListener('click', () => setAuthoring(true));
+runSaveBtn.addEventListener('click', () => void saveCurrentScript(false));
+runSaveAsBtn.addEventListener('click', () => void saveCurrentScript(true));
+runNameInput.addEventListener('input', paintRunHead);
 
 // True for as long as the document is open (style.css rule 15, tier 1): the
 // script sees plain JS numbers, and this document has some it cannot hold.
@@ -4191,17 +4739,23 @@ function setRunLossy(hasUnsafeNumbers: boolean): void {
 // The result on screen is no longer about this document. NEVER re-run for them:
 // the script is the user's, and a re-run is theirs to ask for.
 function markRunResultStale(): void {
-  if (runResultText) runStaleBadge.hidden = false;
+  if (!runResultText) return;
+  runStaleWanted = true;
+  runStaleBadge.hidden = runFace === 'functions';
 }
 
 function clearRunResult(): void {
   runResultText = '';
+  runResultKind = '';
+  runStaleWanted = false;
   runStaleBadge.hidden = true;
-  runResultLabel.textContent = 'result';
+  runResultLabel.textContent = 'nothing run yet';
   resultTree.resetSelection();
   resultTree.setTotal(0);
+  // The library is the other face of these two surfaces: while it is up, an
+  // emptied result must not push it off screen.
   runViewport.hidden = true;
-  runEmpty.hidden = false;
+  runEmpty.hidden = runFace === 'functions';
   for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = true;
 }
 
@@ -4216,6 +4770,10 @@ function resetRunState(hasUnsafeNumbers: boolean): void {
   setRunStatus('');
   resultDownloadName = '';
   clearRunResult();
+  // A new document is exactly when "does this function fit?" changes its answer
+  // — for the loaded one, and for every row in the library.
+  void paintRunFit();
+  if (activePane === 'run') void renderLibrary();
 }
 
 // Called from showPane on every exit, so there is one teardown rather than one
@@ -4248,7 +4806,13 @@ async function ensureRunEditor(): Promise<void> {
     doc: loadLastScript(),
     placeholder: RUN_PLACEHOLDER,
     onRun: () => void runScript(),
-    onChange: saveLastScript,
+    // Every keystroke is both a scratch save and the answer to "has this
+    // drifted from the record it came from" — the head's `unsaved` mark is
+    // only honest if it is recomputed here.
+    onChange: (code) => {
+      saveLastScript(code);
+      paintRunHead();
+    },
   });
 }
 
@@ -4275,8 +4839,18 @@ async function openRun(): Promise<void> {
   if (!runResultChannel) runResultChannel = createWorkerChannel('result');
   await showRunSource();
   await ensureRunEditor();
-  void renderScriptChips();
-  runEditor?.focus();
+  await renderLibrary();
+  // Someone with a library came here to press one of their functions, so that
+  // is what run mode opens on; someone with none came here to write one, and
+  // gets the editor they would have had to open anyway.
+  const library = await store.listScripts();
+  if (library.length > 0) {
+    setRunFace('functions');
+    setAuthoring(false);
+  } else {
+    setRunFace('result');
+    setAuthoring(true);
+  }
 }
 
 runSrcSwitch.addEventListener('click', (e) => {
@@ -4287,29 +4861,46 @@ runSrcSwitch.addEventListener('click', (e) => {
   void showRunSource();
 });
 
-function executeInSandbox(docText: string, code: string): Promise<RunResult> {
+// One sandbox, two shapes of press: a single script, or a batch of named ones
+// over a single parse of the document. Same worker, same timeout, same
+// termination — the batch is a different message, not a different mechanism.
+function executeInSandbox(docText: string, code: string, trace: boolean): Promise<RunResult>;
+function executeInSandbox(
+  docText: string,
+  scripts: { name: string; code: string }[],
+  trace: boolean,
+): Promise<BatchResult>;
+function executeInSandbox(
+  docText: string,
+  work: string | { name: string; code: string }[],
+  trace: boolean,
+): Promise<RunResult | BatchResult> {
   return new Promise((resolve) => {
     const sandbox = new Worker(new URL('./run-sandbox.ts', import.meta.url), { type: 'module' });
     let timer = 0;
     let settled = false;
-    const finish = (res: RunResult): void => {
+    const finish = (res: RunResult | BatchResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       sandbox.terminate();
       resolve(res);
     };
+    // The cap is the PRESS, not the script: a batch that runs long is stopped
+    // whole, because a worker terminated halfway has no partial report to give.
     timer = window.setTimeout(
       () => finish({ ok: false, error: `script timed out after ${RUN_TIMEOUT_MS / 1000}s`, logs: [] }),
       RUN_TIMEOUT_MS,
     );
-    sandbox.onmessage = (e: MessageEvent) => finish(e.data as RunResult);
+    sandbox.onmessage = (e: MessageEvent) => finish(e.data as RunResult | BatchResult);
     sandbox.onerror = (e) => finish({
       ok: false,
       error: e.message || 'the sandbox worker could not be started',
       logs: [],
     });
-    sandbox.postMessage({ docText, code });
+    sandbox.postMessage(
+      typeof work === 'string' ? { docText, code: work, trace } : { docText, scripts: work, trace },
+    );
   });
 }
 
@@ -4320,10 +4911,20 @@ async function paintResultLabel(): Promise<void> {
   const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start: 0, count: 1 });
   const root = r?.rows[0];
   if (!root) return;
-  const count = root.type === 'object' || root.type === 'array'
-    ? ` ${fmtNumber(root.childCount)}`
-    : '';
-  runResultLabel.textContent = `result · ${root.type}${count}`;
+  const container = root.type === 'object' || root.type === 'array';
+  // An empty result and a real one used to look identical: `array 0` next to a
+  // pane with nothing in it reads as "none today" when the likelier story is
+  // that the script was written for another shape. Say which one it is.
+  if ((container && root.childCount === 0) || root.type === 'null') {
+    runResultLabel.textContent = `nothing came back · ${root.type}`;
+    return;
+  }
+  // The switch beside it already says `result`; saying it again here put the
+  // word twice on one strip. What the label is for is what CAME BACK — and for
+  // a batch, what came back is a report, not an object that happens to have
+  // three keys. The head names what is LOADED; this names what produced this.
+  runResultLabel.textContent = runResultKind
+    || `${root.type}${container ? ` ${fmtNumber(root.childCount)}` : ''}`;
 }
 
 // Hand the result to its own worker and read it back as a document. The guard
@@ -4342,7 +4943,11 @@ async function showResultDocument(text: string): Promise<void> {
     return;
   }
   runResultText = text;
+  runStaleWanted = false;
   runStaleBadge.hidden = true;
+  // A finished run is what the column is for: it takes the result face, so the
+  // library steps aside for the answer it was pressed for.
+  setRunFace('result');
   runEmpty.hidden = true;
   runViewport.hidden = false;
   for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = false;
@@ -4384,16 +4989,109 @@ async function runScript(): Promise<void> {
   // one mid-flight; the result belongs to the old document, so it is dropped
   // rather than rendered under the new one.
   const documentRevision = currentDocumentRevision;
+  // Tracing costs a Proxy trap on every property read, so it is asked for once:
+  // on the first run of a saved function, or the first after its code changed
+  // (saving new code clears what the old code was seen to read).
+  const trace = runLoadedId !== null && runLoadedReads === undefined;
   runInFlight = true;
   runExecBtn.disabled = true;
   runErrorEl.hidden = true;
+  // One script answers for itself, so the label goes back to describing the
+  // value rather than the press that made it.
+  runResultKind = '';
+  runBatchEl.hidden = true;
   setRunStatus('running…');
-  const res = await executeInSandbox(currentText, code);
+  const res = await executeInSandbox(currentText, code, trace);
   runInFlight = false;
   runExecBtn.disabled = false;
   if (documentRevision !== currentDocumentRevision) return;
+  if (res.ok && res.reads && runLoadedId) await learnReads(runLoadedId, res.reads);
   await renderRunResult(res);
 }
+
+// What the run just taught us about the function, kept on its record. Guarded
+// on the id it started with: a run is slow enough for the user to have loaded
+// something else, and the reading belongs to the script that produced it.
+async function learnReads(id: string, reads: string[]): Promise<void> {
+  await store.updateScript(id, { reads });
+  if (runLoadedId !== id) return;
+  runLoadedReads = reads;
+  void renderLibrary();
+}
+
+// ---------- a batch: several functions, one document, one report ----------
+//
+// The answers come back as ONE object keyed by function name, which is what
+// keeps the result face working unchanged — it is a document like any other, so
+// it scrolls, downloads and opens as its own document, and that object IS the
+// day's report. A function that fails keeps its key with a `null` beside it, so
+// the report has the same shape tomorrow as today; the reasons are said here
+// instead, because a batch is not a failure just because one of its parts was.
+async function runPickedScripts(): Promise<void> {
+  if (runInFlight) return;
+  if (!currentText) {
+    setRunStatus('open a document first');
+    return;
+  }
+  const all = await store.listScripts();
+  const picked = all.filter((s) => runPicked.has(s.id));
+  if (picked.length === 0) return;
+
+  const documentRevision = currentDocumentRevision;
+  // One trace for the whole batch when ANY of them has yet to be read: the
+  // per-function cost is the same, and asking twice would need two passes.
+  const trace = picked.some((s) => s.reads === undefined);
+  runInFlight = true;
+  runPickedBtn.disabled = true;
+  runExecBtn.disabled = true;
+  runErrorEl.hidden = true;
+  runBatchEl.hidden = true;
+  setRunStatus(`running ${fmtNumber(picked.length)}…`);
+
+  const res = await executeInSandbox(
+    currentText,
+    picked.map((s) => ({ name: s.name, code: s.script })),
+    trace,
+  );
+  runInFlight = false;
+  runPickedBtn.disabled = false;
+  runExecBtn.disabled = false;
+  if (documentRevision !== currentDocumentRevision) return;
+
+  if (!res.ok) {
+    // Only an unreadable document gets here — every script-level failure is an
+    // entry, not the batch's verdict.
+    clearRunResult();
+    runErrorEl.textContent = `✗ ${res.error}`;
+    runErrorEl.hidden = false;
+    setRunStatus('');
+    return;
+  }
+
+  const byName = new Map(picked.map((s) => [s.name, s.id]));
+  for (const entry of res.entries) {
+    const id = byName.get(entry.name);
+    if (entry.reads && id) await learnReads(id, entry.reads);
+  }
+
+  const failed = res.entries.filter((e) => !e.ok);
+  runBatchEl.hidden = failed.length === 0;
+  runBatchEl.textContent = failed.length === 1
+    ? `${failed[0].name} failed · ${failed[0].error}`
+    : `${fmtNumber(failed.length)} of ${fmtNumber(res.entries.length)} failed · ${failed.map((f) => f.name).join(', ')}`;
+  runBatchEl.title = failed.map((f) => `${f.name}: ${f.error}`).join('\n');
+
+  runConsole.hidden = res.logs.length === 0;
+  runConsole.open = false;
+  runConsoleBody.textContent = res.logs.join('\n');
+  runErrorEl.hidden = true;
+  const ran = res.entries.length - failed.length;
+  setRunStatus(`ran ${fmtNumber(ran)} of ${fmtNumber(res.entries.length)} in ${res.ms} ms · ${fmtBytes(res.resultText.length)}`);
+  runResultKind = `report · ${fmtNumber(res.entries.length)} functions`;
+  await showResultDocument(res.resultText);
+}
+
+runPickedBtn.addEventListener('click', () => void runPickedScripts());
 
 runExecBtn.addEventListener('click', () => void runScript());
 

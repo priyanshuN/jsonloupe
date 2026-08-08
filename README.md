@@ -94,6 +94,12 @@ flagged, with the original bytes preserved.
   weight on collapsed containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
+- **Run — a library of your own functions** — write JavaScript for the questions
+  no query language should have to answer, keep it under a name, and press it
+  over tomorrow's file. Scripts run in an ephemeral sandbox worker with `fetch`,
+  storage and the network removed, and the result opens as a document of its
+  own. Tick several and one press answers all of them as a single report.
+  ([below](#playbooks-your-functions-as-a-file).)
 - **JSON → Excel / CSV converter** — rename and reorder columns, choose source
   fields, add constants, set date and coordinate handling, take the column names
   from a target CSV header, and save or share the mapping for the next file.
@@ -151,6 +157,53 @@ can sort and subtract, numbers and coordinates as numbers, and text that only
 looks numeric stays text, so `"1.10"` keeps its trailing zero and an int64 id
 keeps every digit instead of being rounded. Excel's limits and values a column
 cannot read are reported or refused, never quietly written wrong.
+
+## Playbooks: your functions as a file
+
+The document changes daily; the handful of questions you ask of it does not. So
+**run** opens on your library rather than an empty editor — named functions,
+newest first — and pressing one runs it over whatever is open. Tick several and
+one press answers all of them, as a single object keyed by function name: today's
+report, which downloads and reopens as a document like any other.
+
+A function learns what it reads. The first time one runs it is handed the
+document through a recording proxy, and the paths it actually touched are kept
+with it. That is what lets the panel say
+
+> this reads `orders`, `orders[].deliveredInHours` — this document has none of that
+
+*before* you press run, instead of leaving you to read an empty result as "none
+today". It is always a remark and never a gate: the reading knows only the branch
+that last run took, so the run button still works.
+
+A playbook is that library as a file — the questions, never the data:
+
+```json
+{
+  "playbookVersion": 1,
+  "name": "carrier dumps",
+  "functions": [
+    {
+      "name": "slow orders",
+      "script": "data.orders.filter(o => o.deliveredInHours > 48)",
+      "reads": ["orders", "orders[].deliveredInHours"]
+    }
+  ]
+}
+```
+
+Export writes one; dropping one on the window installs it. Import **merges and
+never replaces** — a name you already use keeps yours and the incoming one lands
+as `slow orders 2`, because a duplicate is one `×` away and an overwrite is not.
+Unknown fields are refused by name rather than dropped, so a file from a newer
+jsonloupe cannot import as a subset of itself and look like it worked.
+
+Scripts run in an ephemeral worker with `fetch`, `XMLHttpRequest`, WebSockets,
+IndexedDB and `importScripts` removed before any user code, terminated on its
+result or after ten seconds — a pasted script cannot reach the network or the
+documents you have opened. They see plain `JSON.parse` values, so an int64 id
+arrives rounded there; the panel says so out loud rather than hiding it, and the
+lossless path is everywhere else in the app.
 
 ## Use with AI agents
 

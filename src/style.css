@@ -702,7 +702,7 @@ button.primary:hover,
    are excluded here rather than being overridden six rules later. The exclusion
    sits inside :where() so it filters without adding specificity — this is the
    floor every field starts from, and a single class (.field > input,
-   .codec-card textarea) has to be able to override it. */
+   .codec-side textarea) has to be able to override it. */
 input:where(:not([type='checkbox']):not([type='file'])),
 textarea,
 select {
@@ -771,11 +771,28 @@ select:focus {
      draws a second one three pixels inside the first. */
   box-shadow: none;
 }
+/* The magnifier stands where .field-prefix stands, and does the same job: it
+   names the field from inside the shell. Faint like the prefix text, so it
+   reads as a label rather than as a control you can press. */
+.tb-search-icon {
+  flex-shrink: 0;
+  margin-left: var(--gap-3);
+  color: var(--text-faint);
+}
+/* The input keeps its own inset when the icon is not there to provide one;
+   with the icon it would double up, so the left side is the icon's margin. */
+.tb-search > .tb-search-icon + input { padding-left: var(--gap-2); }
+
 /* The prefix owns the shell's inset, so the input's text starts after it. */
 .field > input { padding: 0; }
 /* No shell inset of its own — the input carries the contract's 12px so the
    trailing chip can sit tight against the right edge. */
 .tb-search > input { padding: 0 var(--gap-3); }
+/* Glyph + count. The gap only exists when the count does, so the resting chip
+   is a square around the funnel rather than a square with a hole beside it. */
+#filter-btn { display: inline-flex; align-items: center; gap: var(--gap-1); }
+#filter-btn > span { font-variant-numeric: tabular-nums; }
+
 /* Rule 14's standing label, and the ONE small-caps label device in the app. It
    has two homes and they are the same device: INSIDE the shell on a one-line
    field (.field-prefix), and ABOVE the box everywhere a shell has no baseline
@@ -826,8 +843,9 @@ select:focus {
 
 /* Rule 2, the SURFACE TITLE rank: a page, a dialog and a view are the same
    rank — "a thing you opened" — and each one used to title itself differently
-   (18/660, 16/bold, 13/bold accent). The section-label rank lives on
-   .codec-card h2, the only band label in the app. */
+   (18/660, 16/bold, 13/bold accent). The section-label rank now lives only on
+   #convert-preview-head, the payload page's own band labels having gone with
+   the two cards they titled. */
 .codec-head h1,
 .baseline-head h2,
 .transport-head h2,
@@ -1477,53 +1495,57 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .codec-head { display: flex; align-items: baseline; gap: 14px; }
 .codec-head h1 { margin: 0; }
 .codec-sub { color: var(--text-dim); font: var(--fs-body) var(--mono); flex: 1; }
-.codec-grid {
+/* ONE conversion, two directions. The sides are fixed — JSON left, payload
+   right — and the middle column holds the two acts that cross between them, so
+   the direction is never a mode you are in, only a button you press. This
+   replaced two cards of input+output: four boxes for one pair, two of them
+   holding base64, which is not a reading surface for anything. */
+.codec-pair {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr auto 1fr;
+  /* label row · boxes · actions row. The rows are the PAIR's, not each side's,
+     which is what lets the arrows centre on the boxes rather than on the column
+     (see .codec-run) and keeps the two labels on one baseline even when one
+     side's label wraps and the other's does not. */
+  grid-template-rows: auto 1fr auto;
   gap: var(--gap-4);
   min-height: 0;
 }
-.codec-card {
+/* The sides are containers for authoring, not for layout: `display: contents`
+   drops them out of the grid so their three bands land in the pair's three
+   rows directly. Without it each side is one cell and every band inside it is
+   sized by that side alone. */
+.codec-side {
+  display: contents;
+}
+.codec-side:first-of-type > * { grid-column: 1; }
+.codec-side:last-of-type > * { grid-column: 3; }
+/* Every band names its ROW as well as its column. Auto-placement cannot: the
+   cursor has advanced past row 2 by the time the second side is laid out, so
+   its bands land in rows 3, 4 and 5 and the two sides stack instead of facing
+   each other. Six cells, six coordinates. */
+.codec-side > .codec-box-head { grid-row: 1; }
+.codec-side > textarea { grid-row: 2; }
+.codec-side > .codec-actions { grid-row: 3; }
+/* THE ARROWS SIT ON THE BOXES, not on the column. Centred against the whole
+   height they would drift by half the difference between the label row above
+   and the actions row below — which is a different amount on each side, so the
+   pair of buttons would sit slightly off the thing they act on and there would
+   be no way to say why. Pinned to the box row, "centred" means centred on the
+   text they move between. */
+.codec-run {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: var(--gap-4);
-  min-height: 0;
-  /* No shadow: this card sits in the page flow and shadows are for things that
-     FLOAT (menus, dialogs, toasts). In light it was reading as a real lift, so
-     what separates it now is the --border hairline plus the ground it sits on
-     — a hairline, not nothing. */
-  box-shadow: none;
+  gap: var(--gap-2);
 }
-/* Rule 2, the SECTION LABEL rank — this is the pattern the rank is named for.
-   The converter's `preview` names a band inside its surface too, and had
-   invented its own dim 12px treatment; markup stays lowercase, the caps are the
-   rank's. */
-.codec-card h2,
-#convert-preview-head > span:first-child {
-  margin: 0;
-  font-size: var(--fs-chip);
-  font-weight: 400;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
-}
-/* A labelled box: the standing label (rule 14) above the textarea, because a
-   textarea's shell has no baseline to seat a .field-prefix on. Both boxes in a
-   card are flex:1, and both cards hold the same four bands, so the 1fr 1fr
-   mirror is back in register — decode used to carry a fourth button and a trace
-   row, which pushed its boxes shorter than encode's. */
-.codec-box {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+.codec-run button { white-space: nowrap; }
+/* The label row (rule 14's standing label — a textarea's shell has no baseline
+   to seat a .field-prefix on) and the side's own ops, which act on the box
+   below them. */
 .codec-box-head {
   display: flex;
   align-items: center;
@@ -1531,23 +1553,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: var(--ctl-h-mini);
 }
 /* Rule 14 supplies ground, border, inset, type and the focus ring; only the
-   box's own facts live here. */
-.codec-card textarea {
-  flex: 1;
-  min-height: 120px;
+   box's own facts live here. Both sides are WRITABLE now — you paste into
+   whichever one you have and press the arrow pointing away from it — so the
+   read-only output surface (--bg-inset) has no user on this page. */
+.codec-side textarea {
+  min-height: 160px;
   resize: none;
   border-radius: var(--r);
   line-height: 1.5;
-}
-/* Rule 14's other half: --bg-inset + --border-strong is the read-only OUTPUT
-   surface, so the result pane stops being a third field style and starts
-   saying "this is what came back". Rule 18 for the ink: --c-string paints JSON
-   STRINGS, and base64 is not one — a syntax token was being used to mean "this
-   is output", which is what the surface itself already says. */
-.codec-card textarea[readonly] {
-  background: var(--bg-inset);
-  border-color: var(--border-strong);
-  color: var(--text-dim);
 }
 .codec-actions { display: flex; gap: var(--gap-2); flex-wrap: wrap; }
 /* The transformation trace reads as part of the output's label — what came
@@ -2241,6 +2254,27 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    rows you were typing in collapse to one. */
 #run-producer > * { flex-shrink: 0; }
 
+/* Rule 15 tier 2 — ink AND a hairline: this function reads something the open
+   document does not have, which you want to notice BEFORE reading a plausible
+   empty result as an answer. Not tier 3: the run is not blocked and the reading
+   can be incomplete (it knows only the branch the last run took), so it must
+   not dress as a failure. */
+.run-remark {
+  display: flex;
+  align-items: center;
+  /* The strip is a column, so a block child would stretch the hairline across
+     the whole pane and read as a banner. It is a remark: it is as wide as what
+     it says, like the `unsaved` and `re-run` marks. */
+  align-self: flex-start;
+  max-width: 100%;
+  gap: var(--gap-1);
+  padding: 2px var(--gap-2);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font-size: var(--fs-body);
+}
+
 /* Rule 15 tier 1, INK ONLY: the script sees plain JS numbers, which is expected
    and permanent rather than something to respond to. It reads --warn because
    that is what --warn means, and it is a line rather than a toast because it is
@@ -2300,13 +2334,38 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   z-index: 1;
 }
 #run-editor .cm-content { padding-right: 52px; }
+/* Its other home. main.ts moves this same button to the head bar when the
+   editor collapses, where it is an ordinary control on an ordinary row. */
+.run-head > #run-exec { position: static; }
 
-/* Saved scripts and the run's status on one line, between the field and the
-   result pane. The status is parked at the right edge — it is what the last
-   press of that button had to say, not a chip. */
-.run-chips { display: flex; align-items: flex-start; gap: var(--gap-3); }
-.run-chips #run-saved { flex: 1; min-width: 0; }
-.run-chips #run-status { flex-shrink: 0; padding-top: 3px; }
+/* The head row: the one thing in this column that never moves. It names the
+   function that is loaded and carries the single action the current state has
+   — so it is a control row, on the strip's own ground rather than a bar of its
+   own (the strip IS the bar; rule 11's geometry is already on #run-producer). */
+.run-head { display: flex; align-items: center; gap: var(--gap-2); }
+/* Rule 22: the loaded function outranks the controls beside it the way the
+   active document does in the sidebar — by ink, not by a third weight. */
+.run-name {
+  color: var(--text);
+  font-size: var(--fs-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Rule 14's field recipe. It is the SAME slot the name label stands in, so it
+   holds the same measure rather than stretching the row. */
+.run-name-input { max-width: 32ch; flex: 1; }
+/* Rule 15 tier 2 — ink and a hairline: work that would be lost is worth
+   noticing before you press something else, and no louder than that. */
+#run-dirty {
+  padding: 2px var(--gap-2);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+}
+#run-status { display: block; }
 
 /* The right column: producer strip on top, result pane under it. It is a PANE,
    so it takes the pane area's geometry and its own hairline against the source
@@ -2350,6 +2409,147 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   white-space: nowrap;
 }
 /* Quiet tier via .btn-quiet on each button — see the tier block up top. */
+
+/* ---------- the functions face: the library ---------- */
+
+/* The column's other face. It fills the same box the result does, because the
+   two are never on screen together — before a run there is no result, and after
+   one the result wants the height. */
+#run-library {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* Rule 13: this count moves 9 → 99 as the library grows and while a search
+   narrows it. */
+#run-lib-count {
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The measure is a function's name, not the column: rule 14 gives it
+   everything else. */
+.run-lib-search { max-width: 24ch; }
+/* The list is a reading surface, like every other pane in this app. */
+#run-lib-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-canvas);
+}
+.run-lib-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  padding-right: var(--gap-3);
+  border-bottom: 1px solid var(--border);
+}
+.run-lib-row:hover { background: var(--bg-hover); }
+/* Rule 18: an inset 2px left bar means SELECTED, here as everywhere — this is
+   the function the editor is bound to. Inset, so a selected row cannot shift
+   its own content. */
+.run-lib-row.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+/* Rule 7's checkbox, and it is NOT hover-revealed like the delete beside it: a
+   tick that disappears when the pointer leaves cannot be counted by eye, and
+   counting them is the whole point of it.
+   THE TARGET IS THE COLUMN, NOT THE BOX. A 14px box inside a 38px row means
+   most of the space around it belonged to the row, so a near-miss aimed at the
+   cheapest act in the panel (ticking) performed the most expensive one
+   (running). The zone spans the row's full height and a comfortable width; the
+   box is only what it draws. */
+.run-lib-pickzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 34px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+/* The column is DRAWN, not just present. A hover tint alone could not say it —
+   the row lights up on hover too, so the two were indistinguishable and the
+   column still read as a checkbox floating in a row. One hairline makes the
+   boundary visible at rest, which is the whole claim: left of this line ticks,
+   right of it runs. Its hover then needs a ground of its own, one step off the
+   row's, or it disappears back into it. */
+.run-lib-pickzone { border-right: 1px solid var(--border); }
+.run-lib-pickzone:hover { background: var(--bg-inset); }
+.run-lib-pick { pointer-events: none; }
+
+/* The rest of the row is the press: loading a function and running it are one
+   act, so the name, its first line and the hit area are one button rather than
+   a label with a play control beside it. */
+.run-lib-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-2);
+  padding: var(--gap-2);
+  min-height: 38px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+}
+.run-lib-open:hover { background: none; }
+.run-lib-name {
+  color: var(--text);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What the function has to say about itself: its first line, dimmed, and the
+   first thing to give up width when the column is narrow. */
+.run-lib-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-lib-meta {
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Rule 15 tier 1 in a LIST: ink only. A row that reads something this document
+   lacks is worth seeing while scanning, but it is still a perfectly good
+   function — dimming the name or barring the row would read as broken. The
+   head's tier 2 line carries the weight once the function is loaded. */
+.run-lib-row.misfit .run-lib-name { color: var(--text-dim); }
+.run-lib-meta.misfit-note { color: var(--warn); }
+/* Rule 20: HOVER REVEALS, IT NEVER REFLOWS. The gutter is reserved on every
+   row, always, and the control fades in — and it answers to :focus-within too,
+   because hover is not a state a keyboard can enter. */
+.run-lib-del {
+  opacity: 0;
+  visibility: hidden;
+  color: var(--text-dim);
+  transition: opacity var(--dur) var(--ease);
+}
+.run-lib-row:hover .run-lib-del,
+.run-lib-row:focus-within .run-lib-del {
+  opacity: 1;
+  visibility: visible;
+}
+.run-lib-del:hover { color: var(--danger); }
 
 /* The result IS a document surface: same canvas, same gutter stripe, same
    virtualized layer as #tree-viewport (see the note there for why the stripe is

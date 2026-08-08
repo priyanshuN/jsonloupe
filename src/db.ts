@@ -4,6 +4,7 @@
 // so listing recents never loads document bodies.
 
 import type { ConvertSpec } from './convert/spec';
+import { deriveScriptName } from './run-script';
 
 export interface DocMeta {
   id: string;
@@ -348,14 +349,27 @@ export interface SavedQuery {
   uses: number;
 }
 
-/** A run-mode script, kept beside the saved questions and told apart by `kind`. */
+/**
+ * A run-mode script, kept beside the saved questions and told apart by `kind`.
+ * `name` is the script's identity to the user — the library lists names, and
+ * `save` writes back to the record you loaded rather than minting a second one.
+ * It is absent on every script kept before the library existed (those were
+ * labelled by their first line), so reads derive one instead of a DB bump.
+ */
 export interface SavedScript {
   id: string;
   kind: 'script';
+  name: string;
   script: string;
   createdAt: number;
   updatedAt: number;
   uses: number;
+  /**
+   * The document paths this script was seen to read, learned from its first
+   * traced run (run-exec.ts). ABSENT means not learned yet — never "reads
+   * nothing" — so every reader of this field has to tell the two apart.
+   */
+  reads?: string[];
 }
 
 type SavedRecord = SavedQuery | SavedScript;
@@ -376,8 +390,13 @@ export async function listQueries(): Promise<SavedQuery[]> {
   return (await listSaved()).filter((rec): rec is SavedQuery => !isScript(rec));
 }
 
+// Every read hands back a NAMED script, whether or not the stored record has a
+// name: the library has one way to draw a row, and a migration that happens on
+// write would leave a script you never re-saved nameless forever.
 export async function listScripts(): Promise<SavedScript[]> {
-  return (await listSaved()).filter(isScript);
+  return (await listSaved()).filter(isScript).map((s) => (
+    s.name ? s : { ...s, name: deriveScriptName(s.script) }
+  ));
 }
 
 // The one put + cull, for both kinds. `siblings` predates the put: a new record
@@ -408,18 +427,53 @@ export async function saveQuery(question: string, query: string): Promise<SavedQ
   return rec;
 }
 
-// A script is its own identity — there is no question in front of it — so a
-// repeat save of the same source folds into the chip that is already there.
-// Case matters here, unlike a question: `Data` and `data` are different code.
-export async function saveScript(script: string): Promise<SavedScript> {
+// A NAME is a script's identity, not its source: the same function edited twice
+// is one library entry, and two entries may hold identical code under different
+// names. Saving the same name again therefore overwrites that entry — which is
+// what `save` means once a thing has a name — while `save as new` asks its
+// caller for a free one (uniqueScriptName) before it gets here.
+export async function saveScript(name: string, script: string, reads?: string[]): Promise<SavedScript> {
   const all = await listScripts();
   const now = Date.now();
-  const canonical = script.trim();
-  const dup = all.find((s) => s.script.trim() === canonical);
+  const label = name.trim() || deriveScriptName(script);
+  const dup = all.find((s) => s.name.trim().toLowerCase() === label.toLowerCase());
   const rec: SavedScript = dup
-    ? { ...dup, script: canonical, updatedAt: now, uses: dup.uses + 1 }
-    : { id: crypto.randomUUID(), kind: 'script', script: canonical, createdAt: now, updatedAt: now, uses: 1 };
+    ? { ...dup, name: label, script, ...(reads ? { reads } : {}), updatedAt: now, uses: dup.uses + 1 }
+    : {
+      id: crypto.randomUUID(),
+      kind: 'script',
+      name: label,
+      script,
+      ...(reads ? { reads } : {}),
+      createdAt: now,
+      updatedAt: now,
+      uses: 1,
+    };
   await putSaved(rec, all, !!dup);
+  return rec;
+}
+
+// `save` on a script you loaded from the library: the record you are editing,
+// updated in place. It answers null when that record is gone (deleted in
+// another tab, or culled), so the caller can fall back to creating one rather
+// than silently writing a resurrected copy.
+export async function updateScript(
+  id: string,
+  // `reads: null` CLEARS what the script was seen to read — the caller edited
+  // its code, so the old reading describes a function that no longer exists.
+  patch: { name?: string; script?: string; reads?: string[] | null },
+): Promise<SavedScript | null> {
+  const all = await listScripts();
+  const current = all.find((s) => s.id === id);
+  if (!current) return null;
+  const rec: SavedScript = {
+    ...current,
+    name: patch.name?.trim() || current.name,
+    script: patch.script ?? current.script,
+    reads: patch.reads === null ? undefined : patch.reads ?? current.reads,
+    updatedAt: Date.now(),
+  };
+  await putSaved(rec, all, true);
   return rec;
 }
 

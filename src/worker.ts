@@ -37,6 +37,8 @@ import {
   type TransportInspection,
 } from './transport';
 import {
+  encodePayload,
+  type EncodeFormat,
   decodeJsonPayload,
   type DecodeJsonPayloadOptions,
   type PayloadDecodeFailure,
@@ -1820,6 +1822,44 @@ function renderSpec(s: Spec, indent: string): string {
   return lines.join('\n');
 }
 
+// ---------- does this document have the paths a script reads? ----------
+//
+// Run mode learns which paths a saved function touches (run-exec.ts) and asks
+// here whether the open document has them, so pressing a function written for
+// another shape is answered BEFORE it runs and comes back with a plausible
+// `[]`. It lives in the worker for the reason everything about the document
+// does: the worker owns the parsed value, and nothing else holds a second copy.
+//
+// The dialect is exactly what the recorder emits — dotted segments, with `[]`
+// meaning "into the elements of this array" — and an array is entered through
+// its FIRST element, the same sample the schema view reads.
+function hasPath(value: unknown, path: string): boolean {
+  let current = value;
+  for (const raw of path.split('.')) {
+    const intoArray = raw.endsWith('[]');
+    const key = intoArray ? raw.slice(0, -2) : raw;
+    if (typeof current !== 'object' || current === null || Array.isArray(current)) return false;
+    if (!Object.prototype.hasOwnProperty.call(current, key)) return false;
+    current = (current as Record<string, unknown>)[key];
+    if (intoArray) {
+      if (!Array.isArray(current)) return false;
+      // An empty array cannot answer for its elements, and calling that
+      // "missing" would be a claim about the document that is not true.
+      if (current.length === 0) return true;
+      current = current[0];
+    }
+  }
+  return true;
+}
+
+function pathsPresent(paths: string[]): { present: string[]; missing: string[] } {
+  const root = nodes.get(rootId);
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const p of paths) (root && hasPath(root.value, p) ? present : missing).push(p);
+  return { present, missing };
+}
+
 let schemaCache: string | null = null;
 
 type SchemaResult = { text: string } | { ok: false; error: string; pos: number };
@@ -2181,6 +2221,8 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return queryCopy();
     case 'schema':
       return buildSchema(msg.path as string | undefined);
+    case 'hasPaths':
+      return pathsPresent((msg.paths as string[] | undefined) ?? []);
     case 'undo':
       return doUndo();
     case 'redo':
@@ -2225,6 +2267,18 @@ export type DecodePayloadWorkerResult =
   | Omit<PayloadDecodeSuccess, 'bytes'>
   | PayloadDecodeFailure;
 
+export interface CompressPayloadWorkerMessage extends Record<string, unknown> {
+  type: 'compressPayload';
+  text: string;
+  /** Which of the three text-holdable forms to produce. Defaults to base64 zstd. */
+  format?: EncodeFormat;
+  level?: number;
+}
+
+export type CompressPayloadWorkerResult =
+  | { ok: true; b64: string; sourceBytes: number }
+  | { ok: false; error: string };
+
 /**
  * Async worker-only dispatch. Stateful parser requests continue through the
  * synchronous `handle` seam; codec requests are the only ones that await WASM.
@@ -2254,6 +2308,32 @@ export async function handleAsync(
       return convertPreview(doc, spec, ((msg as { rows?: number }).rows ?? 20));
     }
     return convertRun(doc, spec);
+  }
+  // The other half of the payload round trip, and it belongs here for the same
+  // two reasons decoding does. One is architectural: zstd is WASM and the page
+  // is the wrong place to compile it — every other heavy path already runs in a
+  // worker. The other was a live bug. The page's own CSP is `script-src 'self'`
+  // with no `wasm-unsafe-eval`, so `WebAssembly.instantiate` on the MAIN thread
+  // is refused outright by Chrome; the module aborted, the promise behind
+  // `loadZstd()` never settled, and `compress` did nothing at all — no error,
+  // no toast, forever. The worker has its own policy and compiles it fine,
+  // which is why decoding always worked and compressing never did.
+  if (msg.type === 'compressPayload') {
+    if (typeof msg.text !== 'string') throw new TypeError('compressPayload requires text');
+    const level = typeof msg.level === 'number' ? msg.level : undefined;
+    try {
+      const format = (msg.format as EncodeFormat | undefined) ?? 'base64-zstd';
+      return {
+        ok: true,
+        b64: await encodePayload(msg.text, format, level),
+        sourceBytes: new TextEncoder().encode(msg.text).length,
+      } satisfies CompressPayloadWorkerResult;
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      } satisfies CompressPayloadWorkerResult;
+    }
   }
   if (msg.type === 'decodePayload') {
     const input = msg.input;
@@ -2316,6 +2396,7 @@ if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessag
     if (
       msg.type === 'transportInspect' ||
       msg.type === 'decodePayload' ||
+      msg.type === 'compressPayload' ||
       msg.type === 'convertInspect' ||
       msg.type === 'convertPreview' ||
       msg.type === 'convertRun'
