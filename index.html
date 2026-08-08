@@ -43,6 +43,15 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M9.5 3.5 5 8l4.5 4.5" />
     </symbol>
+    <!-- The payload page's two directions. An arrow is the one glyph rule 3
+         calls universal without argument, and here it carries the whole
+         meaning: which side is read, and which is filled. -->
+    <symbol id="i-arrow-right" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 8h10" /><path d="M9.5 4.5 13 8l-3.5 3.5" />
+    </symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 8H3" /><path d="M6.5 4.5 3 8l3.5 3.5" />
+    </symbol>
     <symbol id="i-compare" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 6h10" /><path d="M10.5 3.5 13 6l-2.5 2.5" />
       <path d="M13 10H3" /><path d="M5.5 7.5 3 10l2.5 2.5" />
@@ -264,64 +273,60 @@ SPDX-License-Identifier: MIT -->
           <span class="codec-sub">JSON, raw Zstd, PostgreSQL bytea, SQL cells, and standard or URL-safe Base64</span>
           <button id="codec-close">back</button>
         </div>
-        <!-- Every box wears a STANDING label (contract rule 14): a label that
-             lives in the placeholder is gone the moment there is content, and a
-             filled page was four identical grey boxes. `copy` and `open as
-             document` sit in the OUTPUT box's own header row because that is
-             what they act on — which also drops both cards to two card-level
-             buttons, so the 1fr 1fr mirror lines up again. -->
-        <div class="codec-grid">
-          <div class="codec-card">
-            <h2>encode · JSON → Zstd → Base64</h2>
+        <!-- ONE conversion with two directions, not two tools. It used to be
+             two cards of input + output — four boxes for a pair of
+             representations, half of them holding base64 nobody reads. Now the
+             sides are fixed (JSON on the left, payload on the right) and the
+             DIRECTION is the button: `compress →` reads the left and fills the
+             right, `← decode` the reverse. No mode to be in, so nothing to
+             remember and nothing to set before acting.
+             Each side carries its own copy — whichever one just filled is the
+             one you came for, and going elsewhere to copy it was the whole
+             complaint. Rule 14's standing labels stay: a label in a
+             placeholder vanishes the moment there is content. -->
+        <div class="codec-pair">
+          <div class="codec-side">
             <div class="codec-box">
               <div class="codec-box-head">
-                <label class="standing-label" for="codec-in-c">input · JSON or text</label>
+                <label class="standing-label" for="codec-json">JSON or text</label>
+                <span class="spacer"></span>
+                <button id="codec-copy-json" class="btn-quiet" type="button" title="Copy this JSON">copy</button>
+                <button id="codec-open-json" class="btn-quiet" type="button" title="Parse this JSON as a document">open as document</button>
               </div>
-              <textarea id="codec-in-c" spellcheck="false" placeholder="{&quot;orders&quot;: […]}"></textarea>
+              <textarea id="codec-json" spellcheck="false" placeholder="{&quot;orders&quot;: […]}"></textarea>
             </div>
             <div class="codec-actions">
-              <button id="codec-run-c" class="primary">compress</button>
               <button id="codec-use-current" title="Compress the currently open document (never rendered here — stays fast for huge docs)">use open doc</button>
             </div>
-            <div class="codec-box">
-              <div class="codec-box-head">
-                <label class="standing-label" for="codec-out-c">output · Base64</label>
-                <span class="spacer"></span>
-                <button id="codec-copy-c" class="btn-quiet" type="button" title="Copy the base64 zstd result">copy</button>
-              </div>
-              <textarea id="codec-out-c" readonly spellcheck="false" placeholder="base64(zstd(…))"></textarea>
-            </div>
           </div>
-          <div class="codec-card">
-            <h2>decode · payload → JSON</h2>
+
+          <!-- The two directions, between the two sides they act on. -->
+          <div class="codec-run">
+            <button id="codec-run-c" class="primary" title="Compress the JSON on the left to base64 zstd">compress <svg class="ic" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button>
+            <button id="codec-run-d" title="Decode the payload on the right back to JSON"><svg class="ic" aria-hidden="true"><use href="#i-arrow-left"></use></svg> decode</button>
+          </div>
+
+          <div class="codec-side">
             <div class="codec-box">
               <div class="codec-box-head">
-                <label class="standing-label" for="codec-in-d">input · Base64, bytea, or a SQL cell</label>
+                <label class="standing-label" for="codec-payload">payload · base64, bytea, or a SQL cell</label>
+                <span class="spacer"></span>
+                <button id="codec-copy-payload" class="btn-quiet" type="button" title="Copy the payload">copy</button>
               </div>
-              <textarea id="codec-in-d" spellcheck="false"
+              <textarea id="codec-payload" spellcheck="false"
                 placeholder="KLUv/SAsxQAe… · \x28b52ffd… · 'quoted cell'"></textarea>
             </div>
             <div class="codec-actions">
-              <button id="codec-run-d" class="primary">decode</button>
               <button id="codec-file-d">choose file…</button>
               <input type="file" id="codec-file-input"
                 accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
             </div>
-            <div class="codec-box">
-              <div class="codec-box-head">
-                <label class="standing-label" for="codec-out-d">output · JSON</label>
-                <!-- The transformation trace reads as part of the output's
-                     label — what came back, and how — rather than as a band
-                     wedged between the buttons and the box. -->
-                <span id="codec-trace" hidden></span>
-                <span class="spacer"></span>
-                <button id="codec-copy-d" class="btn-quiet" type="button" title="Copy the decoded JSON">copy</button>
-                <button id="codec-open-d" class="btn-quiet" type="button" title="Parse the decompressed text as a document">open as document</button>
-              </div>
-              <textarea id="codec-out-d" readonly spellcheck="false" placeholder="decoded JSON appears here"></textarea>
-            </div>
           </div>
         </div>
+        <!-- What the last press did, where it happened: the trip and its sizes.
+             Given how rarely the separate size report is opened, this is the
+             number people actually want — beside the thing that produced it. -->
+        <div id="codec-trace" hidden></div>
       </section>
       <!-- data-pane is the layout's own state, written by showPane in main.ts
            and read by style.css to decide which strips a layout is allowed. It

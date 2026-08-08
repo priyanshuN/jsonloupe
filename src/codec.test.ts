@@ -320,6 +320,26 @@ describe('decodePayload worker route', () => {
     }
   });
 
+  // Compressing is a worker op for the same reason decoding is, and for one
+  // more: the page's CSP has no `wasm-unsafe-eval`, so a main-thread
+  // WebAssembly.instantiate is refused and the promise never settles — which is
+  // how `compress` silently did nothing while `decode` always worked.
+  it('compresses through the worker and round-trips back through it', async () => {
+    const compressed = await handleAsync({ type: 'compressPayload', text: exactJson });
+
+    expect(compressed).toMatchObject({ ok: true });
+    const { b64, sourceBytes } = compressed as { b64: string; sourceBytes: number };
+    expect(sourceBytes).toBe(new TextEncoder().encode(exactJson).length);
+
+    const back = await handleAsync({ type: 'decodePayload', input: b64 });
+    expect(back).toMatchObject({ ok: true, text: exactJson });
+  });
+
+  it('reports a compress failure instead of rejecting the request', async () => {
+    await expect(handleAsync({ type: 'compressPayload', text: 42 as unknown as string }))
+      .rejects.toThrow('compressPayload requires text');
+  });
+
   it('decodes a wrapped Base64 string and preserves wrapper metadata', async () => {
     const base64 = await compressToB64(exactJson);
     const result = await handleAsync({

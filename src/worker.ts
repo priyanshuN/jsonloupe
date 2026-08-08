@@ -37,6 +37,7 @@ import {
   type TransportInspection,
 } from './transport';
 import {
+  compressToB64,
   decodeJsonPayload,
   type DecodeJsonPayloadOptions,
   type PayloadDecodeFailure,
@@ -2265,6 +2266,16 @@ export type DecodePayloadWorkerResult =
   | Omit<PayloadDecodeSuccess, 'bytes'>
   | PayloadDecodeFailure;
 
+export interface CompressPayloadWorkerMessage extends Record<string, unknown> {
+  type: 'compressPayload';
+  text: string;
+  level?: number;
+}
+
+export type CompressPayloadWorkerResult =
+  | { ok: true; b64: string; sourceBytes: number }
+  | { ok: false; error: string };
+
 /**
  * Async worker-only dispatch. Stateful parser requests continue through the
  * synchronous `handle` seam; codec requests are the only ones that await WASM.
@@ -2294,6 +2305,31 @@ export async function handleAsync(
       return convertPreview(doc, spec, ((msg as { rows?: number }).rows ?? 20));
     }
     return convertRun(doc, spec);
+  }
+  // The other half of the payload round trip, and it belongs here for the same
+  // two reasons decoding does. One is architectural: zstd is WASM and the page
+  // is the wrong place to compile it — every other heavy path already runs in a
+  // worker. The other was a live bug. The page's own CSP is `script-src 'self'`
+  // with no `wasm-unsafe-eval`, so `WebAssembly.instantiate` on the MAIN thread
+  // is refused outright by Chrome; the module aborted, the promise behind
+  // `loadZstd()` never settled, and `compress` did nothing at all — no error,
+  // no toast, forever. The worker has its own policy and compiles it fine,
+  // which is why decoding always worked and compressing never did.
+  if (msg.type === 'compressPayload') {
+    if (typeof msg.text !== 'string') throw new TypeError('compressPayload requires text');
+    const level = typeof msg.level === 'number' ? msg.level : undefined;
+    try {
+      return {
+        ok: true,
+        b64: await compressToB64(msg.text, level),
+        sourceBytes: new TextEncoder().encode(msg.text).length,
+      } satisfies CompressPayloadWorkerResult;
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      } satisfies CompressPayloadWorkerResult;
+    }
   }
   if (msg.type === 'decodePayload') {
     const input = msg.input;
@@ -2356,6 +2392,7 @@ if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessag
     if (
       msg.type === 'transportInspect' ||
       msg.type === 'decodePayload' ||
+      msg.type === 'compressPayload' ||
       msg.type === 'convertInspect' ||
       msg.type === 'convertPreview' ||
       msg.type === 'convertRun'

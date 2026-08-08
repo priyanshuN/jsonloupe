@@ -21,7 +21,6 @@ import { SAMPLE_DOC, SAMPLE_DOC_TITLE } from './sample-doc';
 import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
-  compressToB64,
   decodeJsonPayload,
   sniffPayloadText,
   type DecodeJsonPayloadOptions,
@@ -81,6 +80,22 @@ function call<T>(msg: Record<string, unknown>): Promise<T> {
 type WorkerPayloadDecodeResult =
   | { ok: true; text: string; metadata: PayloadDecodeMetadata }
   | { ok: false; error: PayloadDecodeError; metadata: PayloadDecodeMetadata };
+
+// Zstd is WASM, and the page cannot compile WASM: its own CSP is
+// `script-src 'self'` with no `wasm-unsafe-eval`, so a main-thread
+// WebAssembly.instantiate is refused and the promise behind it never settles —
+// which is exactly how `compress` came to do nothing at all, silently, while
+// decoding (already in the worker) always worked. Both directions live in the
+// worker now, where the policy allows it and a 40 MB compress is off the UI
+// thread besides.
+async function compressInWorker(text: string): Promise<{ b64: string; sourceBytes: number }> {
+  const res = await call<{ ok: boolean; b64?: string; sourceBytes?: number; error?: string }>({
+    type: 'compressPayload',
+    text,
+  });
+  if (!res.ok || typeof res.b64 !== 'string') throw new Error(res.error ?? 'compress failed');
+  return { b64: res.b64, sourceBytes: res.sourceBytes ?? text.length };
+}
 
 function decodePayloadInWorker(
   input: PayloadInput,
@@ -2193,10 +2208,10 @@ function goLanding(): void {
 // ---------- zstd ⇄ base64 codec panel ----------
 
 const codecPane = $('#codec');
-const codecInC = $<HTMLTextAreaElement>('#codec-in-c');
-const codecOutC = $<HTMLTextAreaElement>('#codec-out-c');
-const codecInD = $<HTMLTextAreaElement>('#codec-in-d');
-const codecOutD = $<HTMLTextAreaElement>('#codec-out-d');
+// One pair, not two cards: the JSON side and the payload side, with the
+// direction living in the buttons between them.
+const codecJson = $<HTMLTextAreaElement>('#codec-json');
+const codecPayload = $<HTMLTextAreaElement>('#codec-payload');
 const codecTrace = $('#codec-trace');
 const codecFileInput = $<HTMLInputElement>('#codec-file-input');
 let codecDecodedText = '';
@@ -2210,10 +2225,11 @@ function showCodec(): void {
   codecPane.hidden = false;
 }
 
+// What the last press did, under the pair it acted on: the trip and its sizes
+// for a success, the bytes and the reason for a failure. It is one line for
+// both directions because there is one conversation here, not two.
 function setCodecTrace(text: string, state: 'ok' | 'bad' | null): void {
   codecTrace.textContent = text;
-  // It rides the output box's label row now, so a long trace ellipsizes there
-  // and keeps the whole of itself in the tooltip.
   codecTrace.title = text;
   codecTrace.hidden = !text;
   codecTrace.classList.toggle('ok', state === 'ok');
@@ -2228,12 +2244,16 @@ function showDecodedPayload(
   codecDecodedText = text;
   codecDecodedTitle = decodedDocumentTitle(title);
   codecDecodedProvenance = provenance;
+  // A decode fills the JSON side — the direction the button drew. A huge one
+  // still never reaches the textarea: `open as document` and `copy` work off
+  // the text itself, so the box says what is being held instead of rendering
+  // 40 MB into the DOM.
   if (text.length <= PASTE_ECHO_MAX) {
-    codecOutD.value = text;
-    codecOutD.placeholder = '';
+    codecJson.value = text;
+    codecJson.placeholder = '';
   } else {
-    codecOutD.value = '';
-    codecOutD.placeholder = `decoded ${exactBytes(provenance.decodedBytes)} — kept out of the textarea so the page stays responsive`;
+    codecJson.value = '';
+    codecJson.placeholder = `decoded ${exactBytes(provenance.decodedBytes)} — kept out of the textarea so the page stays responsive`;
   }
   setCodecTrace(provenanceTrace(provenance), 'ok');
   showToast(`decoded ${exactBytes(provenance.decodedBytes)}`);
@@ -2259,12 +2279,12 @@ async function decodeInPayloadTools(
   if (!decoded.ok) {
     codecDecodedText = '';
     codecDecodedProvenance = null;
-    codecOutD.value = '';
+    codecJson.value = '';
     const bytes = firstBytesHex(input);
     // Bytes lead, wordy message last: the trace ellipsizes at the label row's
     // right edge, and the clue must survive the cut — the prose can go.
     setCodecTrace(
-      `${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
+      `decode failed · ${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
       'bad',
     );
     showToast(decoded.error.message, 'bad');
@@ -2284,95 +2304,113 @@ $('#codec-close').addEventListener('click', () => {
   else goLanding();
 });
 
-$('#zstd-btn').addEventListener('click', async () => {
-  if (!currentText) return;
-  const documentRevision = currentDocumentRevision;
-  const source = currentText;
-  let b64: string;
-  try {
-    b64 = await compressToB64(source);
-  } catch (err) {
-    showToast(`compress failed: ${String(err)}`, 'bad');
-    return;
-  }
-  if (documentRevision !== currentDocumentRevision) return;
-  showCodec();
-  codecInC.value = '';
-  codecInC.placeholder = `compressed the open doc (${fmtBytes(source.length)} → ${fmtBytes(b64.length)} b64)`;
-  codecOutC.value = b64;
-  try {
-    await copyText(b64);
-    showToast(`compressed ${fmtBytes(source.length)} → ${fmtBytes(b64.length)} · copied`);
-  } catch {
-    showToast(`compressed ${fmtBytes(source.length)} → ${fmtBytes(b64.length)} — use "copy result"`);
-  }
-});
-
-$('#codec-run-c').addEventListener('click', async () => {
-  const src = codecInC.value;
-  if (!src.trim()) {
-    showToast('paste something to compress');
-    return;
-  }
-  try {
-    codecOutC.value = await compressToB64(src);
-    showToast(`${fmtBytes(src.length)} → ${fmtBytes(codecOutC.value.length)} b64`);
-  } catch (err) {
-    showToast(`compress failed: ${String(err)}`, 'bad');
-  }
-});
-
-$('#codec-use-current').addEventListener('click', async () => {
+// Compressing the open document is the one act that skips the pair entirely:
+// the JSON side would have to hold a 40 MB string to show you what it already
+// knows. It fills the payload side and says what it did.
+async function compressOpenDocument(): Promise<void> {
   if (!currentText) {
     showToast('no document open');
     return;
   }
   const documentRevision = currentDocumentRevision;
   const source = currentText;
+  let b64: string;
   try {
-    codecInC.value = '';
-    codecInC.placeholder = `using the open doc (${fmtBytes(source.length)}) — not rendered here on purpose`;
-    const encoded = await compressToB64(source);
-    if (documentRevision !== currentDocumentRevision) return;
-    codecOutC.value = encoded;
-    showToast(`${fmtBytes(source.length)} → ${fmtBytes(encoded.length)} b64`);
+    b64 = (await compressInWorker(source)).b64;
   } catch (err) {
+    setCodecTrace(`compress failed · ${String(err)}`, 'bad');
+    showToast(`compress failed: ${String(err)}`, 'bad');
+    return;
+  }
+  if (documentRevision !== currentDocumentRevision) return;
+  codecJson.value = '';
+  codecJson.placeholder = `the open document (${fmtBytes(source.length)}) — not rendered here on purpose`;
+  codecPayload.value = b64;
+  setCodecTrace(compressionTrace(source.length, b64.length), 'ok');
+}
+
+// The menu's `payload tools`: compress what is open, land on the page with the
+// result already in hand and on the clipboard.
+$('#zstd-btn').addEventListener('click', async () => {
+  if (!currentText) return;
+  showCodec();
+  await compressOpenDocument();
+  if (!codecPayload.value) return;
+  try {
+    await copyText(codecPayload.value);
+    showToast(`compressed · ${fmtBytes(codecPayload.value.length)} b64 copied`);
+  } catch {
+    showToast('compressed — use copy on the payload side');
+  }
+});
+
+// The line under the pair: the trip, both ends of it, and what it cost.
+function compressionTrace(sourceBytes: number, b64Bytes: number): string {
+  const ratio = sourceBytes > 0 ? Math.round((b64Bytes / sourceBytes) * 1000) / 10 : 0;
+  return `compressed ${fmtBytes(sourceBytes)} → base64 zstd ${fmtBytes(b64Bytes)} · ${ratio}% of the original`;
+}
+
+// LEFT TO RIGHT. Reads the JSON side, fills the payload side.
+$('#codec-run-c').addEventListener('click', async () => {
+  const src = codecJson.value;
+  if (!src.trim()) {
+    // The one case where the empty box is not the whole story: the open
+    // document may be standing in for it (see compressOpenDocument).
+    if (currentText) return void compressOpenDocument();
+    showToast('paste JSON on the left to compress');
+    return;
+  }
+  try {
+    codecPayload.value = (await compressInWorker(src)).b64;
+    setCodecTrace(compressionTrace(src.length, codecPayload.value.length), 'ok');
+  } catch (err) {
+    setCodecTrace(`compress failed · ${String(err)}`, 'bad');
     showToast(`compress failed: ${String(err)}`, 'bad');
   }
 });
 
-$('#codec-copy-c').addEventListener('click', async () => {
-  if (!codecOutC.value) return;
-  await copyText(codecOutC.value);
-  showToast('base64 zstd copied');
-});
-
+// RIGHT TO LEFT. Reads the payload side, fills the JSON side.
 $('#codec-run-d').addEventListener('click', async () => {
-  const src = codecInD.value;
+  const src = codecPayload.value;
   if (!src.trim()) {
-    showToast('paste a payload to decode');
+    showToast('paste a payload on the right to decode');
     return;
   }
   await decodeInPayloadTools(src, 'pasted payload');
 });
 
-$('#codec-copy-d').addEventListener('click', async () => {
-  if (!codecDecodedText) return;
-  await copyText(codecDecodedText);
-  showToast('decoded JSON copied');
+$('#codec-use-current').addEventListener('click', () => void compressOpenDocument());
+
+// Copy on BOTH sides: whichever one just filled is the one you came for, and
+// having to leave the page to get at it was the whole complaint.
+$('#codec-copy-payload').addEventListener('click', async () => {
+  if (!codecPayload.value) return;
+  await copyText(codecPayload.value);
+  showToast('payload copied');
 });
 
-$('#codec-open-d').addEventListener('click', async () => {
-  if (!codecDecodedText) {
-    showToast('decode a payload first');
+$('#codec-copy-json').addEventListener('click', async () => {
+  // A decode too large to render lives in codecDecodedText, not in the box.
+  const text = codecJson.value || codecDecodedText;
+  if (!text) return;
+  await copyText(text);
+  showToast('JSON copied');
+});
+
+$('#codec-open-json').addEventListener('click', async () => {
+  const text = codecJson.value || codecDecodedText;
+  if (!text) {
+    showToast('decode a payload, or paste JSON, first');
     return;
   }
+  // Provenance belongs to a decode; JSON typed in by hand has none.
+  const decoded = text === codecDecodedText;
   await openText(
-    codecDecodedText,
-    codecDecodedTitle,
+    text,
+    decoded ? codecDecodedTitle : 'pasted.json',
     null,
     null,
-    codecDecodedProvenance,
+    decoded ? codecDecodedProvenance : null,
     true,
   );
 });
@@ -2397,8 +2435,10 @@ payloadBadge.addEventListener('click', () => {
   codecDecodedText = currentText;
   codecDecodedTitle = currentTitle;
   codecDecodedProvenance = currentProvenance;
-  codecOutD.value = '';
-  codecOutD.placeholder = 'Current decoded document — use “open as document” to return to it.';
+  // This document IS the decoded side, so the JSON box says so rather than
+  // rendering a document that is already open in the app behind it.
+  codecJson.value = '';
+  codecJson.placeholder = 'the document open behind this page — decoded from the payload below';
   setCodecTrace(
     `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''} · ${provenanceTrace(currentProvenance)}`,
     'ok',

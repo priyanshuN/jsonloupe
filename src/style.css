@@ -702,7 +702,7 @@ button.primary:hover,
    are excluded here rather than being overridden six rules later. The exclusion
    sits inside :where() so it filters without adding specificity — this is the
    floor every field starts from, and a single class (.field > input,
-   .codec-card textarea) has to be able to override it. */
+   .codec-side textarea) has to be able to override it. */
 input:where(:not([type='checkbox']):not([type='file'])),
 textarea,
 select {
@@ -826,8 +826,9 @@ select:focus {
 
 /* Rule 2, the SURFACE TITLE rank: a page, a dialog and a view are the same
    rank — "a thing you opened" — and each one used to title itself differently
-   (18/660, 16/bold, 13/bold accent). The section-label rank lives on
-   .codec-card h2, the only band label in the app. */
+   (18/660, 16/bold, 13/bold accent). The section-label rank now lives only on
+   #convert-preview-head, the payload page's own band labels having gone with
+   the two cards they titled. */
 .codec-head h1,
 .baseline-head h2,
 .transport-head h2,
@@ -1477,46 +1478,37 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .codec-head { display: flex; align-items: baseline; gap: 14px; }
 .codec-head h1 { margin: 0; }
 .codec-sub { color: var(--text-dim); font: var(--fs-body) var(--mono); flex: 1; }
-.codec-grid {
+/* ONE conversion, two directions. The sides are fixed — JSON left, payload
+   right — and the middle column holds the two acts that cross between them, so
+   the direction is never a mode you are in, only a button you press. This
+   replaced two cards of input+output: four boxes for one pair, two of them
+   holding base64, which is not a reading surface for anything. */
+.codec-pair {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr auto 1fr;
   gap: var(--gap-4);
   min-height: 0;
+  align-items: stretch;
 }
-.codec-card {
+.codec-side {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: var(--gap-4);
   min-height: 0;
-  /* No shadow: this card sits in the page flow and shadows are for things that
-     FLOAT (menus, dialogs, toasts). In light it was reading as a real lift, so
-     what separates it now is the --border hairline plus the ground it sits on
-     — a hairline, not nothing. */
-  box-shadow: none;
 }
-/* Rule 2, the SECTION LABEL rank — this is the pattern the rank is named for.
-   The converter's `preview` names a band inside its surface too, and had
-   invented its own dim 12px treatment; markup stays lowercase, the caps are the
-   rank's. */
-.codec-card h2,
-#convert-preview-head > span:first-child {
-  margin: 0;
-  font-size: var(--fs-chip);
-  font-weight: 400;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
+/* The two directions, centred on the boxes they act on rather than on the
+   column — the label rows above the boxes are not theirs to sit beside. */
+.codec-run {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--gap-2);
+  min-width: 0;
 }
+.codec-run button { white-space: nowrap; }
 /* A labelled box: the standing label (rule 14) above the textarea, because a
-   textarea's shell has no baseline to seat a .field-prefix on. Both boxes in a
-   card are flex:1, and both cards hold the same four bands, so the 1fr 1fr
-   mirror is back in register — decode used to carry a fourth button and a trace
-   row, which pushed its boxes shorter than encode's. */
+   textarea's shell has no baseline to seat a .field-prefix on. */
 .codec-box {
   flex: 1;
   min-height: 0;
@@ -1531,23 +1523,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: var(--ctl-h-mini);
 }
 /* Rule 14 supplies ground, border, inset, type and the focus ring; only the
-   box's own facts live here. */
-.codec-card textarea {
+   box's own facts live here. Both sides are WRITABLE now — you paste into
+   whichever one you have, and press the arrow that points away from it — so
+   the read-only output surface (--bg-inset) has no user on this page. */
+.codec-side textarea {
   flex: 1;
-  min-height: 120px;
+  min-height: 160px;
   resize: none;
   border-radius: var(--r);
   line-height: 1.5;
-}
-/* Rule 14's other half: --bg-inset + --border-strong is the read-only OUTPUT
-   surface, so the result pane stops being a third field style and starts
-   saying "this is what came back". Rule 18 for the ink: --c-string paints JSON
-   STRINGS, and base64 is not one — a syntax token was being used to mean "this
-   is output", which is what the surface itself already says. */
-.codec-card textarea[readonly] {
-  background: var(--bg-inset);
-  border-color: var(--border-strong);
-  color: var(--text-dim);
 }
 .codec-actions { display: flex; gap: var(--gap-2); flex-wrap: wrap; }
 /* The transformation trace reads as part of the output's label — what came
