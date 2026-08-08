@@ -3622,6 +3622,66 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 /* Rule 11: the column editor and the preview under it are the document being
    shaped, so this whole column is CANVAS — the bars inside it are the chrome. */
 #convert-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg-canvas); }
+/* The outcome line is the most important sentence on this screen: it is what
+   tells someone the work is already done and names what they are about to get.
+   It reuses #convert-count, which used to hold the words "3 tables" and was
+   dressed as a trailing figure — faint, chip-sized. Restated here at the body
+   rank so the sentence reads as the answer rather than as a caption, and the id
+   is named because an id outranks a class no matter which of the two wins the
+   file. It keeps tabular figures: the counts in it change on every edit. */
+.convert-outcome { min-width: 0; }
+.convert-outcome #convert-count {
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rule 15 tier 3, matching #convert-preview-note.bad: a problem the mapping has
+   as a whole belongs to no column, so it is said once above the list. Same pill
+   as the per-column message below, one level up. */
+.convert-problems {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-1);
+  margin-bottom: var(--gap-2);
+  padding: var(--gap-1) var(--gap-2);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-chip);
+}
+
+/* The same failure, said on the row that causes it — which is the whole point of
+   routing errors by their pointer. Ink alone here, no fill: the row is already
+   inside a list, and a second filled pill per row would drown the list it is
+   trying to annotate. */
+.convert-col-error {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: var(--fs-chip);
+}
+
+/* What the chosen field actually holds, kept on the row after the picker closes.
+   Faint and chip-sized because it is evidence for a decision already made — the
+   moment it competes with the field name it is answering, it is noise. */
+.convert-col-fill {
+  flex-basis: 100%;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One line saying what saving a mapping buys, under the controls that do it.
+   Rule 13's dim rank: it is explanation, and it is read once. */
+.convert-mappings-note {
+  flex-basis: 100%;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+}
+
 /* Rule 11's strip geometry, and the two grounds it prescribes: the columns head
    is a bar stacked directly under .convert-bar, so it takes the second chrome
    tier; the preview head has the column list above it and takes plain chrome.
@@ -3645,7 +3705,16 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 #convert-detail-name { font: 700 var(--fs-code) var(--mono); color: var(--text); }
 #convert-detail-src { color: var(--text-dim); font: var(--fs-body) var(--mono); }
 /* Rule 13: these digits change on every keystroke in the editor above. */
-#convert-preview-note { color: var(--text-faint); font-size: var(--fs-chip); font-variant-numeric: tabular-nums; margin-left: auto; }
+/* flex-shrink: 0 because this span stops being a row count the moment the
+   mapping breaks: "1 problem to fix, marked below" folded onto three lines
+   inside a 44px bar is how a verdict turns back into decoration. */
+#convert-preview-note {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+  font-variant-numeric: tabular-nums;
+}
 /* Rule 15 tier 3: an invalid mapping is the one thing here you must fix before
    anything below it means anything, so it takes ink, hairline and fill. It was
    drawn in --c-string, which is green in light — a failure in the success hue,
@@ -3677,11 +3746,18 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    .disc-key is the app's inline label: --text-dim, not --text-faint, which is
    the 3.0-floor rank for placeholders and captions. These were the smallest and
    the faintest text in the view at the same time. */
+/* Wraps, so the two full-width members below it (the problem message and the
+   note saying what the chosen field holds) get a line of their own instead of
+   being squeezed into whatever the option controls left over. Named as a
+   deviation from rule 11's no-wrap default: an error folded into a 75px column
+   is not a message, and this row is content rather than a control strip. */
 .convert-col-options {
   grid-column: 2 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-3);
+  row-gap: var(--gap-1);
   color: var(--text-dim);
   font-size: var(--fs-chip);
   padding-bottom: var(--gap-1);
