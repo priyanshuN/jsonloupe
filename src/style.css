@@ -9,25 +9,28 @@
    whole vocabulary. If a new control needs something outside them, change the
    contract deliberately rather than adding a one-off.
 
-    1. Two button sizes exist: regular --ctl-h (28px) for toolbars, panels and
-       dialogs, and mini --ctl-h-mini (20px) for controls sitting inline on a
-       row or card. There is no third size.
+    1. Two button sizes exist: regular --ctl-h (30px) for toolbars, panels and
+       dialogs, and mini --ctl-h-mini (22px) for controls sitting inline on a
+       row or card. There is no third size. Both stepped up 2px on 2026-08-09
+       with the type ramp (rule 23) — quote the TOKEN, never the number, and
+       a rescale stays one edit.
     2. Labels are lowercase — the app's dominant voice. Acronyms keep their
        case (JSON, CSV, MIT); headings and prose sentences stay sentence case.
        Headings come in exactly two ranks, both already in the file: SURFACE
        TITLE (16px/700, --text) names a thing you opened — a page, a dialog, a
        view; SECTION LABEL (11.5px/400, caps, +0.7px, --accent) names a band
        inside one. A view does not get a third treatment because it is a view.
-    3. One icon grid: --icon (14px), centred in a fixed square hit area
+    3. One icon grid: --icon (15px), centred in a fixed square hit area
        (.btn-icon / .btn-icon.btn-mini). Glyph-only controls carry aria-label.
        The icons are an inline SVG SET — the <symbol> sprite at the top of
        index.html, .ic here, icon() in main.ts: one 16-unit viewBox, fill none,
-       stroke currentColor at the ONE width .ic declares (1.25 — retuned from
-       1.5 when labels dropped to weight 400, rule 22; the symbols carry no
+       stroke currentColor at the ONE width .ic declares (1.067 = 16 / --icon,
+       so it is re-derived whenever --icon moves; the symbols carry no
        stroke-width so the CSS knob is the only one), round caps and joins,
        flex-shrink 0. The 16 box is an AUTHORING grid, not a second display
-       size; .ic renders at --icon so this rule still describes ONE grid, and
-       1.25 viewBox units land near 1.1 device px there. Six characters used to do
+       size; .ic renders at --icon so this rule still describes ONE grid.
+       ONE SYMBOL OPTS OUT OF `fill: none`, and only one: i-run, whose play
+       triangle in outline reads as a shape rather than an action. Six characters used to do
        this job (◂ ⇆ ⟳ ⤓ ⚠ ☾) and could not: three optical weights on one bar
        that no font metric can reconcile, ⤓ absent from most Windows UI stacks,
        ⚠ arriving in full emoji colour on three platforms. Characters survive
@@ -68,11 +71,33 @@
        panel is restyled to this contract in both themes, pure CSS, near the
        bottom of this file. Its behaviour is CodeMirror's; its look is ours.
    10. Operations live on the pane they act on: if you do it while READING a
-       document it is one click on its pane, never behind the ⋯ menu. The global
-       toolbar carries only document/view concerns (back, title, compare, mode,
-       search, ask); ⋯ is once-per-document-or-less residue. An action gets a
-       glyph instead of a word ONLY when the glyph is universal (back, ⋯ more);
-       anything ambiguous keeps its lowercase label.
+       document it is one click on its pane, never behind the ⋯ menu. ⋯ is
+       once-per-document-or-less residue.
+       THE TOOLBAR HAS THREE GROUPS AND EXACTLY THREE (2026-08-09), because
+       every control in it answers one of three questions: WHICH DOCUMENT am I
+       in (back, title, stats, badges) · HOW AM I LOOKING at it (mode switch,
+       search + filter, ask) · WHAT CAN I DO with it (collapse, copy, download,
+       compare, convert, compress, ⋯), the last group behind a hairline. Before
+       this, `compare` and `convert` sat between the identity group and the
+       mode switch while `compress` sat past the hairline with the tree ops —
+       three controls that do the same kind of job, in three places, wearing
+       three different button tiers. Doing something WITH the document and
+       looking AT it are different questions; the bar now says so.
+       AN ACTION GETS A GLYPH INSTEAD OF A WORD when a drawing of it already
+       exists — REVISED 2026-08-09, and this is a real reversal. The old test
+       was "only when the glyph is universal", which in practice meant "only
+       when a stranger would recognise it cold", and that test can never be
+       passed by anything: it argues every control into a label forever and
+       calls the result caution. The test that replaced it is about the
+       DESIGNER, not the reader — am I reaching for a drawing that exists (a
+       grid is a table, a triangle is play, arrows meeting are compression), or
+       am I coining one? A coined glyph keeps its word. The rest carry a title
+       tooltip, an aria-label and a slot on /styleguide.html, so the word is
+       always one hover from the reader and the whole set is reviewable on one
+       page. What paid for it, measured on one document at the new type scale
+       by rebuilding the old bar in place: 211px, and the narrowest single-row
+       window went 1519 → 1308. 1440 had been wrapping since `convert` and the
+       `run` chip landed; it now clears by 132px.
        REVISED 2026-08-04 — A PANE-SCOPED BAR EXISTS ONLY WHEN THERE IS MORE
        THAN ONE PANE TO SCOPE TO. The tree is the case that proved it: there is
        only ever one of it, and collapse / copy / download all act on the
@@ -100,12 +125,12 @@
        under another bar takes --bg-chrome-2 so the two stay a visible step
        apart.
        ONE STRIP GEOMETRY, and it is not negotiable per bar: --gap-2 / --gap-3
-       padding (8/12), min-height 44px. Every strip that misses it puts its
+       padding (8/12), min-height --bar-h (46px). Every strip that misses it puts its
        first control on a different x from the strip above, and no two stacked
        bars come out the same height — invisible one at a time, machined vs
        assembled when you see them stacked. Two exceptions, both stated:
-       #status-bar is a STATUS line, not a control bar, so it keeps 30px (and
-       the vertical padding that holds 30px) while taking the 12px inset like
+       #status-bar is a STATUS line, not a control bar, so it keeps 32px (and
+       the vertical padding that holds 32px) while taking the 12px inset like
        everything else; .sem-toolbar keeps --bg-chrome-2 because it is deliberately a
        second bar under a first. A list panel (#search-panel) is the one strip
        whose box is sized by its rows: it delivers the 12px inset and its height
@@ -203,7 +228,7 @@
        another. Hover keeps its background change and nothing more.
    19. THE BOTTOM EDGE IS THE APP'S, not the view's. There is ONE status line,
        #status-bar, and it is the last thing in #viewer under every pane: the
-       geometry #crumb had (30px, the 12px inset, --bg-chrome, top border),
+       geometry #crumb had (32px, the 12px inset, --bg-chrome, top border),
        present whether or not the view has anything to say. Each view fills the
        same three slots — LEAD (its "where am I": the tree/table path, the code
        caret, the diff verdict, the aligned row), CHIPS (what that lead earns)
@@ -254,8 +279,14 @@
    23. THE TYPE RAMP: eight sizes, tokenized as --fs-{micro,label,chip,body,
        code,base,lede,title} — the only font sizes the workbench UI may use.
        22 distinct literal sizes had accreted (six of them within 2.5px of
-       each other); the ramp's step values equal the sizes the app used most,
-       so adoption moved almost nothing. Landing/spec display sizes (17-58px)
+       each other); the ramp's step values started as the sizes the app used
+       most, so adoption moved almost nothing. The ramp is now 11 / 11.5 /
+       12.5 / 13.5 / 14 / 15 / 16 / 17.5 — raised one step on 2026-08-09, with
+       --ctl-h, --ctl-h-mini and --icon moving alongside it (rules 1 and 3).
+       That rescale was eight token lines and three metric lines, which is the
+       point of this rule: the ramp is not bookkeeping, it is the thing that
+       makes a global type decision cheap enough to actually make.
+       Landing/spec display sizes (17-58px)
        stay literal under rule 22's exception. Letter-spacing belongs to the
        two uppercase label RANKS, not to individual selectors. The spacing
        grid is --gap-1..4 (4/8/12/16): a literal that RESTATES a gap value is
@@ -452,11 +483,19 @@
   --display: 'Space Grotesk', var(--sans);
   --row-h: 28px;
 
-  /* Contract rules 1, 3 and 4 — the only control sizes and gaps in the app. */
-  --ctl-h: 28px;
-  --ctl-h-mini: 20px;
-  --icon: 14px;
-  --bar-h: 44px;
+  /* Contract rules 1, 3 and 4 — the only control sizes and gaps in the app.
+     Stepped up 2026-08-09 with the type ramp below: 12.5px body in a 28px
+     control was a size the app had inherited rather than chosen, and it read
+     small against every desktop tool it sits beside (VS Code's chrome is 13,
+     GitHub's 14). The metrics move WITH the ramp — a bigger label in the same
+     box is not a scale, it is a crowded box. --row-h deliberately does NOT
+     move: row height is a density decision, its value is mirrored as a
+     virtualization constant in three TS files, and 14px in 28px is a
+     comfortable ratio already. */
+  --ctl-h: 30px;
+  --ctl-h-mini: 22px;
+  --icon: 15px;
+  --bar-h: 46px;
   --gap-1: 4px;
   --gap-2: 8px;
   --gap-3: 12px;
@@ -465,18 +504,23 @@
   --r-pill: 999px;
 
   /* Rule 24 — the TYPE RAMP: the only font sizes the workbench UI may use.
-     Step values equal the sizes the app already used most, so adopting the
-     ramp moved almost nothing; the absorbed strays (9/9.5→micro, 11→chip,
+     Step values started as the sizes the app already used most, so adopting
+     the ramp moved almost nothing; the absorbed strays (9/9.5→micro, 11→chip,
      12→body, 13.5→code, 14.5→lede) each shifted ≤1px. Landing/spec display
-     sizes (17-58px) are rule 22's exception territory and stay literal. */
-  --fs-micro: 10px;
-  --fs-label: 10.5px;
-  --fs-chip: 11.5px;
-  --fs-body: 12.5px;
-  --fs-code: 13px;
-  --fs-base: 14px;
-  --fs-lede: 15px;
-  --fs-title: 16px;
+     sizes (17-58px) are rule 22's exception territory and stay literal.
+     RAISED ONE STEP 2026-08-09 (was 10/10.5/11.5/12.5/13/14/15/16). Nothing
+     about the shape of the ramp changed — same eight ranks, same intervals —
+     and because rule 23 already forbids a font size anywhere outside these
+     tokens, this block is the ONLY place the change had to be made. That is
+     the whole return on the ramp: a global type decision is eight lines. */
+  --fs-micro: 11px;
+  --fs-label: 11.5px;
+  --fs-chip: 12.5px;
+  --fs-body: 13.5px;
+  --fs-code: 14px;
+  --fs-base: 15px;
+  --fs-lede: 16px;
+  --fs-title: 17.5px;
 
   /* The one focus/attention glow recipe, accent and danger flavors (rule 5's
      box-shadow sibling — the outline ring is defined at .focus-ring). */
@@ -591,12 +635,14 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   height: var(--icon);
   flex-shrink: 0;
   /* The whole sprite's stroke, one knob (the symbols carry no stroke-width of
-     their own). 16/14 viewBox units = EXACTLY 1 device px at --icon (2 on
+     their own). 16/15 viewBox units = EXACTLY 1 device px at --icon (2 on
      hidpi) — retuned from 1.5 (≈1.31px, all smear) when button labels dropped
-     to weight 400 (rule 22) and the icons read heavier than their own text.
+     to weight 400 (rule 22) and the icons read heavier than their own text,
+     and again from 1.143 when --icon went 14 → 15 with the type ramp.
      Keep this an integer number of device px; fractions render as AA blur,
-     the same disease rule 22 kills in type. */
-  stroke-width: 1.143;
+     the same disease rule 22 kills in type. THIS NUMBER IS DERIVED — it is
+     16 / --icon, so it moves every time --icon does. */
+  stroke-width: 1.067;
 }
 /* An icon centres on the control's box, not on the text baseline (rule 3), so
    any button carrying one becomes a flex row. --gap-1 between icon and label:
@@ -628,7 +674,6 @@ button:has(> .ic) {
 .chip-del,
 .crumb-chip,
 .codec-box-head button,
-#run-exec,
 #ask-query-line button {
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
@@ -650,7 +695,6 @@ button:has(> .ic) {
    workbench needs to shout twice. */
 button.primary,
 #ask-btn,
-#compare-btn,
 #baseline-file-btn {
   background: var(--btn-bg);
   border-color: var(--accent-line);
@@ -687,7 +731,6 @@ button.primary,
 .mode-switch button:active { border: none; }
 button.primary:hover,
 #ask-btn:hover,
-#compare-btn:hover,
 #baseline-file-btn:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
 #parse-btn {
   background: var(--accent-fill);
@@ -1643,17 +1686,26 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* .tb-doc is a shrinkable flex row — the label must not break across two lines. */
 #original-btn { white-space: nowrap; }
 
-/* Rule 10, revised: the tree's document ops, upstairs, behind a hairline —
-   ONE group with a divider before it rather than a whole second floor with a
-   border under it. Visible only where they have a subject: the tree standing
-   alone. In split they are down in the tree half of the shared strip, and in
-   code / diff / table / compare there is no tree on screen to collapse. */
-.tb-tree {
-  display: none;
+/* Rule 10's third group — WHAT CAN I DO with this document — behind ONE
+   hairline, rather than a whole second floor with a border under it. The
+   divider belongs to the GROUP, not to the tree ops inside it: .tb-tree used to
+   carry it, so in split and run (where those four migrate into the pane bar)
+   the line left with them and `compare convert ⋯` ended up floating with no
+   edge to sit behind. */
+.tb-tools {
+  display: flex;
   align-items: center;
   gap: var(--gap-2);
   padding-left: var(--gap-4);
   border-left: 1px solid var(--border);
+}
+/* Visible only where they have a subject: the tree standing alone. In split
+   they are down in the tree half of the shared strip, and in code / diff /
+   table / compare there is no tree on screen to collapse. */
+.tb-tree {
+  display: none;
+  align-items: center;
+  gap: var(--gap-2);
 }
 #viewer[data-pane='tree'] .tb-tree { display: flex; }
 
@@ -2027,12 +2079,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-color: var(--accent-line);
 }
 
-/* `ask` and `compare` wear the outline tier, defined once with button.primary
-   near the top of this file — nothing to restate here. Only their two local
-   facts live below. Open IS a toggle state, so the tint here means exactly what
-   it means everywhere else. */
+/* `ask` is the ONE outline-tier control in the toolbar, defined once with
+   button.primary near the top of this file — nothing to restate here. `compare`
+   used to share it and `convert` was the bar's only plain bordered button, so
+   three neighbours doing the same kind of job wore three tiers; both are quiet
+   glyphs in .tb-tools now (rule 10, revised), which is what finally rations the
+   accent to one shape per view the way rule 6 always said. Open IS a toggle
+   state, so the tint here means exactly what it means everywhere else. */
 #ask-btn.on { background: var(--accent-soft); border-color: var(--accent); }
-#compare-btn { white-space: nowrap; }
 
 /* Quiet utilities — toolbar, code bar, split strip, ask row, codec label rows,
    run result bar — all wear .btn-quiet declared on the element (the tier block
@@ -2326,14 +2380,16 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 /* The run button docks in the bottom-right corner of the field (chat-input
    style) instead of standing on a row of its own: the script and the act of
    running it are one control. The content keeps a matching right inset so a
-   wrapped line never runs underneath it. */
+   wrapped line never runs underneath it. It is a ▶ square at the REGULAR size
+   now (it was rule 1's mini, alone among the controls on its own row) — the
+   inset below is --ctl-h plus the two --gap-2 it sits between. */
 #run-exec {
   position: absolute;
   right: var(--gap-2);
   bottom: var(--gap-2);
   z-index: 1;
 }
-#run-editor .cm-content { padding-right: 52px; }
+#run-editor .cm-content { padding-right: 46px; }
 /* Its other home. main.ts moves this same button to the head bar when the
    editor collapses, where it is an ordinary control on an ordinary row. */
 .run-head > #run-exec { position: static; }
@@ -2931,8 +2987,8 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 /* ---------- status strip: the app's bottom edge ---------- */
 
 /* Rule 19. ONE status line under every pane, and rule 11's one stated height
-   exception: a STATUS line, not a control bar, so it keeps 30px and the 5px
-   vertical padding that holds 30px around a mini chip. The 12px inset is not
+   exception: a STATUS line, not a control bar, so it keeps 32px and the 5px
+   vertical padding that holds 32px around a mini chip. The 12px inset is not
    an exception — the lead starts on the same x as every strip above it. It has
    no :empty rule on purpose: the strip is the app's bottom edge whether or not
    the view has something to say, and a view with nothing to say has a resting
@@ -2943,7 +2999,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   padding: 5px var(--gap-3);
   font: var(--fs-body) var(--mono);
   color: var(--text-dim);
-  min-height: 30px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   gap: var(--gap-2);

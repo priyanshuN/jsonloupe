@@ -23,6 +23,19 @@ paintTheme();
 const surfaceTokens = ['bg-well', 'bg', 'bg-chrome', 'bg-chrome-2', 'bg-canvas', 'bg-elevated', 'bg-elevated-2', 'bg-inset', 'bg-hover'];
 const inkTokens = ['text', 'text-dim', 'text-faint', 'accent', 'brand', 'ok', 'warn', 'danger', 'c-key', 'c-string', 'c-number', 'c-boolean'];
 
+// Same principle as the swatches, applied to the numbers this page PRINTS: the
+// type ramp and the control metrics are stamped from the live tokens rather
+// than typed into the markup. They were typed until 2026-08-09, and the ramp
+// moved one step without them — a page whose whole job is "look at this" was
+// captioning 13.5px type as 12.5.
+function stampMetrics() {
+  const computed = getComputedStyle(doc);
+  for (const el of document.querySelectorAll('[data-sg-size]')) {
+    el.textContent = computed.getPropertyValue(`--${el.dataset.sgSize}`).trim() || '—';
+  }
+}
+stampMetrics();
+
 function renderSwatches() {
   const computed = getComputedStyle(doc);
   const swatch = (token, ink) => {

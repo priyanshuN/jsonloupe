@@ -186,4 +186,63 @@ describe('the icon sprite', () => {
     expect(Object.keys(app).length).toBeGreaterThan(0);
     expect(symbols(styleguide)).toEqual(app);
   });
+
+  // Rule 10, revised 2026-08-09: the app may drop a label for a glyph, and the
+  // price is that the glyph is REVIEWABLE — mirroring the sprite into the
+  // styleguide is not enough if the symbol is never drawn on the page.
+  it('draws every symbol on the styleguide, not just defines it there', () => {
+    const shown = new Set(
+      [...styleguide.matchAll(/<use href="#(i-[\w-]+)"/g)].map((m) => m[1]),
+    );
+    const missing = Object.keys(symbols(html)).filter((id) => !shown.has(id));
+    expect(missing, 'symbols defined but never rendered on the stare page').toEqual([]);
+  });
+});
+
+// The other half of rule 10's revision, and the half that is easy to forget on
+// the next glyph: a control that says nothing in print has to say it on hover
+// AND to a screen reader. Neither is optional, and neither is checkable by
+// looking at the bar — they only exist in the markup.
+describe('glyph-only controls (rule 10, revised)', () => {
+  /**
+   * The text a reader would see in a markup fragment — everything NOT inside a
+   * tag. A scan rather than a `.replace(/<[^>]*>/g, '')`, for the same reason
+   * withoutComments above is one: strip-tags-by-regex is the shape of a
+   * sanitizer, it is never a correct one, and writing it here invites the next
+   * person to reach for it somewhere it matters. (CodeQL agrees, and said so.)
+   */
+  function textOutsideTags(fragment: string): string {
+    let out = '';
+    let i = 0;
+    for (;;) {
+      const open = fragment.indexOf('<', i);
+      if (open < 0) return (out + fragment.slice(i)).trim();
+      out += fragment.slice(i, open);
+      const close = fragment.indexOf('>', open);
+      // Unterminated tag: nothing after it is text a reader would see.
+      if (close < 0) return out.trim();
+      i = close + 1;
+    }
+  }
+
+  /** Buttons whose entire visible content is one <svg class="ic">. */
+  const glyphOnly = [...withoutComments(html).matchAll(/<button\b[\s\S]*?<\/button>/g)]
+    .map((m) => m[0])
+    .filter((b) => {
+      const inner = b.slice(b.indexOf('>') + 1, b.lastIndexOf('</button>'));
+      return inner.includes('<svg') && textOutsideTags(inner) === '';
+    });
+
+  it('finds the glyph-only buttons at all', () => {
+    // A guard on the guard: if the regex above ever stops matching, every
+    // assertion below passes vacuously and the rule silently stops being one.
+    expect(glyphOnly.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('gives each of them a tooltip and an accessible name', () => {
+    const naked = glyphOnly
+      .filter((b) => !/\stitle="/.test(b) || !/\saria-label="/.test(b))
+      .map((b) => /\bid="([^"]+)"/.exec(b)?.[1] ?? b.slice(0, 60));
+    expect(naked, 'glyph-only buttons missing title and/or aria-label').toEqual([]);
+  });
 });
