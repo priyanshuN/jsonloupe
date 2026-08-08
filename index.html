@@ -91,12 +91,50 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-theme" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M14 8.5A6 6 0 1 1 7.5 2 4.7 4.7 0 0 0 14 8.5Z" />
     </symbol>
+    <!-- 2026-08-09, the five that let the toolbar's utilities drop their words
+         (rule 10, revised again). The test each had to pass is NOT "would a
+         stranger recognise it" — it is "does a drawing of this action already
+         exist, or am I inventing one". A grid IS a table, two arrows meeting
+         IS compression, a triangle IS play; those are drawn, not coined. -->
+    <symbol id="i-table" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 3.5h11v9h-11z" /><path d="M2.5 6.75h11" /><path d="M6.75 6.75v5.75" />
+    </symbol>
+    <!-- An archive box, not the two-arrows-meeting glyph this started as. Both
+         readings of "squeeze" were on the same bar three buttons apart — and
+         between the two, the arrows belong to COLLAPSE (every IDE draws
+         collapse-all that way) while a package is what a zstd blob actually
+         is. Drawing them the other way round put the conventional glyph on the
+         unconventional action. -->
+    <symbol id="i-compress" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 3.25h11v2.5h-11z" /><path d="M3.5 5.75h9v7h-9z" /><path d="M6.75 8.5h2.5" />
+    </symbol>
+    <!-- Chevron-double-UP, not two chevrons meeting in the middle: drawn that
+         way the vertices land 2 units apart and the glyph reads as ✕, which
+         already means close. Stacked and both pointing the same way it reads
+         as one direction — fold everything up — which is the action. -->
+    <symbol id="i-collapse" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 8 8 4.5l3.5 3.5" /><path d="M4.5 11.5 8 8l3.5 3.5" />
+    </symbol>
+    <!-- The one glyph in the set that is FILLED. A play triangle drawn in
+         outline reads as a shape rather than an action, and this is the only
+         symbol whose whole job is "now" — so it opts out of the stroke recipe
+         deliberately rather than by omission. -->
+    <symbol id="i-run" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5.6 3.6 12 8l-6.4 4.4z" />
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 3.5v9" /><path d="M3.5 8h9" />
+    </symbol>
   </svg>
   <div id="app">
     <aside id="sidebar">
       <div class="side-head">
         <a class="brand" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec"><img class="brand-mark" src="/favicon.svg" alt="" width="27" height="27" /><span>json<span class="brand-loupe">loupe</span></span></a>
-        <button id="new-btn" title="New document">+ new</button>
+        <!-- The drawn plus, not the character: `+` carries its own optical
+             weight and its own baseline, which is the whole reason rule 3
+             exists. Keeps its word — this is the sidebar's one CTA, and it has
+             the room. -->
+        <button id="new-btn" title="New document"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>new</button>
       </div>
       <div class="side-label">Recents</div>
       <div id="recents"></div>
@@ -369,8 +407,6 @@ SPDX-License-Identifier: MIT -->
             <button id="original-btn" class="btn-quiet" title="reopen the document this was decoded from" hidden><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>original</button>
             <button id="reload-btn" class="btn-quiet" title="Re-read this file from disk" hidden><svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>reload</button>
           </div>
-          <button id="compare-btn" title="Choose a baseline and open semantic side-by-side comparison"><svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg>compare</button>
-          <button id="convert-btn" title="Turn this document into flat tables you can open in Excel">convert</button>
           <!-- Four layouts of the SAME document, so `run` is a view here rather
                than a button of its own: it composes the source pane with a
                derived one, exactly as split composes tree with code. -->
@@ -400,29 +436,6 @@ SPDX-License-Identifier: MIT -->
               title="Prune the tree to branches matching the search text" aria-label="Filter the tree to matches"><svg class="ic" aria-hidden="true"><use href="#i-filter"></use></svg></button>
           </div>
           <button id="ask-btn" title="Ask a question about this document in English">ask</button>
-          <!-- The tree's three document ops, behind a hairline (contract rule
-               10, revised): with one tree on screen there is no second pane to
-               scope a strip to, so they ride the toolbar instead of spending a
-               whole second floor and a second border. In split there ARE two
-               panes, and main.ts moves these same three buttons down into the
-               tree half of the shared strip. -->
-          <div class="tb-tree" id="tb-tree-ops">
-            <button id="collapse-btn" class="btn-quiet" type="button" title="Collapse every expanded node">collapse</button>
-            <!-- copy and download are the two glyphs rule 3 calls universal
-                 without argument, and dropping their labels is what pays for
-                 the button beside them: the bar was already wrapping below a
-                 ~1475px window before `compress` existed. -->
-            <button id="fmt-btn" class="btn-icon btn-quiet" type="button" title="Copy pretty-printed JSON"
-              aria-label="Copy pretty-printed JSON"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
-            <button id="dl-btn" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
-              title="Name and download the original bytes" aria-label="Name and download the original bytes"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
-            <!-- A document op like its neighbours — it acts on the document you
-                 are reading — so it rides with them, including down into the
-                 pane bar in split and run. Out of the ⋯ deliberately: getting
-                 the blob back out is not once-per-document residue. -->
-            <button id="compress-btn" class="btn-quiet" type="button"
-              title="Compress this document to base64 zstd, copy it, and open compress &amp; decode">compress</button>
-          </div>
           <!-- Rule 21: the name popover renders to the top layer rather than
                hanging off whichever bar #dl-btn is standing in — main.ts moves
                that button between the toolbar and the split strip. A <form> so
@@ -431,24 +444,63 @@ SPDX-License-Identifier: MIT -->
             <input id="dl-name-input" spellcheck="false" aria-label="File name for the download">
             <button type="submit" class="primary">download</button>
           </form>
-          <!-- Overflow: once-per-document-or-less. Anything you do while READING
-               a document lives on the pane it acts on when there is a pane to
-               scope it to (code-bar / the split strip). -->
-          <div class="tb-more">
-            <button id="more-btn" class="btn-icon btn-quiet" type="button" aria-haspopup="menu"
-              aria-expanded="false" aria-controls="more-menu" title="More actions">⋯</button>
-            <div id="more-menu" class="menu" role="menu" hidden>
-              <button id="min-btn" role="menuitem" type="button" title="Copy minified JSON">copy minified</button>
-              <div class="menu-sep" role="separator"></div>
-              <button id="transport-btn" role="menuitem" type="button"
-                title="Inspect exact JSON, Zstd, Base64, envelope, and transport-budget sizes">size report</button>
+          <!-- Rule 10's third group — WHAT CAN I DO with this document — behind
+               one hairline. Everything here is the same species and therefore
+               the same tier (quiet) and the same shape (a glyph square); the
+               bar spends its one accent on `ask` and nothing else.
+               Order is not arbitrary. .tb-tree first, because those four act on
+               the document IN PLACE and migrate away together when a pane bar
+               exists to scope them to; then the two that hand you a NEW surface
+               and therefore never migrate; then the residue. In split and run
+               this group is left holding exactly `compare convert ⋯`, which is
+               still a sentence. -->
+          <div class="tb-tools">
+            <!-- The tree's document ops: with one tree on screen there is no
+                 second pane to scope a strip to, so they ride the toolbar
+                 instead of spending a whole second floor and a second border.
+                 In split there ARE two panes, and main.ts moves these same four
+                 buttons down into the tree half of the shared strip. -->
+            <div class="tb-tree" id="tb-tree-ops">
+              <button id="collapse-btn" class="btn-icon btn-quiet" type="button"
+                title="Collapse every expanded node" aria-label="Collapse every expanded node"><svg class="ic" aria-hidden="true"><use href="#i-collapse"></use></svg></button>
+              <button id="fmt-btn" class="btn-icon btn-quiet" type="button" title="Copy pretty-printed JSON"
+                aria-label="Copy pretty-printed JSON"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+              <button id="dl-btn" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
+                title="Name and download the original bytes" aria-label="Name and download the original bytes"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
+              <!-- A document op like its neighbours — it acts on the document
+                   you are reading — so it rides with them, including down into
+                   the pane bar in split and run. Out of the ⋯ deliberately:
+                   getting the blob back out is not once-per-document residue. -->
+              <button id="compress-btn" class="btn-icon btn-quiet" type="button"
+                title="Compress this document to base64 zstd, copy it, and open compress &amp; decode"
+                aria-label="Compress this document and open compress and decode"><svg class="ic" aria-hidden="true"><use href="#i-compress"></use></svg></button>
+            </div>
+            <button id="compare-btn" class="btn-icon btn-quiet" type="button"
+              title="Choose a baseline and open semantic side-by-side comparison"
+              aria-label="Compare this document with a baseline"><svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg></button>
+            <button id="convert-btn" class="btn-icon btn-quiet" type="button"
+              title="Turn this document into flat tables you can open in Excel"
+              aria-label="Convert this document to tables"><svg class="ic" aria-hidden="true"><use href="#i-table"></use></svg></button>
+            <!-- Overflow: once-per-document-or-less. Anything you do while
+                 READING a document lives on the pane it acts on when there is a
+                 pane to scope it to (code-bar / the split strip). -->
+            <div class="tb-more">
+              <button id="more-btn" class="btn-icon btn-quiet" type="button" aria-haspopup="menu"
+                aria-expanded="false" aria-controls="more-menu" title="More actions">⋯</button>
+              <div id="more-menu" class="menu" role="menu" hidden>
+                <button id="min-btn" role="menuitem" type="button" title="Copy minified JSON">copy minified</button>
+                <div class="menu-sep" role="separator"></div>
+                <button id="transport-btn" role="menuitem" type="button"
+                  title="Inspect exact JSON, Zstd, Base64, envelope, and transport-budget sizes">size report</button>
+              </div>
             </div>
           </div>
         </div>
         <div id="ask-panel" hidden>
           <div class="ask-row">
             <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
-            <button id="ask-run" class="primary">run</button>
+            <button id="ask-run" class="btn-icon primary" title="Ask this question"
+              aria-label="Ask this question"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
             <button id="ask-key" class="btn-quiet" title="Set the Anthropic API key (stored in this browser only)">key</button>
           </div>
           <!-- A real form: satisfies Chrome's password-field containment warning
@@ -460,8 +512,13 @@ SPDX-License-Identifier: MIT -->
           </form>
           <div id="ask-query-line" hidden>
             <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
-            <button id="ask-query-run" class="primary" title="Run this query as a saved query">run</button>
-            <button id="ask-query-copy" class="btn-icon btn-quiet" title="Copy this query" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+            <!-- btn-mini on both: this row is rule 1's mini tier, but .btn-icon
+                 sets width AND height from --ctl-h, which the row's min-height
+                 could never override — so the copy glyph had been standing a
+                 full regular-size square in a mini row all along. -->
+            <button id="ask-query-run" class="btn-icon btn-mini primary" title="Run this query as a saved query"
+              aria-label="Run this query"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
+            <button id="ask-query-copy" class="btn-icon btn-mini btn-quiet" title="Copy this query" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
           </div>
           <details id="ask-disclosure" hidden>
             <summary>sent to model</summary>
@@ -547,7 +604,9 @@ SPDX-License-Identifier: MIT -->
                    script and the act of running it are one control); main.ts
                    moves this same element up here when the editor collapses,
                    the way the tree ops move between bars. -->
-              <button id="run-exec" type="button" class="primary" title="Run this script over the document (Ctrl/Cmd+Enter)">run</button>
+              <button id="run-exec" type="button" class="btn-icon primary"
+                title="Run this script over the document (Ctrl/Cmd+Enter)"
+                aria-label="Run this script over the document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
             </div>
             <!-- What this function was seen to read, against what the open
                  document actually has. A remark about the script, never a gate
@@ -585,8 +644,11 @@ SPDX-License-Identifier: MIT -->
               placeholder="find a function" aria-label="Find a function" />
             <!-- Appears only once something is ticked: with nothing picked, a
                  row press is still the whole interaction. -->
+            <!-- The one ▶ that keeps a word beside it, and the word is a NUMBER:
+                 how many functions this press is about to run. -->
             <button id="run-picked" class="primary" type="button" hidden
-              title="Run every ticked function over this document">run</button>
+              title="Run every ticked function over this document"
+              aria-label="Run every ticked function over this document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg><span id="run-picked-n"></span></button>
             <!-- A playbook: your functions as a file, so the library survives a
                  cleared browser and can be handed to someone. It never carries
                  the document — you export the questions, not the data. -->
@@ -595,7 +657,8 @@ SPDX-License-Identifier: MIT -->
             <button id="run-import" class="btn-quiet" type="button" hidden
               title="Add the functions from a playbook file">import</button>
             <input id="run-import-file" type="file" accept="application/json,.json" hidden />
-            <button id="run-new" class="btn-quiet" type="button" hidden title="Write a new function">+ new</button>
+            <button id="run-new" class="btn-icon btn-quiet" type="button" hidden
+              title="Write a new function" aria-label="Write a new function"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg></button>
             <button id="run-copy" class="btn-icon btn-quiet" type="button" title="Copy the whole result" aria-label="Copy the whole result"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts
                  remembers which button opened it and downloads accordingly. -->

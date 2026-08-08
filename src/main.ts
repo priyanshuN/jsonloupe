@@ -4176,6 +4176,9 @@ const runConsoleBody = $('#run-console-body');
 const runFitEl = $('#run-fit');
 const runBatchEl = $('#run-batch');
 const runPickedBtn = $<HTMLButtonElement>('#run-picked');
+// The count only — the ▶ beside it is markup and must survive a repaint, which
+// setting textContent on the button itself would have wiped.
+const runPickedCount = $('#run-picked-n');
 const runHead = $('.run-head');
 const runNameEl = $('#run-name');
 const runNameInput = $<HTMLInputElement>('#run-name-input');
@@ -4439,7 +4442,14 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
 function paintPickState(total: number): void {
   const picked = runPicked.size;
   runPickedBtn.hidden = picked === 0;
-  runPickedBtn.textContent = `run ${fmtNumber(picked)}`;
+  runPickedCount.textContent = fmtNumber(picked);
+  // Both, not just the tooltip: "▶ 3" announces as "3" on its own, so the
+  // accessible name has to carry the verb the glyph is standing in for.
+  const say = picked === 1
+    ? 'Run the ticked function over this document'
+    : `Run all ${fmtNumber(picked)} ticked functions over this document`;
+  runPickedBtn.title = say;
+  runPickedBtn.setAttribute('aria-label', say);
   // Both directions: unticking the last one has to put the bar back to what it
   // said before, or it keeps claiming a selection that is gone.
   runLibCount.textContent = picked > 0

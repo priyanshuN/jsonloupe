@@ -31,6 +31,11 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-move-down" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9" /><path d="M4.75 9.25 8 12.5l3.25-3.25" /></symbol>
     <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6 14.4 13.4H1.6Z" /><path d="M8 6.6v3" /><path d="M8 11.6h.01" /></symbol>
     <symbol id="i-theme" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8.5A6 6 0 1 1 7.5 2 4.7 4.7 0 0 0 14 8.5Z" /></symbol>
+    <symbol id="i-table" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v9h-11z" /><path d="M2.5 6.75h11" /><path d="M6.75 6.75v5.75" /></symbol>
+    <symbol id="i-compress" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.25h11v2.5h-11z" /><path d="M3.5 5.75h9v7h-9z" /><path d="M6.75 8.5h2.5" /></symbol>
+    <symbol id="i-collapse" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8 8 4.5l3.5 3.5" /><path d="M4.5 11.5 8 8l3.5 3.5" /></symbol>
+    <symbol id="i-run" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 3.6 12 8l-6.4 4.4z" /></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9" /><path d="M3.5 8h9" /></symbol>
   </svg>
 
   <div class="sg" id="sg-main">
@@ -47,13 +52,18 @@ SPDX-License-Identifier: MIT -->
 
     <section>
       <h2>type ranks — rule 2 &amp; 22</h2>
+      <!-- Every size in this section is STAMPED from the live token by
+           styleguide.js, never typed. The swatches below have always read the
+           stylesheet; these rows did not, so the day the ramp moved they went
+           on claiming 12.5px in 13.5px type — the stare page lying about the
+           one thing it exists to show. -->
       <div class="sg-row sg-type" style="display:block">
-        <div style="font-size:var(--fs-title); font-weight:700; color:var(--text)">Surface title — 16px/700, names a thing you opened</div>
-        <div style="font-size:var(--fs-chip); font-weight:400; color:var(--accent); text-transform:uppercase; letter-spacing:0.7px">section label — 11.5px/400 caps, names a band inside one</div>
-        <div style="font:400 var(--fs-body) var(--sans); color:var(--text)">Body sans 12.5/400 — the app's speaking voice, weight 400 everywhere</div>
+        <div style="font-size:var(--fs-title); font-weight:700; color:var(--text)">Surface title — <span data-sg-size="fs-title"></span>/700, names a thing you opened</div>
+        <div style="font-size:var(--fs-chip); font-weight:400; color:var(--accent); text-transform:uppercase; letter-spacing:0.7px">section label — <span data-sg-size="fs-chip"></span>/400 caps, names a band inside one</div>
+        <div style="font:400 var(--fs-body) var(--sans); color:var(--text)">Body sans <span data-sg-size="fs-body"></span>/400 — the app's speaking voice, weight 400 everywhere</div>
         <div style="font:400 var(--fs-body) var(--sans); color:var(--text-dim)">Dim — supporting copy on canvas and chrome</div>
         <div style="font:400 var(--fs-body) var(--sans); color:var(--text-faint)">Faint — placeholders and captions (≥3.0:1, lint-enforced)</div>
-        <div style="font:var(--fs-body) var(--mono); color:var(--text)">mono 12.5 — values, chips, statuses</div>
+        <div style="font:var(--fs-body) var(--mono); color:var(--text)">mono <span data-sg-size="fs-body"></span> — values, chips, statuses</div>
         <div style="font:700 var(--fs-code) var(--mono); color:var(--text)">doc title — 700 mono, the strongest identity in the toolbar</div>
       </div>
     </section>
@@ -61,15 +71,26 @@ SPDX-License-Identifier: MIT -->
     <section>
       <h2>type ramp — rule 23</h2>
       <div class="sg-row sg-type" style="display:block">
-        <div style="font-size:var(--fs-micro)">--fs-micro 10 — superscripts and the smallest annotations</div>
-        <div style="font-size:var(--fs-label)">--fs-label 10.5 — uppercase micro-labels</div>
-        <div style="font-size:var(--fs-chip)">--fs-chip 11.5 — chips, badges, section labels, footnotes</div>
-        <div style="font-size:var(--fs-body)">--fs-body 12.5 — controls and body, the app's voice</div>
-        <div style="font-size:var(--fs-code)">--fs-code 13 — the editor and the doc title</div>
-        <div style="font-size:var(--fs-base)">--fs-base 14 — the page's base size</div>
-        <div style="font-size:var(--fs-lede)">--fs-lede 15 — ledes and dialog subtitles</div>
-        <div style="font-size:var(--fs-title)">--fs-title 16 — surface titles</div>
+        <div style="font-size:var(--fs-micro)">--fs-micro <span data-sg-size="fs-micro"></span> — superscripts and the smallest annotations</div>
+        <div style="font-size:var(--fs-label)">--fs-label <span data-sg-size="fs-label"></span> — uppercase micro-labels</div>
+        <div style="font-size:var(--fs-chip)">--fs-chip <span data-sg-size="fs-chip"></span> — chips, badges, section labels, footnotes</div>
+        <div style="font-size:var(--fs-body)">--fs-body <span data-sg-size="fs-body"></span> — controls and body, the app's voice</div>
+        <div style="font-size:var(--fs-code)">--fs-code <span data-sg-size="fs-code"></span> — the editor and the doc title</div>
+        <div style="font-size:var(--fs-base)">--fs-base <span data-sg-size="fs-base"></span> — the page's base size</div>
+        <div style="font-size:var(--fs-lede)">--fs-lede <span data-sg-size="fs-lede"></span> — ledes and dialog subtitles</div>
+        <div style="font-size:var(--fs-title)">--fs-title <span data-sg-size="fs-title"></span> — surface titles</div>
         <div class="sg-note" style="margin-top:6px">the only sizes the workbench may use — landing/spec display sizes are rule 22's exception</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>control metrics — rule 1 &amp; 3</h2>
+      <div class="sg-row sg-type" style="display:block">
+        <div>--ctl-h <span data-sg-size="ctl-h"></span> — buttons in toolbars, panels and dialogs</div>
+        <div>--ctl-h-mini <span data-sg-size="ctl-h-mini"></span> — controls sitting inline on a row or card</div>
+        <div>--icon <span data-sg-size="icon"></span> — every glyph, on a 16-unit authoring grid</div>
+        <div>--bar-h <span data-sg-size="bar-h"></span> — every control strip; #status-bar is the one stated exception</div>
+        <div class="sg-note" style="margin-top:6px">these move WITH the ramp — a bigger label in the same box is not a scale, it is a crowded box</div>
       </div>
     </section>
 
@@ -120,15 +141,25 @@ SPDX-License-Identifier: MIT -->
       <h2>icons — one sprite, one stroke knob (rule 3)</h2>
       <div class="sg-row">
         <svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-arrow-left"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-filter"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-move-up"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-move-down"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-table"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-compress"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-collapse"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>
         <span style="color:var(--text-dim)">⋯ × ▸ ▾ ★ ☆</span>
-        <span class="sg-note">stroke-width lives on .ic only — exactly 1 device px; characters survive only where universal</span>
+        <span class="sg-note">stroke-width lives on .ic only — exactly 1 device px; i-run is the one filled symbol; characters survive only where universal</span>
       </div>
     </section>
 

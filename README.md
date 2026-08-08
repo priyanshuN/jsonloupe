@@ -119,7 +119,8 @@ If a spreadsheet is the only thing you came for,
 [jsonloupe.dev/json-to-excel.html](https://jsonloupe.dev/json-to-excel.html) is
 that job on a page of its own: paste, convert, done.
 
-Open a document and choose **convert**. Every repeating array becomes its own
+Open a document and press the table glyph in the toolbar's tools group
+(**convert**; every glyph there names itself on hover). Every repeating array becomes its own
 table, joined back to its parent by the id that was already in the data — so
 this:
 
