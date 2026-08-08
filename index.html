@@ -1,8 +1,11 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <!-- Two jobs, and the second one is the one people type into a search box:
        someone handed a JSON file who needs it as a spreadsheet searches for
@@ -18,22 +21,10 @@
        paint, or the page flashes the wrong theme / the marketing landing before
        main.ts loads and boots. The `returning` class only bridges the gap until
        boot() decides — boot removes it on every path. -->
-  <style>html.returning #landing { display: none; }</style>
   <!-- Stylesheet as a link (not a JS import) so dev paints styled on first
        frame, same as the production build — no unstyled flash on refresh. -->
   <link rel="stylesheet" href="/src/style.css" />
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem('wb-theme');
-        if (t !== 'light' && t !== 'dark')
-          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-        document.documentElement.dataset.theme = t;
-        if (localStorage.getItem('wb-returning') === '1' && location.hash !== '#about')
-          document.documentElement.classList.add('returning');
-      } catch (e) { /* private mode: no flash protection, nothing broken */ }
-    })();
-  </script>
+  <script src="/prepaint.js" data-returning="true"></script>
 </head>
 <body>
   <!-- The icon set (contract rule 3): one 16-unit box, ONE stroke width — set

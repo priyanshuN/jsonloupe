@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { LosslessNumber } from 'lossless-json';
 import {
@@ -444,5 +446,194 @@ describe('schema-free semantic comparison', () => {
     });
 
     expect(visible.map((node) => node.matchLabel)).toEqual(['$', 'a', 'b']);
+  });
+
+  it('returns false for every structural mismatch shape', () => {
+    expect(semanticValueEqual([1], 1)).toBe(false);
+    expect(semanticValueEqual([1], [1, 2])).toBe(false);
+    expect(semanticValueEqual([1, 2], [1, 3])).toBe(false);
+    expect(semanticValueEqual({ a: 1 }, 1)).toBe(false);
+    expect(semanticValueEqual({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+    expect(semanticValueEqual({ a: 1 }, { b: 1 })).toBe(false);
+    expect(semanticValueEqual({ a: 1 }, { a: 2 })).toBe(false);
+    expect(semanticValueEqual(new LosslessNumber('1'), '1')).toBe(false);
+    expect(semanticValueEqual(new LosslessNumber('1'), 1)).toBe(true);
+  });
+
+  it('accepts list-form rules and normalizes comma-separated duplicate keys', () => {
+    const result = compareSemantic(
+      { rows: [{ tenant: 'a', id: 1 }] },
+      { rows: [{ id: 1, tenant: 'a' }] },
+      { rules: [{ path: '$.rows', mode: 'identity', keys: ' tenant, id, tenant, ' }] },
+    );
+
+    expect(planAt(result.plans, '$.rows').keys).toEqual(['tenant', 'id']);
+    expect(result.root.status).toBe('equal');
+  });
+
+  it('materializes nested one-sided arrays and objects', () => {
+    const result = compareSemantic(
+      { removed: [1, { deep: true }] },
+      { added: { nested: [null, false] } },
+    );
+
+    expect(result.summary.removed).toBe(1);
+    expect(result.summary.added).toBe(1);
+    const nodes = allNodes(result.root);
+    expect(nodes.some((node) => node.matchLabel === 'deep' && node.status === 'removed')).toBe(true);
+    expect(nodes.some((node) => node.matchLabel === 'nested' && node.status === 'added')).toBe(true);
+    expect(nodes.some((node) => node.leftPreview === 'null' || node.rightPreview === 'null')).toBe(true);
+  });
+
+  it('reports truncation reached while expanding a one-sided branch', () => {
+    const result = compareSemantic({ values: [1, 2, 3] }, {}, { nodeCap: 3 });
+
+    expect(result.truncated).toBe(true);
+    expect(result.truncation.paths).toContain('$.values');
+    expect(result.truncation.omittedBranchesAtLeast).toBeGreaterThan(0);
+  });
+
+  it('classifies empty and heterogeneous arrays conservatively', () => {
+    const empty = compareSemantic({ values: [] }, { values: [] });
+    expect(planAt(empty.plans, '$.values')).toMatchObject({
+      mode: 'position',
+      inferredKind: 'empty-unknown',
+    });
+
+    const mixed = compareSemantic({ values: [1, { x: 1 }] }, { values: [{ x: 1 }, 1] });
+    expect(planAt(mixed.plans, '$.values')).toMatchObject({
+      mode: 'position',
+      inferredKind: 'mixed-unknown',
+    });
+    expect(planAt(mixed.plans, '$.values').warnings.join(' ')).toContain('Heterogeneous');
+  });
+
+  it('explains low-confidence and unavailable identity discovery', () => {
+    const low = compareSemantic(
+      { rows: [{ id: 'same', payload: { n: 1 } }, { id: 'same', payload: { n: 2 } }] },
+      { rows: [{ id: 'same', payload: { n: 2 } }, { id: 'same', payload: { n: 3 } }] },
+      { rules: { '$.rows': { mode: 'identity' } } },
+    );
+    expect(planAt(low.plans, '$.rows').warnings.join(' ')).toContain('low-confidence');
+
+    const unavailable = compareSemantic(
+      { rows: [{ payload: { n: 1 } }] },
+      { rows: [{ payload: { n: 2 } }] },
+      { rules: { '$.rows': { mode: 'identity' } } },
+    );
+    expect(planAt(unavailable.plans, '$.rows')).toMatchObject({ mode: 'position', inferredKind: 'mixed-unknown' });
+    expect(planAt(unavailable.plans, '$.rows').warnings.join(' ')).toContain('could not find');
+  });
+
+  it('keeps an explicit identity rule visible on a primitive array', () => {
+    const result = compareSemantic(
+      { values: [1, 2] },
+      { values: [2, 3] },
+      { rules: { '$.values': { mode: 'identity', keys: ['id'] } } },
+    );
+    const plan = planAt(result.plans, '$.values');
+
+    expect(plan.mode).toBe('identity');
+    expect(plan.confidence).toBe(0);
+    expect(plan.warnings.join(' ')).toContain('not object-only');
+    expect(plan.counts.ambiguous).toBe(1);
+  });
+
+  it('reports unique identity additions and removals independently', () => {
+    const result = compareSemantic(
+      { rows: [{ id: 'A' }, { id: 'B' }] },
+      { rows: [{ id: 'B' }, { id: 'C' }] },
+      { rules: { '$.rows': { mode: 'identity', keys: 'id' } } },
+    );
+
+    expect(planAt(result.plans, '$.rows').counts).toMatchObject({ matched: 1, added: 1, removed: 1 });
+    expect(result.summary).toMatchObject({ added: 1, removed: 1 });
+  });
+
+  it('retains original encounter order for aligned and unordered displays', () => {
+    const identity = compareSemantic(
+      { rows: [{ id: 10 }, { id: 2 }] },
+      { rows: [{ id: 2 }, { id: 10 }, { id: 3 }] },
+      { displayMode: 'original', rules: { '$.rows': { mode: 'identity', keys: 'id' } } },
+    );
+    expect(identity.root.children[0].children.map((node) => node.matchLabel)).toEqual(['id=10', 'id=2', 'id=3']);
+
+    const unordered = compareSemantic(
+      { values: [2, 1] },
+      { values: [1, 3] },
+      { displayMode: 'original', rules: { '$.values': 'unordered' } },
+    );
+    expect(unordered.root.children[0].children.map((node) => node.leftPreview || node.rightPreview)).toEqual(['2', '1', '3']);
+  });
+
+  it('covers positional additions, removals, and object sequence move detection', () => {
+    const removed = compareSemantic({ values: [1, 2] }, { values: [1] }, { mode: 'position' });
+    const added = compareSemantic({ values: [1] }, { values: [1, 2] }, { mode: 'position' });
+    expect(removed.summary.removed).toBe(1);
+    expect(added.summary.added).toBe(1);
+
+    const moved = compareSemantic(
+      { values: [{ nested: { id: 1 } }, { nested: { id: 2 } }] },
+      { values: [{ nested: { id: 2 } }, { nested: { id: 1 } }] },
+      { rules: { '$.values': 'sequence' } },
+    );
+    expect(planAt(moved.plans, '$.values').counts.moved).toBe(2);
+  });
+
+  it('reports a cap reached while materializing aligned identity rows', () => {
+    const left = { rows: Array.from({ length: 6 }, (_, id) => ({ id })) };
+    const right = { rows: [...left.rows].reverse() };
+    const result = compareSemantic(left, right, {
+      nodeCap: 3,
+      rules: { '$.rows': { mode: 'identity', keys: 'id' } },
+    });
+
+    expect(result.truncated).toBe(true);
+    expect(result.truncation.paths).toContain('$.rows');
+    expect(planAt(result.plans, '$.rows').counts.matched).toBe(6);
+  });
+
+  it('uses bracket paths and bounded previews for unusual JSON keys and values', () => {
+    const long = 'x'.repeat(140);
+    const result = compareSemantic(
+      { 'not a key': long, one: [true], many: [true, false], object: { only: 1 } },
+      { 'not a key': `${long}y`, one: [false], many: [true], object: { only: 2, extra: 3 } },
+    );
+    const unusual = result.root.children.find((node) => node.matchLabel === 'not a key')!;
+
+    expect(unusual.instancePath).toContain('["not a key"]');
+    expect(unusual.leftPreview.endsWith('…')).toBe(true);
+    expect(result.root.children.find((node) => node.matchLabel === 'one')?.leftPreview).toBe('[1 item]');
+    expect(result.root.children.find((node) => node.matchLabel === 'many')?.leftPreview).toBe('[2 items]');
+    expect(result.root.children.find((node) => node.matchLabel === 'object')?.leftPreview).toBe('{1 key}');
+    expect(result.root.children.find((node) => node.matchLabel === 'object')?.rightPreview).toBe('{2 keys}');
+  });
+
+  it('handles boolean, null, non-finite, lossless, and structural unordered values', () => {
+    const values = [true, false, null, Number.NaN, new LosslessNumber('9007199254740993'), [1], { a: 1 }, undefined];
+    const result = compareSemantic(
+      { values },
+      { values: [...values].reverse() },
+      { rules: { '$.values': 'unordered' } },
+    );
+
+    expect(planAt(result.plans, '$.values').counts.matched).toBe(values.length);
+    expect(result.summary.changed).toBe(0);
+  });
+
+  it('clamps finite node caps and uses the default for non-finite caps', () => {
+    expect(compareSemantic({ a: 1 }, { a: 1 }, { nodeCap: 0 }).truncation.cap).toBe(1);
+    expect(compareSemantic({ a: 1 }, { a: 1 }, { nodeCap: Number.POSITIVE_INFINITY }).truncation.cap).toBeGreaterThan(1);
+  });
+
+  it('can filter matching rows without retaining their ancestors', () => {
+    const result = compareSemantic({ a: { b: 1 }, c: 2 }, { a: { b: 9 }, c: 2 });
+    const rows = flattenVisibleRows(result.root, {
+      statuses: new Set(['changed']),
+      includeAncestors: false,
+    });
+
+    expect(rows.map((node) => node.matchLabel)).toEqual(['$', 'a', 'b']);
+    expect(flattenVisibleRows(result.root, { statuses: new Set(['added']), includeAncestors: false })).toEqual([result.root]);
   });
 });

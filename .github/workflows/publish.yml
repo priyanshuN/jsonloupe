@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Priyanshu Nandan
+# SPDX-License-Identifier: MIT
 name: publish
 
 # Publishing happens here rather than from a laptop so npm can attach a
@@ -35,12 +37,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: "24.16.0"
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
-      - run: npm test
+      # OpenSSF Gold dynamic analysis: the full assertion-rich test suite has
+      # >80% branch coverage and is run against every proposed release.
+      - run: npm run coverage -- --coverage.reporter=text
       - run: npm run build # tsc --noEmit + vite build; prepublishOnly reruns both at publish
 
       - name: Release tag and package version must agree

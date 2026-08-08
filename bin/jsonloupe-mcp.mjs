@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // npx -y -p jsonloupe jsonloupe-mcp — jsonloupe as an MCP server, speaking JSON-RPC on stdio.
 //
 // Register it with an agent host, e.g.:

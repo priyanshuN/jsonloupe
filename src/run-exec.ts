@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The runner's engine: one user-written script over one document, with no
 // worker or DOM in sight so a test can call it directly.
 //

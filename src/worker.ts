@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Parser worker: owns the parsed document and the visible-row model.
 // Node records are created lazily on first expand, so a collapsed 5M-element
 // array costs one record, not five million.

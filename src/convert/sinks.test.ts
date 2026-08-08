@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The output writers, tested through the bytes they actually produce. A
 // workbook is only correct if a reader can open it, so these read the zip back
 // apart rather than asserting on strings the writer happened to build.

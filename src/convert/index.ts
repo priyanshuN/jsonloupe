@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The converter's public surface (SPEC-converter.md §9.2). Consumed unchanged
 // by the browser worker, the Node MCP server and the CLI — zero DOM, zero I/O.
 

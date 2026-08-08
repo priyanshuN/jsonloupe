@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { compressToBytes } from './codec';
 
 export const KIBIBYTE = 1024;

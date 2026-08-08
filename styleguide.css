@@ -1,0 +1,29 @@
+/* Copyright (c) 2026 Priyanshu Nandan
+ * SPDX-License-Identifier: MIT */
+
+/* Page-local layout only. All visual tokens come from the app stylesheet. */
+.sg { max-width: 1060px; margin: 0 auto; padding: 26px 28px 80px; }
+.sg-head { display: flex; align-items: center; gap: var(--gap-3); margin-bottom: 8px; }
+.sg-head h1 { margin: 0; font-size: var(--fs-title); font-weight: 700; color: var(--text); }
+.sg-sub { color: var(--text-dim); font: var(--fs-body) var(--mono); }
+.sg section { margin-top: 34px; }
+.sg h2 {
+  margin: 0 0 12px;
+  font-size: var(--fs-chip);
+  font-weight: 400;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.sg-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-3); padding: 14px; background: var(--bg-canvas); border: 1px solid var(--border); border-radius: var(--r); }
+.sg-row + .sg-row { margin-top: 10px; }
+.sg-row.on-chrome { background: var(--bg-chrome); }
+.sg-note { flex-basis: 100%; color: var(--text-faint); font: var(--fs-chip) var(--mono); }
+.sg-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.sw { border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
+.sw-fill { height: 44px; }
+.sw-fill--ink { display: flex; align-items: center; justify-content: center; background: var(--bg-canvas); font: 700 var(--fs-lede) var(--mono); }
+.sw-name { padding: 6px 9px; font: var(--fs-chip) var(--mono); color: var(--text-dim); background: var(--bg-canvas); border-top: 1px solid var(--border); }
+.sg-type div { padding: 4px 0; }
+.sg iframe { width: 100%; height: 1400px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--bg); }
+.sg-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

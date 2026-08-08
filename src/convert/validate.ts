@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Spec validation (SPEC-converter.md §4.4). Fail-loud doctrine: any key the
 // engine does not recognise is a hard reject, not a shrug. The grammar is small
 // enough to check completely up front, and permissiveness here has a known

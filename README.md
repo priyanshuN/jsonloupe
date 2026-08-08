@@ -243,9 +243,10 @@ visitor adds their own key.
 ```sh
 npm test           # vitest — query engine, worker, MCP dispatch, NL translation suites
 npm run lint:security  # FLOSS security analysis + checked TypeScript style
-npm run coverage   # same suite with the enforced 80% statement floor
+npm run coverage   # same suite with enforced 90% statement / 80% branch floors
 npm run build      # tsc --noEmit + vite build + the MCP bundle
-npm run check:repeatable-build  # two clean paths must produce identical bytes
+npm run check:site-headers # verify the live OpenSSF hardening headers
+npm run check:reproducible-build  # clean locked installs must produce identical bytes
 npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture
 npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
 ```

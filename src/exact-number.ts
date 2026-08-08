@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { compareLosslessNumber, isLosslessNumber, LosslessNumber } from 'lossless-json';
 
 /** A number as parsed by the workbench: safe values stay native, unsafe values keep their source digits. */

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The one description of the query language, shared by every consumer that has
 // to explain it: the Ask feature's model prompt, and the MCP server's tool
 // description and its teaching error messages. One grammar, one place to fix.

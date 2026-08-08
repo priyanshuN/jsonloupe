@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Theme manager: light / dark, persisted, with change subscribers so the
 // CodeMirror pane can swap its own theme in lockstep with the app.
 

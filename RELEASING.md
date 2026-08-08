@@ -13,10 +13,12 @@ source archives are not the npm artifact users install.
    ```sh
    npm ci
    npm run lint:contract
+   npm run lint:headers
    npm run lint:security
    npm run coverage
    npm run build
-   npm run check:repeatable-build
+   npm run check:reproducible-build
+   npm run check:site-headers
    npm audit
    ```
 

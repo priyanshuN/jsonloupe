@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The engine's half of the typed-cell contract: what a cell says it WAS, and
 // what the preview knows before anyone clicks download.
 

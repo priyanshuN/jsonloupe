@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // A black-box tool-choice evaluation: an agent gets a large JSON file plus its
 // normal local Bash/Python option. In MCP mode JsonLoupe is also available, but
 // never named in the prompt. This measures whether the tool descriptions and

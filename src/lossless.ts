@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Lossless parsing — the single definition of how a JSON number literal becomes
 // a value in this codebase. Pure module so the worker, the MCP server and the
 // converter engine all parse identically; a second copy of this predicate would

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The execution engine: walk the anchors, build rows, push them at a sink.
 //
 // v1 reads the document into memory (SPEC-converter.md §9.3) — the same

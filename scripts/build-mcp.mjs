@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Bundles the MCP server into dist-mcp/ — two entries, each self-contained:
 // server.js (the stdio protocol layer) and doc-thread.js (one parsed document).
 //

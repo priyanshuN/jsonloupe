@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Contract linter — the component contract at the top of src/style.css,
 // machine-enforced (contract rule 23). Every check here corresponds to a
 // written rule; when the contract gains a rule, this file gains its check in

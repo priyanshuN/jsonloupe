@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The run panel's script box: a small CodeMirror 6 editor for JavaScript, lazy-
 // loaded on first open exactly like code.ts, so the CM chunks stay out of the
 // cold start for everyone who never opens the panel.

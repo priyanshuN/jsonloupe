@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -187,6 +189,83 @@ describe('converter workflow', () => {
 
     expect((await call('convert', { docId: 'd1', spec, outPath })).isError).toBe(true);
     expect((await call('convert', { docId: 'd1', spec, outPath, overwrite: true })).isError).toBe(false);
+  });
+
+  it('returns an inline draft and validates draft options before work starts', async () => {
+    await load('{"rows":[{"when":"09:00","where":"Lat: 28.53 Lng: 77.39"}]}');
+    const drafted = await call('draft_spec', { docId: 'd1', format: 'csv', baseDate: '2026-08-01' });
+    expect(drafted).toMatchObject({ isError: false });
+    expect(drafted.text).toContain('"format": "csv"');
+    expect(drafted.text).toContain('"baseDate": "2026-08-01"');
+
+    expect((await call('draft_spec', { docId: 'd1', format: 'pdf' })).text)
+      .toBe('error: draft_spec format must be xlsx or csv');
+    expect((await call('draft_spec', { docId: 'd1', baseDate: 'tomorrow' })).text)
+      .toBe('error: draft_spec baseDate must be yyyy-MM-dd or today');
+    expect((await call('draft_spec', { docId: 'd1', outPath: join(dir, 'missing-parent', 'spec.json') })).isError)
+      .toBe(true);
+  });
+
+  it('reads a spec file, permits an output override, and validates malformed conversion requests', async () => {
+    await load(DOC);
+    const spec = {
+      specVersion: 1,
+      source: { format: 'json' },
+      tables: [{ name: 'tasks', anchor: '$.tasks[]', columns: [{ name: 'id', from: 'id' }] }],
+      output: { format: 'xlsx' },
+    };
+    const specPath = join(dir, 'file-spec.json');
+    const outPath = join(dir, 'file-spec-output');
+    await writeFile(specPath, JSON.stringify(spec));
+
+    const converted = await call('convert', { docId: 'd1', specPath, outPath, format: 'csv' });
+    expect(converted).toMatchObject({ isError: false });
+    expect(converted.text).toContain('format: csv');
+
+    expect((await call('convert', { docId: 'd1', spec, format: 'csv' })).text).toBe('error: convert needs an outPath');
+    expect((await call('convert', { docId: 'd1', specPath: join(dir, 'absent-spec.json'), outPath: 'x' })).text)
+      .toContain('could not read converter spec');
+    expect((await call('convert', { docId: 'd1', spec, outPath: 'x', format: 'pdf' })).text)
+      .toBe('error: convert format must be xlsx or csv');
+    expect((await call('convert', { docId: 'd1', spec: { tables: [] }, outPath: 'x', format: 'csv' })).text)
+      .toBe('error: converter spec has no output block');
+  });
+
+  it('renders converter warnings and scalar-free inspections without leaking values', async () => {
+    await load('{"rows":[{"at":"not-a-time"},{}]}');
+    const inspected = await call('inspect', { docId: 'd1' });
+    expect(inspected.text).toContain('rows: 2 rows');
+
+    const outPath = join(dir, 'warning.csv');
+    const spec = {
+      specVersion: 1,
+      source: { format: 'json' },
+      tables: [{
+        name: 'rows',
+        anchor: '$.rows[]',
+        columns: [{ name: 'at', from: 'at', type: 'datetime', parse: 'HH:mm', baseDate: 'today', out: 'yyyy-MM-dd HH:mm:ss' }],
+      }],
+      output: { format: 'csv' },
+    };
+    const converted = await call('convert', { docId: 'd1', spec, outPath });
+    expect(converted.text).toContain('warnings: 1');
+    expect(converted.text).toContain('rows.at: BAD_DATETIME x1');
+
+    await load('{"rows":[{},{}]}');
+    expect((await call('inspect', { docId: 'd2' })).text).toContain('(no scalar fields detected)');
+  });
+
+  it('renders datetime, base-date, geo, and ambiguous-date inspection suggestions', async () => {
+    await load(JSON.stringify({ rows: [
+      { stamp: '2026-08-01 09:30:00', time: '09:30', coordinate: '28.53, 77.39', ambiguous: '01/02/2026' },
+      { stamp: '2026-08-02 10:30:00', time: '10:30', coordinate: '28.54, 77.40', ambiguous: '03/04/2026' },
+    ] }));
+    const text = (await call('inspect', { docId: 'd1' })).text;
+
+    expect(text).toContain('suggest datetime');
+    expect(text).toContain('+ base date');
+    expect(text).toContain('suggest geo');
+    expect(text).toContain('ambiguous dayMonth');
   });
 });
 
@@ -469,5 +548,46 @@ describe('failures stay inside the tool call', () => {
       spec: {},
       specPath: join(dir, 'spec.json'),
     })).text).toBe('error: convert needs exactly one of spec or specPath');
+  });
+
+  it('validates every document-operation argument at the routing boundary', async () => {
+    await load(DOC);
+    expect((await call('get_schema', { docId: 'd1', path: '$.absent' })).isError).toBe(true);
+    expect((await call('profile', { docId: 'd1' })).text).toBe('error: profile needs a query');
+    expect((await call('profile', { docId: 'd1', query: '$', fields: 'id' })).text)
+      .toBe('error: profile fields must be an array of non-empty strings');
+    expect((await call('profile', { docId: 'd1', query: '$', fields: [''] })).text)
+      .toBe('error: profile fields must be an array of non-empty strings');
+    expect((await call('profile', { docId: 'd1', query: '$', fields: Array.from({ length: 100 }, (_, i) => `f${i}`) })).text)
+      .toContain('profile accepts at most');
+    expect((await call('sample', { docId: 'd1' })).text).toBe('error: sample needs a path');
+    expect((await call('export_csv', { docId: 'd1', query: '$' })).text)
+      .toBe('error: export_csv needs a query and an outPath');
+    expect((await call('export_result', { docId: 'd1', query: '$', outPath: 'x', format: 'xml' })).text)
+      .toBe('error: export_result needs a query, format (csv or jsonl), and an outPath');
+    expect((await call('diff_docs', {})).text).toBe('error: diff_docs needs docIdA and docIdB');
+    expect((await call('diff_docs', { docIdA: 'missing', docIdB: 'd1' })).text).toContain("unknown docId 'missing'");
+    expect((await call('diff_docs', { docIdA: 'd1', docIdB: 'missing' })).text).toContain("unknown docId 'missing'");
+  });
+
+  it('does not retain a one-shot file that fails to load', async () => {
+    const filePath = join(dir, 'invalid-one-shot.json');
+    await writeFile(filePath, 'not json');
+
+    expect((await call('get_schema', { filePath })).isError).toBe(true);
+    expect(pool.list()).toEqual([]);
+  });
+
+  it('normalizes a non-Error transport rejection', async () => {
+    pool = new DocPool(() => ({
+      send: () => Promise.reject('transport string failure'),
+      close: async () => undefined,
+    }));
+    router = new ToolRouter(pool);
+
+    expect(await call('load_doc', { text: '{}' })).toMatchObject({
+      isError: true,
+      text: 'error: transport string failure',
+    });
   });
 });

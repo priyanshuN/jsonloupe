@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
 import { scriptChipLabel } from './run-script';
 

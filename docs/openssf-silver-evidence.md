@@ -6,12 +6,14 @@ It separates evidence from self-certification: a row marked **Ready** has a
 repository-backed answer prepared for BadgeApp; it is not represented as saved
 externally until the project owner reviews and submits it.
 
-Snapshot on 2026-08-08: 573 tests passed and 5 were skipped; statement coverage
-was 85.27%; two clean checkout paths produced 30 matching generated files,
-including byte-identical npm tarballs. The published `jsonloupe@1.2.0` returned
-one verified npm registry signature and one verified provenance attestation from
-`npm audit signatures`. BadgeApp remained at Passing with the Silver form 15%
-answered; no Silver answers from this worksheet had been submitted.
+Snapshot on 2026-08-08: 658 tests passed and 5 were skipped; statement coverage
+was 90.08% and branch coverage was 81.47%. Two clean checkout paths produced 34
+matching generated files, including byte-identical npm tarballs, with manifest
+SHA-256 `31cd7b66c439819c05b67dfc00fdde04dac14d88150a30e4c16f45dcf5374c9b`.
+The published `jsonloupe@1.2.0` returned one verified npm registry signature and
+one verified provenance attestation from `npm audit signatures`. BadgeApp
+remained at Passing with the Silver form 98% complete; access continuity stayed
+explicitly Unmet.
 
 ## Owner-controlled gate
 
@@ -66,7 +68,7 @@ a non-secret level, then mark the criterion Met in BadgeApp.
 | `build_standard_variables` | Ready: N/A | The project produces no native compiler/linker build. |
 | `build_preserve_debug` | Ready: N/A | This is a TypeScript/JavaScript package, the criterion's documented typical N/A case. |
 | `build_non_recursive` | Ready: N/A | The JavaScript build has no recursive native subdirectory make graph. |
-| `build_repeatable` | Ready: Met | [`check:repeatable-build`](../scripts/check-repeatable-build.mjs) builds and packs from two paths and compares every byte in CI. |
+| `build_repeatable` | Ready: Met | [`check:reproducible-build`](../scripts/check-repeatable-build.mjs) performs two clean installs, builds, and packs from different paths, then compares every byte in CI. |
 | `installation_common` | Ready: Met | Users install through standard npm/npx commands in [README](../README.md#run-it). |
 | `installation_standard_variables` | Ready: Met | npm owns install location and honors its standard prefix/configuration mechanisms; jsonloupe adds no custom installer. |
 | `installation_development_quick` | Ready: Met | A clean checkout uses `npm ci`, `npm test`, and `npm run build` in [CONTRIBUTING](../CONTRIBUTING.md#get-it-running). |
@@ -76,7 +78,7 @@ a non-secret level, then mark the criterion Met in BadgeApp.
 | `interfaces_current` | Ready: Met | Dependencies and APIs are actively updated; deprecated APIs are treated as defects when FLOSS replacements exist. |
 | `automated_integration_testing` | Ready: Met | [CI](../.github/workflows/ci.yml) runs the suite and reports success/failure on pushes and pull requests. |
 | `regression_tests_added50` | Ready: Met | [The six-month audit below](#six-month-regression-test-audit) maps all 29 known fixed defects to automated behavioral or contract regressions, exceeding the required 50%. |
-| `test_statement_coverage80` | Ready: Met | `npm run coverage` enforces 80%; the recorded full-suite result is 85.27%. |
+| `test_statement_coverage80` | Ready: Met | `npm run coverage` enforces 90%; the recorded full-suite result is 90.08%. |
 | `test_policy_mandated` | Ready: Met | [Major functionality MUST add tests](../CONTRIBUTING.md#what-a-good-change-looks-like). |
 | `tests_documented_added` | Ready: Met | The same policy is part of public change-proposal instructions. |
 | `warnings_strict` | Ready: Met | Strict TypeScript failures block all browser, CLI, and MCP builds. |

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Drafting: an Inspection becomes a spec the user reviews. A pure function of
 // the inspection — no model calls, no I/O — so the schema never depends on LLM
 // availability (SPEC-converter.md §10.2, ground rule 1). Semantic auto-mapping

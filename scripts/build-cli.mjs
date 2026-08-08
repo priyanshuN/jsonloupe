@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Bundles the converter CLI into dist-cli/commands.js.
 //
 // Same reasoning as build-mcp: lossless-json is a devDependency that ends up

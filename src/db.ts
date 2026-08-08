@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Light memory: IndexedDB with meta and text split into separate stores,
 // so listing recents never loads document bodies.
 

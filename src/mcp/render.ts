@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Every tool has a human-readable text view under one flat cap; the router
 // applies the same policy independently to structuredContent. The cap is the
 // whole point of the server: the caller asked about a 200 MB document precisely

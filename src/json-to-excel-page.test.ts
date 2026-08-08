@@ -1,13 +1,17 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 // Pulled in through Vite's ?raw rather than node:fs: this file lives under src/,
 // which tsconfig.json types for the browser and deliberately denies node types.
 import page from '../json-to-excel.html?raw';
+import converterLanding from '../public/converter-landing.js?raw';
+import prepaint from '../public/prepaint.js?raw';
 import viteConfig from '../vite.config.ts?raw';
 
-// The converter landing is static markup with one small inline script, so there
-// is no module to import — the file itself is the unit. These assertions exist
-// because the page's whole job is a ten-second promise to someone who searched
-// for it, and every one of them is silently breakable by an innocuous edit.
+// The converter landing is static markup with two small external scripts. These
+// assertions exist because the page's whole job is a ten-second promise to
+// someone who searched for it, and each promise is silently breakable by an
+// innocuous edit.
 
 /**
  * Cut every open…close block out of `source`, matching the delimiters however
@@ -30,7 +34,7 @@ function cutBlocks(source: string, open: string, close: string): string {
   }
 }
 
-// Visible copy only: comments and the inline script explain WHY to the next
+// Visible copy only: comments and script elements explain WHY to the next
 // developer and are held to a different standard than what the reader sees.
 const visible = cutBlocks(cutBlocks(page, '<!--', '-->'), '<script', '</script>')
   .replace(/<[^>]+>/g, ' ')
@@ -56,7 +60,7 @@ describe('the convert-JSON-to-Excel landing page', () => {
     );
     expect(fields[0]).toBe('paste-box');
     // preventScroll, or focusing it drags the headline off the top on a phone.
-    expect(page).toMatch(/box\.focus\(\{ preventScroll: true \}\)/);
+    expect(converterLanding).toMatch(/box\.focus\(\{ preventScroll: true \}\)/);
   });
 
   it('gives the converting button the landing shout and nothing else', () => {
@@ -88,21 +92,22 @@ describe('the convert-JSON-to-Excel landing page', () => {
     expect(page).toMatch(/<link rel="stylesheet" href="\/src\/style\.css" \/>/);
     // The frozen half of the handoff: this URL and this sessionStorage key are
     // what the app's #convert route is expected to read.
-    expect(page).toMatch(/var APP = '\.\/#convert';/);
-    expect(page).toMatch(/var HANDOFF = 'wb-convert-handoff';/);
+    expect(page).toContain('<script src="/converter-landing.js"></script>');
+    expect(converterLanding).toMatch(/var APP = '\.\/#convert';/);
+    expect(converterLanding).toMatch(/var HANDOFF = 'wb-convert-handoff';/);
   });
 
   it('refuses out loud when the text cannot be carried across', () => {
     // The fail-loud doctrine, applied to the handoff: a paste past the storage
     // quota, or a browser refusing storage at all, must say so — dropping the
     // text quietly lands the visitor in an empty converter with no idea why.
-    const convertNow = page.match(/function convertNow\(\)[\s\S]*?\n {6}\}/)?.[0] ?? '';
+    const convertNow = converterLanding.match(/function convertNow\(\)[\s\S]*?\n {2}\}/)?.[0] ?? '';
     expect(convertNow).toMatch(/carried === 'no-handoff'/);
     expect(convertNow).toMatch(/fail\(/);
     // Both failure modes reach that branch: the quota throw and the probe.
-    const carry = page.match(/function carry\(\)[\s\S]*?\n {6}\}/)?.[0] ?? '';
+    const carry = converterLanding.match(/function carry\(\)[\s\S]*?\n {2}\}/)?.[0] ?? '';
     expect(carry).toMatch(/if \(!canCarry\) return 'no-handoff';/);
-    expect(carry).toMatch(/catch \(e\) \{\s*return 'no-handoff';/);
+    expect(carry).toMatch(/catch \{\s*return 'no-handoff';/);
   });
 
   it('keeps the words a non-developer would not recognise out of the copy', () => {
@@ -114,6 +119,7 @@ describe('the convert-JSON-to-Excel landing page', () => {
   it('paints in the visitor’s theme on the first frame, like the other static pages', () => {
     // Without the pre-paint gate a light-theme visitor gets a dark flash — the
     // same reason spec.html carries a copy of this script.
-    expect(page).toMatch(/localStorage\.getItem\('wb-theme'\)/);
+    expect(page).toContain('<script src="/prepaint.js"></script>');
+    expect(prepaint).toMatch(/localStorage\.getItem\('wb-theme'\)/);
   });
 });

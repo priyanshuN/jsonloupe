@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The typed parse layer (SPEC-converter.md §5) — the one place a value is
 // allowed to change on its way through. Closed vocabulary, one value in, one
 // value out. The rule that keeps this from becoming a language: formatting,

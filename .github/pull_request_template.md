@@ -19,7 +19,7 @@ latency — say what you drove in the browser, and on what document.
 
 ---
 
-- [ ] `npm run lint:security`, `npm run coverage`, and `npm run build` pass (coverage enforces 80%; build includes strict `tsc --noEmit`)
+- [ ] `npm run lint:security`, `npm run coverage`, and `npm run build` pass (coverage enforces 90% statements / 80% branches; build includes strict `tsc --noEmit`)
 - [ ] Every commit includes the DCO `Signed-off-by` trailer (`git commit -s`)
 - [ ] Int64s and precise decimals survive your change end-to-end, if it touches values
 - [ ] Docs updated if behaviour changed — README for anything a user sees,
@@ -27,3 +27,7 @@ latency — say what you drove in the browser, and on what document.
       payload changed
 - [ ] No new runtime network call, no `innerHTML`, no new runtime dependency
       (see [CONTRIBUTING.md](https://github.com/priyanshuN/jsonloupe/blob/main/CONTRIBUTING.md#what-will-be-turned-down))
+- [ ] Review record covers security boundaries, exact-number behaviour, public
+      compatibility, documentation/licensing impact, and any item that does not
+      apply (see [the review procedure](https://github.com/priyanshuN/jsonloupe/blob/main/CONTRIBUTING.md#code-review-procedure))
+- [ ] All actionable review threads are resolved before merge

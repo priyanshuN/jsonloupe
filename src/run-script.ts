@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // What a saved script is to the app OUTSIDE the editor. It is its own module
 // rather than part of run-editor.ts because that one is imported lazily (so its
 // CodeMirror wrapper stays out of the cold start) and a chip label is needed

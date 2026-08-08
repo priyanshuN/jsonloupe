@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The validation corpus (SPEC-converter.md §6): eight hand-written converters
 // accumulated over ~2 years of routing work, each expressed as a spec and run
 // through the engine.

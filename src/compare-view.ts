@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Virtualized, aligned semantic comparison. The worker owns comparison state;
 // this view only requests visible row slices and renders them safely as text.
 

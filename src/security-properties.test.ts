@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import * as fc from 'fast-check';
 import { csvField } from './csv';

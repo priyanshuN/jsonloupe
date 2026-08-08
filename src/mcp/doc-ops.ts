@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // One document's operations, expressed purely as sequences of engine messages
 // through `handle` — the same seam the browser worker answers on. Everything
 // here runs beside the parsed document (in Node: inside that document's thread),

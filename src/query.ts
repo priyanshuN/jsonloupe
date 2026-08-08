@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Query engine: a JSONPath subset with predicates and aggregation pipes.
 // Pure module — no worker or DOM dependencies — so it is unit-testable and
 // callable by both the query bar and the NL layer. Hand-written parser,

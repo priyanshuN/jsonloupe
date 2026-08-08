@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // CSV serialization (RFC 4180) — the one control point for turning values into
 // spreadsheet-safe text. Pure module, no worker or DOM dependencies: the export
 // path in the worker and the converter engine both import from here, so the

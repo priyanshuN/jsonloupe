@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // style.css is loaded via <link> in index.html (not imported here) so the dev
 // server paints styled on first frame, matching the production build.
 import { VirtualTree } from './tree';

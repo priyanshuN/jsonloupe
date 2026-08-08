@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // The converter's command line (SPEC-converter.md §12 step 5): a frozen spec
 // re-runs headless, with no UI and no model in the loop.
 //

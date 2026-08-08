@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Priyanshu Nandan
+// SPDX-License-Identifier: MIT
 // Document intake rules shared by every host: the browser app, and the MCP
 // server that runs the same engine under Node. Nothing here touches the DOM, so
 // both can import it and a document is admitted (or refused) on identical terms.
