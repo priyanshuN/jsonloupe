@@ -327,7 +327,13 @@ export function executeUserScripts(
   console.warn = record('warn: ');
   console.error = record('error: ');
 
-  const report: Record<string, unknown> = {};
+  // NULL PROTOTYPE, and it is not decoration: the keys here are function names
+  // the user typed, and `{}['__proto__'] = value` runs the prototype SETTER
+  // rather than creating a property — so a function called `__proto__` would
+  // vanish from its own report and take the object's prototype with it. With no
+  // prototype there is no setter to hit, the key lands as an ordinary own
+  // property, and JSON.stringify serializes it like any other.
+  const report: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   const entries: BatchEntry[] = [];
   try {
     for (const { name, code } of scripts) {

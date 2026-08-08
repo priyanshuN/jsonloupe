@@ -208,6 +208,26 @@ describe('executeUserScripts', () => {
     expect(JSON.parse(res.resultText)).toEqual({ cyclic: null, fine: 3 });
   });
 
+  it('keeps a function named __proto__ in the report like any other', () => {
+    // The keys are names the user typed. On a plain object this assignment runs
+    // the prototype setter instead of creating a property, so the entry would
+    // disappear from its own report.
+    const res = batch([
+      { name: '__proto__', code: 'data.tasks.length' },
+      { name: 'constructor', code: '1 + 1' },
+      { name: 'ordinary', code: '7' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    // Asserted key by key on purpose: `{ __proto__: 3 }` written as a literal
+    // sets the prototype of the EXPECTATION rather than a property, so the
+    // obvious version of this test passes against the bug it exists to catch.
+    const report = JSON.parse(res.resultText) as Record<string, unknown>;
+    expect(Object.keys(report).sort()).toEqual(['__proto__', 'constructor', 'ordinary']);
+    expect(report['__proto__']).toBe(3);
+    expect(report.constructor).toBe(2);
+    expect(report.ordinary).toBe(7);
+  });
+
   it('fails as a whole only when the document itself cannot be read', () => {
     const res = executeUserScripts('{"a": 1,}', [{ name: 'any', code: 'data.a' }]);
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('plain JSON') });
