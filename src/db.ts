@@ -432,14 +432,23 @@ export async function saveQuery(question: string, query: string): Promise<SavedQ
 // names. Saving the same name again therefore overwrites that entry — which is
 // what `save` means once a thing has a name — while `save as new` asks its
 // caller for a free one (uniqueScriptName) before it gets here.
-export async function saveScript(name: string, script: string): Promise<SavedScript> {
+export async function saveScript(name: string, script: string, reads?: string[]): Promise<SavedScript> {
   const all = await listScripts();
   const now = Date.now();
   const label = name.trim() || deriveScriptName(script);
   const dup = all.find((s) => s.name.trim().toLowerCase() === label.toLowerCase());
   const rec: SavedScript = dup
-    ? { ...dup, name: label, script, updatedAt: now, uses: dup.uses + 1 }
-    : { id: crypto.randomUUID(), kind: 'script', name: label, script, createdAt: now, updatedAt: now, uses: 1 };
+    ? { ...dup, name: label, script, ...(reads ? { reads } : {}), updatedAt: now, uses: dup.uses + 1 }
+    : {
+      id: crypto.randomUUID(),
+      kind: 'script',
+      name: label,
+      script,
+      ...(reads ? { reads } : {}),
+      createdAt: now,
+      updatedAt: now,
+      uses: 1,
+    };
   await putSaved(rec, all, !!dup);
   return rec;
 }

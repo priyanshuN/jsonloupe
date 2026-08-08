@@ -535,6 +535,14 @@ SPDX-License-Identifier: MIT -->
                  row press is still the whole interaction. -->
             <button id="run-picked" class="primary" type="button" hidden
               title="Run every ticked function over this document">run</button>
+            <!-- A playbook: your functions as a file, so the library survives a
+                 cleared browser and can be handed to someone. It never carries
+                 the document — you export the questions, not the data. -->
+            <button id="run-export" class="btn-quiet" type="button" hidden
+              title="Save these functions as a playbook file">export</button>
+            <button id="run-import" class="btn-quiet" type="button" hidden
+              title="Add the functions from a playbook file">import</button>
+            <input id="run-import-file" type="file" accept="application/json,.json" hidden />
             <button id="run-new" class="btn-quiet" type="button" hidden title="Write a new function">+ new</button>
             <button id="run-copy" class="btn-quiet" type="button" title="Copy the whole result">copy</button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts

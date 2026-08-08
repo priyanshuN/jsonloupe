@@ -50,6 +50,7 @@ import type { ScriptEditor } from './run-editor';
 import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
 import type { SavedScript } from './db';
 import type { RunResult, BatchResult } from './run-exec';
+import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
@@ -1995,6 +1996,15 @@ async function importFiles(
     } catch (error) {
       showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'bad');
       continue;
+    }
+    // A playbook is a file OF this app, not a file FOR it: dropping one means
+    // "add these functions", not "read this JSON". It is additive and every
+    // imported function is one `×` away, which is what makes deciding for the
+    // user acceptable here — nothing is replaced and nothing is lost.
+    if (looksLikePlaybook(payload.text)) {
+      if (await importPlaybookText(payload.text, file.name)) continue;
+      // Not actually a playbook after all — fall through and open it, so a
+      // document that merely mentions the word still reads as a document.
     }
     if (i === entries.length - 1) {
       await openText(
@@ -4044,6 +4054,9 @@ const runLibList = $('#run-lib-list');
 const runLibCount = $('#run-lib-count');
 const runLibSearch = $<HTMLInputElement>('#run-lib-search');
 const runNewBtn = $<HTMLButtonElement>('#run-new');
+const runExportBtn = $<HTMLButtonElement>('#run-export');
+const runImportBtn = $<HTMLButtonElement>('#run-import');
+const runImportInput = $<HTMLInputElement>('#run-import-file');
 const runSrcSwitch = $('#run-src-switch');
 const runResultLabel = $('#run-result-label');
 const runStaleBadge = $('#run-stale');
@@ -4101,6 +4114,8 @@ const runPicked = new Set<string>();
  * single run, which lets the label describe the value itself.
  */
 let runResultKind = '';
+/** How many functions the library holds, so the bar can hide what is moot. */
+let runLibraryCount = 0;
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4203,6 +4218,9 @@ function setRunFace(face: 'functions' | 'result'): void {
   for (const el of [runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = showing;
   runLibCount.hidden = !showing;
   runNewBtn.hidden = !showing;
+  runImportBtn.hidden = !showing;
+  // Nothing to export until there is something in the library.
+  runExportBtn.hidden = !showing || runLibraryCount === 0;
   runPickedBtn.hidden = !showing || runPicked.size === 0;
   runLibSearch.hidden = !showing || runLibSearchWanted === false;
   if (showing) runStaleBadge.hidden = true;
@@ -4286,6 +4304,8 @@ async function renderLibrary(): Promise<void> {
     ? all.filter((s) => `${s.name}\n${s.script}`.toLowerCase().includes(term))
     : all;
 
+  runLibraryCount = all.length;
+  runExportBtn.hidden = runFace !== 'functions' || all.length === 0;
   runLibSearchWanted = all.length >= LIBRARY_SEARCH_MIN;
   runLibSearch.hidden = !runLibSearchWanted || runFace !== 'functions';
   if (all.length === 0) runLibCount.textContent = 'functions';
@@ -4483,6 +4503,68 @@ runNewBtn.addEventListener('click', () => {
   adoptScript(null);
   setRunFace('result');
   setAuthoring(true);
+});
+
+// ---------- the library as a file ----------
+//
+// Everything in run mode so far lives in this browser's IndexedDB, which means
+// it is one cleared storage away from gone and cannot be handed to anyone. A
+// playbook is the portable form: the functions, their learned reads, and
+// nothing else — never the document (playbook.ts says why).
+
+async function exportPlaybook(): Promise<void> {
+  const all = await store.listScripts();
+  if (all.length === 0) return;
+  const text = serializePlaybook({
+    playbookVersion: PLAYBOOK_VERSION,
+    functions: all.map((s) => ({
+      name: s.name,
+      script: s.script,
+      ...(s.reads ? { reads: s.reads } : {}),
+    })),
+  });
+  downloadText(text, 'jsonloupe-playbook.json', 'application/json');
+  showToast(`exported ${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`);
+}
+
+/**
+ * Add a playbook's functions to the library.
+ *
+ * MERGE, NEVER REPLACE, and a name collision keeps BOTH — the incoming one
+ * lands as `slow orders 2`, the same way a fork does. Overwriting a function
+ * someone wrote is the one outcome here that cannot be undone, so it is the one
+ * thing import will not do; a duplicate, by contrast, is one `×` away.
+ */
+async function importPlaybookText(text: string, fileName: string): Promise<boolean> {
+  const res = parsePlaybook(text);
+  if (!res.ok) {
+    showToast(`${fileName}: ${res.error}`, 'bad');
+    return false;
+  }
+  const taken = (await store.listScripts()).map((s) => s.name);
+  let renamed = 0;
+  for (const fn of res.playbook.functions) {
+    const name = uniqueScriptName(fn.name, taken);
+    if (name !== fn.name) renamed++;
+    taken.push(name);
+    await store.saveScript(name, fn.script, fn.reads);
+  }
+  await renderLibrary();
+  const count = res.playbook.functions.length;
+  showToast(
+    `imported ${fmtNumber(count)} function${count === 1 ? '' : 's'}${renamed ? ` · ${fmtNumber(renamed)} renamed to keep yours` : ''}`,
+  );
+  return true;
+}
+
+runExportBtn.addEventListener('click', () => void exportPlaybook());
+runImportBtn.addEventListener('click', () => runImportInput.click());
+runImportInput.addEventListener('change', async () => {
+  const file = runImportInput.files?.[0];
+  // Cleared either way, so picking the same file twice still fires `change`.
+  runImportInput.value = '';
+  if (!file) return;
+  await importPlaybookText(await file.text(), file.name);
 });
 
 runEditBtn.addEventListener('click', () => setAuthoring(true));
