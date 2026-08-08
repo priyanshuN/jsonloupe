@@ -2300,13 +2300,38 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   z-index: 1;
 }
 #run-editor .cm-content { padding-right: 52px; }
+/* Its other home. main.ts moves this same button to the head bar when the
+   editor collapses, where it is an ordinary control on an ordinary row. */
+.run-head > #run-exec { position: static; }
 
-/* Saved scripts and the run's status on one line, between the field and the
-   result pane. The status is parked at the right edge — it is what the last
-   press of that button had to say, not a chip. */
-.run-chips { display: flex; align-items: flex-start; gap: var(--gap-3); }
-.run-chips #run-saved { flex: 1; min-width: 0; }
-.run-chips #run-status { flex-shrink: 0; padding-top: 3px; }
+/* The head row: the one thing in this column that never moves. It names the
+   function that is loaded and carries the single action the current state has
+   — so it is a control row, on the strip's own ground rather than a bar of its
+   own (the strip IS the bar; rule 11's geometry is already on #run-producer). */
+.run-head { display: flex; align-items: center; gap: var(--gap-2); }
+/* Rule 22: the loaded function outranks the controls beside it the way the
+   active document does in the sidebar — by ink, not by a third weight. */
+.run-name {
+  color: var(--text);
+  font-size: var(--fs-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Rule 14's field recipe. It is the SAME slot the name label stands in, so it
+   holds the same measure rather than stretching the row. */
+.run-name-input { max-width: 32ch; flex: 1; }
+/* Rule 15 tier 2 — ink and a hairline: work that would be lost is worth
+   noticing before you press something else, and no louder than that. */
+#run-dirty {
+  padding: 2px var(--gap-2);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+}
+#run-status { display: block; }
 
 /* The right column: producer strip on top, result pane under it. It is a PANE,
    so it takes the pane area's geometry and its own hairline against the source
@@ -2350,6 +2375,114 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   white-space: nowrap;
 }
 /* Quiet tier via .btn-quiet on each button — see the tier block up top. */
+
+/* ---------- the functions face: the library ---------- */
+
+/* The column's other face. It fills the same box the result does, because the
+   two are never on screen together — before a run there is no result, and after
+   one the result wants the height. */
+#run-library {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+/* Rule 13: this count moves 9 → 99 as the library grows and while a search
+   narrows it. */
+#run-lib-count {
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The measure is a function's name, not the column: rule 14 gives it
+   everything else. */
+.run-lib-search { max-width: 24ch; }
+/* The list is a reading surface, like every other pane in this app. */
+#run-lib-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-canvas);
+}
+.run-lib-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  padding-right: var(--gap-3);
+  border-bottom: 1px solid var(--border);
+}
+.run-lib-row:hover { background: var(--bg-hover); }
+/* Rule 18: an inset 2px left bar means SELECTED, here as everywhere — this is
+   the function the editor is bound to. Inset, so a selected row cannot shift
+   its own content. */
+.run-lib-row.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+/* The whole row is the press: loading a function and running it are one act,
+   so the name, its first line and the hit area are one button rather than a
+   label with a play control beside it. */
+.run-lib-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-2);
+  padding: var(--gap-2) var(--gap-3);
+  min-height: 38px;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+}
+.run-lib-open:hover { background: none; }
+.run-lib-name {
+  color: var(--text);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What the function has to say about itself: its first line, dimmed, and the
+   first thing to give up width when the column is narrow. */
+.run-lib-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-lib-meta {
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Rule 20: HOVER REVEALS, IT NEVER REFLOWS. The gutter is reserved on every
+   row, always, and the control fades in — and it answers to :focus-within too,
+   because hover is not a state a keyboard can enter. */
+.run-lib-del {
+  opacity: 0;
+  visibility: hidden;
+  color: var(--text-dim);
+  transition: opacity var(--dur) var(--ease);
+}
+.run-lib-row:hover .run-lib-del,
+.run-lib-row:focus-within .run-lib-del {
+  opacity: 1;
+  visibility: visible;
+}
+.run-lib-del:hover { color: var(--danger); }
 
 /* The result IS a document surface: same canvas, same gutter stripe, same
    virtualized layer as #tree-viewport (see the note there for why the stripe is

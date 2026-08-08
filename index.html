@@ -476,27 +476,32 @@ SPDX-License-Identifier: MIT -->
              worker that owns a document. -->
         <div id="run-pane" hidden>
           <div id="run-producer">
+            <!-- The one thing that never moves: which function is loaded, and
+                 the one thing to do with it. `run` while you are picking,
+                 `save` while you are writing — the bar itself holds still, and
+                 everything below it swaps. -->
+            <div class="run-head">
+              <span id="run-name" class="run-name">untitled</span>
+              <input id="run-name-input" class="run-name-input" type="text" hidden
+                placeholder="name this function" aria-label="Name of this function" />
+              <span id="run-dirty" hidden>unsaved</span>
+              <span class="spacer"></span>
+              <button id="run-edit" class="btn-quiet" type="button" title="Open this script in the editor">edit</button>
+              <button id="run-save" class="btn-quiet" type="button" hidden
+                title="Keep this script — the library survives across documents">save</button>
+              <button id="run-save-as" class="btn-quiet" type="button" hidden
+                title="Keep this as a second function, leaving the original alone">save as new</button>
+              <!-- Docks INSIDE the field frame while the editor is open (the
+                   script and the act of running it are one control); main.ts
+                   moves this same element up here when the editor collapses,
+                   the way the tree ops move between bars. -->
+              <button id="run-exec" type="button" class="primary" title="Run this script over the document (Ctrl/Cmd+Enter)">run</button>
+            </div>
             <div id="run-lossy" hidden>
               <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>this document has numbers plain JS cannot hold exactly — the script sees them rounded
             </div>
-            <!-- The run button docks INSIDE the field frame, bottom-right:
-                 the script and the act of running it are one control, not a
-                 box with a button parked under it. main.ts leaves it where it
-                 is; CodeMirror mounts after it. -->
-            <div id="run-editor">
-              <button id="run-exec" type="button" class="primary" title="Run this script over the document (Ctrl/Cmd+Enter)">run</button>
-            </div>
-            <!-- Saved scripts: the ask panel's chips, over the same store and
-                 the same CSS. The run's status line shares the row, parked at
-                 the right edge — it is what the last press of that button had
-                 to say. -->
-            <div class="run-chips">
-              <div id="run-saved">
-                <button id="run-save" type="button" class="ask-chip chip-add"
-                  title="Keep this script — chips survive across documents">+ save</button>
-              </div>
-              <span id="run-status" hidden></span>
-            </div>
+            <div id="run-editor" hidden></div>
+            <span id="run-status" hidden></span>
             <div id="run-error" hidden></div>
             <details id="run-console" hidden>
               <summary>console</summary>
@@ -504,15 +509,33 @@ SPDX-License-Identifier: MIT -->
             </details>
           </div>
           <div class="run-bar">
+            <!-- The column has TWO FACES and never both at once: before a run
+                 there is no result, and after one the result wants the height.
+                 Same segmented component as the source pane's tree/code. -->
+            <div class="mode-switch mode-switch-mini" id="run-face-switch" role="group" aria-label="Right pane">
+              <button type="button" data-face="functions">functions</button>
+              <button type="button" data-face="result" class="on">result</button>
+            </div>
             <span id="run-result-label">result</span>
+            <span id="run-lib-count" hidden>functions</span>
             <span id="run-stale" hidden>source changed — re-run</span>
             <span class="spacer"></span>
+            <input id="run-lib-search" class="run-lib-search" type="search" hidden
+              placeholder="find a function" aria-label="Find a function" />
+            <button id="run-new" class="btn-quiet" type="button" hidden title="Write a new function">+ new</button>
             <button id="run-copy" class="btn-quiet" type="button" title="Copy the whole result">copy</button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts
                  remembers which button opened it and downloads accordingly. -->
             <button id="run-dl" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
               aria-label="Name and download the result" title="Name and download the result"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
             <button id="run-open" class="btn-quiet" type="button" title="Open this result as a document of its own">open as document</button>
+          </div>
+          <!-- The functions face: the library, a reading surface like any other
+               pane. It gets NO bar of its own — the bar above serves whichever
+               face is up (count and `+ new` here, the result's ops there), so
+               the column never stacks a second strip to say the same thing. -->
+          <div id="run-library" hidden>
+            <div id="run-lib-list"></div>
           </div>
           <div id="run-viewport" hidden>
             <div id="run-spacer"></div>

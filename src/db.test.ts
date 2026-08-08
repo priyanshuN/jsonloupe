@@ -33,6 +33,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// A record in the shape some older build of the app wrote. It goes in through a
+// second connection to the same database rather than through db.ts, because the
+// point of these tests is what happens to a shape the current API cannot make.
+function putLegacySaved(rec: Record<string, unknown>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('json-workbench', 3);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const conn = open.result;
+      const t = conn.transaction('queries', 'readwrite');
+      t.objectStore('queries').put(rec);
+      t.oncomplete = () => { conn.close(); resolve(); };
+      t.onerror = () => { conn.close(); reject(t.error); };
+    };
+  });
+}
+
 function provenance(overrides: Partial<DocProvenance> = {}): DocProvenance {
   return {
     sourceTitle: 'payload.json',
@@ -581,38 +598,82 @@ describe('saved questions', () => {
 describe('saved scripts', () => {
   it('stores a script with a first use and lists it apart from the questions', async () => {
     await db.saveQuery('largest orders', '$.orders');
-    const script = await db.saveScript('data.orders.length');
+    const script = await db.saveScript('slow orders', 'data.orders.length');
 
     expect(script.kind).toBe('script');
+    expect(script.name).toBe('slow orders');
     expect(script.uses).toBe(1);
     expect(await db.listScripts()).toEqual([script]);
     // The two kinds share a store; neither list may show the other's records.
     expect((await db.listQueries()).map((q) => q.question)).toEqual(['largest orders']);
   });
 
-  it('folds a repeat save of the same source, counting the use', async () => {
-    const first = await db.saveScript('data.orders.length');
+  it('folds a repeat save under the same name, counting the use', async () => {
+    const first = await db.saveScript('slow orders', 'data.orders.length');
     tick();
-    const second = await db.saveScript('  data.orders.length  ');
+    const second = await db.saveScript('  Slow Orders  ', 'data.orders.length + 1');
 
     expect(second.id).toBe(first.id);
     expect(second.createdAt).toBe(first.createdAt);
     expect(second.uses).toBe(2);
+    expect(second.script).toBe('data.orders.length + 1');
     expect(await db.listScripts()).toHaveLength(1);
   });
 
-  it('keeps scripts differing only in case apart — they are different code', async () => {
-    await db.saveScript('data.Orders');
+  it('keeps two names apart even when they hold identical code', async () => {
+    await db.saveScript('by hub', 'data.orders');
     tick();
-    await db.saveScript('data.orders');
+    await db.saveScript('by driver', 'data.orders');
 
-    expect(await db.listScripts()).toHaveLength(2);
+    expect((await db.listScripts()).map((s) => s.name)).toEqual(['by driver', 'by hub']);
+  });
+
+  it('names an unnamed save after the script it holds', async () => {
+    const rec = await db.saveScript('  ', '// slow orders\ndata.orders');
+
+    expect(rec.name).toBe('slow orders');
+  });
+
+  it('updates the record you loaded rather than minting a second one', async () => {
+    const first = await db.saveScript('slow orders', 'data.a');
+    tick();
+    const edited = await db.updateScript(first.id, { name: 'slower orders', script: 'data.b' });
+
+    expect(edited?.id).toBe(first.id);
+    expect(edited?.createdAt).toBe(first.createdAt);
+    expect(await db.listScripts()).toEqual([edited]);
+  });
+
+  it('answers null when the record to update is gone', async () => {
+    const rec = await db.saveScript('gone', 'data.a');
+    await db.removeSaved(rec.id);
+
+    expect(await db.updateScript(rec.id, { script: 'data.b' })).toBeNull();
+    expect(await db.listScripts()).toEqual([]);
+  });
+
+  it('reads a script kept before names existed under its first line', async () => {
+    // db.ts owns the upgrade that creates the store, so it opens first.
+    await db.listScripts();
+    // Then written straight in: no public call can produce a record without a
+    // name any more, and that is exactly the shape being tested.
+    await putLegacySaved({
+      id: 'legacy-1',
+      kind: 'script',
+      script: '// old one\ndata.b',
+      createdAt: clock,
+      updatedAt: clock,
+      uses: 1,
+    });
+
+    const listed = await db.listScripts();
+    expect(listed.map((s) => s.name)).toEqual(['old one']);
   });
 
   it('lists the most recently used script first and removes by id', async () => {
-    const first = await db.saveScript('data.a');
+    const first = await db.saveScript('a', 'data.a');
     tick();
-    const second = await db.saveScript('data.b');
+    const second = await db.saveScript('b', 'data.b');
     tick();
     await db.touchSaved(first.id);
 
@@ -626,7 +687,7 @@ describe('saved scripts', () => {
     const question = await db.saveQuery('kept', '$.kept');
     for (let i = 0; i < 105; i++) {
       tick();
-      await db.saveScript(`data.s${i}`);
+      await db.saveScript(`s${i}`, `data.s${i}`);
     }
 
     expect(await db.listScripts()).toHaveLength(100);

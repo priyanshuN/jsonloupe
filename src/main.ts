@@ -47,7 +47,8 @@ import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayl
 import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
-import { scriptChipLabel } from './run-script';
+import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
+import type { SavedScript } from './db';
 import type { RunResult } from './run-exec';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
@@ -4027,8 +4028,19 @@ const runStatus = $('#run-status');
 const runErrorEl = $('#run-error');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
-const runSaved = $('#run-saved');
-const runSaveChip = $<HTMLButtonElement>('#run-save');
+const runHead = $('.run-head');
+const runNameEl = $('#run-name');
+const runNameInput = $<HTMLInputElement>('#run-name-input');
+const runDirtyEl = $('#run-dirty');
+const runEditBtn = $<HTMLButtonElement>('#run-edit');
+const runSaveBtn = $<HTMLButtonElement>('#run-save');
+const runSaveAsBtn = $<HTMLButtonElement>('#run-save-as');
+const runFaceSwitch = $('#run-face-switch');
+const runLibrary = $('#run-library');
+const runLibList = $('#run-lib-list');
+const runLibCount = $('#run-lib-count');
+const runLibSearch = $<HTMLInputElement>('#run-lib-search');
+const runNewBtn = $<HTMLButtonElement>('#run-new');
 const runSrcSwitch = $('#run-src-switch');
 const runResultLabel = $('#run-result-label');
 const runStaleBadge = $('#run-stale');
@@ -4046,6 +4058,28 @@ let runResultText = '';
 let runResultChannel: WorkerChannel | null = null;
 /** Which pane the left half is showing. Whatever the user arrived from. */
 let runSource: 'tree' | 'code' = 'tree';
+/** Which face the right column is showing: the library, or the last result. */
+let runFace: 'functions' | 'result' = 'result';
+/** True while the editor is open. Picking a function needs no editor at all. */
+let runAuthoring = false;
+/** The library record the editor is bound to — what `save` writes back to. */
+let runLoadedId: string | null = null;
+/** What that record held when it was loaded, so `unsaved` means something. */
+let runLoadedSnapshot = { name: '', script: '' };
+/**
+ * The row a click is asking to load while the editor has unsaved changes. The
+ * first press refuses and says so, a second press on the SAME row goes through:
+ * work is never lost by a stray click, and no dialog stands in the way either.
+ */
+let runPendingLoadId: string | null = null;
+/**
+ * Whether the result on screen has been outlived by its document. It is state
+ * rather than a `hidden` flag now that the library can cover the result bar:
+ * flipping back to the result must restore the badge, not clear the fact.
+ */
+let runStaleWanted = false;
+/** Whether the library is long enough to be worth a search field (see below). */
+let runLibSearchWanted = false;
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4121,66 +4155,223 @@ function setRunStatus(msg: string): void {
   runStatus.textContent = msg;
 }
 
-// ---------- saved scripts: the ask panel's chips, over the same store ----------
+// ---------- the library: functions you keep, and the column's two faces ----------
 //
-// A script you kept is the same object to the user as a question you kept — it
-// wears the same chip, deletes the same way, and outlives the document it was
-// written against — so it shares the ask panel's markup, its stylesheet and its
-// object store (db.ts). Pressing one loads it AND runs it: re-running is the
-// only reason it was kept.
+// The document is what changes daily; the handful of functions you run over it
+// is what holds still. So the library — not an empty editor — is what run mode
+// opens on, and a function is a NAMED thing you own rather than the first line
+// of some code: named, so five of them are told apart at a glance; bound to its
+// record, so editing one corrects it instead of minting a near-duplicate beside
+// it. Pressing one loads it AND runs it, which is the only reason it was kept.
+//
+// The library and the result share the column and are never both on screen:
+// before a run there is no result, and after one the result wants the height.
 
-/** As many as the ask panel shows — a chip row is a shortcut, not an archive. */
-const SCRIPT_CHIPS_SHOWN = 12;
+/** Below this the list is short enough to read whole; a search field is noise. */
+const LIBRARY_SEARCH_MIN = 8;
 
-async function renderScriptChips(): Promise<void> {
-  const saved = await store.listScripts();
-  // `+ save` leads the row and is never re-created, so it keeps focus across a
-  // re-render (deleting a chip with the keyboard lands you back on it).
-  runSaved.replaceChildren(runSaveChip);
-  for (const s of saved.slice(0, SCRIPT_CHIPS_SHOWN)) {
-    const chip = document.createElement('span');
-    chip.className = 'ask-chip';
-    chip.dataset.id = s.id;
-    chip.title = s.script;
-    const label = document.createElement('span');
-    label.textContent = scriptChipLabel(s.script);
-    const del = document.createElement('button');
-    del.className = 'chip-del';
-    del.textContent = '×';
-    del.title = 'Forget this script';
-    chip.append(label, del);
-    runSaved.appendChild(chip);
+function setRunFace(face: 'functions' | 'result'): void {
+  runFace = face;
+  const showing = face === 'functions';
+  runLibrary.hidden = !showing;
+  runViewport.hidden = showing || !runResultText;
+  runEmpty.hidden = showing || !!runResultText;
+  // One bar, serving whichever face is up: the result's ops act on a document
+  // that is not on screen while the library is, and the library's controls mean
+  // nothing while it is not.
+  for (const el of [runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = showing;
+  runLibCount.hidden = !showing;
+  runNewBtn.hidden = !showing;
+  runLibSearch.hidden = !showing || runLibSearchWanted === false;
+  if (showing) runStaleBadge.hidden = true;
+  else runStaleBadge.hidden = !runResultText || !runStaleWanted;
+  for (const b of runFaceSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', b.dataset.face === face);
   }
 }
 
-async function saveCurrentScript(): Promise<void> {
+// Rule 18's left edge: the row whose function is loaded is the selected one.
+function renderLibraryRow(rec: SavedScript): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'run-lib-row';
+  row.classList.toggle('selected', rec.id === runLoadedId);
+  row.dataset.id = rec.id;
+
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'run-lib-open';
+  open.title = rec.script;
+  const name = document.createElement('span');
+  name.className = 'run-lib-name';
+  name.textContent = rec.name;
+  // No note field yet: the script's first line is what the function has to say
+  // about itself, and it is already the best one-liner available.
+  const note = document.createElement('span');
+  note.className = 'run-lib-note';
+  note.textContent = scriptChipLabel(rec.script);
+  open.append(name, note);
+
+  const meta = document.createElement('span');
+  meta.className = 'run-lib-meta';
+  meta.textContent = relTime(rec.updatedAt);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'run-lib-del btn-icon btn-mini btn-quiet';
+  del.textContent = '×';
+  del.title = `Forget ${rec.name}`;
+  del.setAttribute('aria-label', `Forget ${rec.name}`);
+
+  row.append(open, meta, del);
+  return row;
+}
+
+async function renderLibrary(): Promise<void> {
+  const all = await store.listScripts();
+  const term = runLibSearch.value.trim().toLowerCase();
+  const shown = term
+    ? all.filter((s) => `${s.name}\n${s.script}`.toLowerCase().includes(term))
+    : all;
+
+  runLibSearchWanted = all.length >= LIBRARY_SEARCH_MIN;
+  runLibSearch.hidden = !runLibSearchWanted || runFace !== 'functions';
+  if (all.length === 0) runLibCount.textContent = 'functions';
+  else if (term) runLibCount.textContent = `${fmtNumber(shown.length)} of ${fmtNumber(all.length)}`;
+  else runLibCount.textContent = `${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`;
+
+  if (shown.length === 0) {
+    runLibList.replaceChildren(
+      all.length === 0
+        ? emptyState('no functions yet', 'Press `+ new`, write one, and save it — it will be here for the next document.')
+        : emptyState('nothing matches', 'Clear the search to see the whole library.'),
+    );
+    return;
+  }
+  runLibList.replaceChildren(...shown.map(renderLibraryRow));
+}
+
+/** Has the editor drifted from the record it was loaded from? */
+function runIsDirty(): boolean {
+  if (!runAuthoring) return false;
+  const script = runEditor?.getDoc() ?? '';
+  return script.trim() !== runLoadedSnapshot.script.trim()
+    || runNameInput.value.trim() !== runLoadedSnapshot.name.trim();
+}
+
+// The head bar: the constant. Which function is loaded, whether it has drifted,
+// and the one action that makes sense in the state you are in — `run` while you
+// are picking, `save` while you are writing.
+function paintRunHead(): void {
+  const dirty = runIsDirty();
+  runNameEl.hidden = runAuthoring;
+  runNameInput.hidden = !runAuthoring;
+  runNameEl.textContent = runLoadedSnapshot.name || 'untitled';
+  runDirtyEl.hidden = !dirty;
+  runEditBtn.hidden = runAuthoring;
+  runSaveBtn.hidden = !runAuthoring;
+  runSaveAsBtn.hidden = !runAuthoring || !runLoadedId;
+  runEditorHost.hidden = !runAuthoring;
+  // One `run` button in two homes, moved rather than duplicated: docked in the
+  // field while the field exists, on the head bar while it does not.
+  (runAuthoring ? runEditorHost : runHead).appendChild(runExecBtn);
+}
+
+function setAuthoring(on: boolean): void {
+  runAuthoring = on;
+  paintRunHead();
+  if (on) runEditor?.focus();
+}
+
+/** Load a saved function into the editor, collapsed and clean. */
+function adoptScript(rec: SavedScript | null): void {
+  runLoadedId = rec?.id ?? null;
+  runLoadedSnapshot = { name: rec?.name ?? '', script: rec?.script ?? '' };
+  runNameInput.value = runLoadedSnapshot.name;
+  runEditor?.setDoc(runLoadedSnapshot.script);
+  runPendingLoadId = null;
+  paintRunHead();
+}
+
+async function loadAndRun(id: string): Promise<void> {
+  const rec = (await store.listScripts()).find((s) => s.id === id);
+  if (!rec) return;
+  // Two presses to discard: the first says what is at stake, the second obeys.
+  if (runIsDirty() && runPendingLoadId !== id) {
+    runPendingLoadId = id;
+    setRunStatus(`unsaved changes to \`${runLoadedSnapshot.name || 'this script'}\` — press again to discard them`);
+    return;
+  }
+  // The editor holds the script a run reads, so a row press needs it mounted
+  // even though nothing is about to be typed into it. Without this a library
+  // press on a tab whose lazy chunk never loaded runs the EMPTY editor and
+  // blames the user for not writing an expression.
+  await ensureRunEditor();
+  if (!runEditor) return;
+  setRunStatus('');
+  adoptScript(rec);
+  setAuthoring(false);
+  void store.touchSaved(id);
+  await renderLibrary();
+  await runScript();
+}
+
+async function saveCurrentScript(asNew: boolean): Promise<void> {
   const code = runEditor?.getDoc().trim() ?? '';
   if (!code) {
     setRunStatus('nothing to save yet — write a script first');
     return;
   }
-  await store.saveScript(code);
-  await renderScriptChips();
-  showToast('script saved');
+  const typed = runNameInput.value.trim();
+  const existing = await store.listScripts();
+  let rec: SavedScript | null = null;
+  if (!asNew && runLoadedId) {
+    rec = await store.updateScript(runLoadedId, { name: typed || undefined, script: code });
+  }
+  if (!rec) {
+    const base = typed || deriveScriptName(code);
+    // A fork never overwrites what it was forked from, so it takes the first
+    // free name rather than asking for one.
+    const name = asNew ? uniqueScriptName(base, existing.map((s) => s.name)) : base;
+    rec = await store.saveScript(name, code);
+  }
+  adoptScript(rec);
+  await renderLibrary();
+  showToast(`saved · ${rec.name}`);
 }
 
-runSaved.addEventListener('click', async (e) => {
+runFaceSwitch.addEventListener('click', (e) => {
+  const face = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-face]')?.dataset.face;
+  if (face !== 'functions' && face !== 'result') return;
+  setRunFace(face);
+  if (face === 'functions') void renderLibrary();
+});
+
+runLibSearch.addEventListener('input', () => void renderLibrary());
+
+runLibList.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
-  if (target.closest('#run-save')) return void saveCurrentScript();
-  const chip = target.closest<HTMLElement>('.ask-chip');
-  const id = chip?.dataset.id;
+  const id = target.closest<HTMLElement>('.run-lib-row')?.dataset.id;
   if (!id) return;
-  if (target.closest('.chip-del')) {
+  if (target.closest('.run-lib-del')) {
     await store.removeSaved(id);
-    await renderScriptChips();
+    if (id === runLoadedId) runLoadedId = null;
+    await renderLibrary();
+    paintRunHead();
     return;
   }
-  const saved = (await store.listScripts()).find((s) => s.id === id);
-  if (!saved || !runEditor) return;
-  runEditor.setDoc(saved.script);
-  void store.touchSaved(id);
-  await runScript();
+  await loadAndRun(id);
 });
+
+runNewBtn.addEventListener('click', () => {
+  adoptScript(null);
+  setRunFace('result');
+  setAuthoring(true);
+});
+
+runEditBtn.addEventListener('click', () => setAuthoring(true));
+runSaveBtn.addEventListener('click', () => void saveCurrentScript(false));
+runSaveAsBtn.addEventListener('click', () => void saveCurrentScript(true));
+runNameInput.addEventListener('input', paintRunHead);
 
 // True for as long as the document is open (style.css rule 15, tier 1): the
 // script sees plain JS numbers, and this document has some it cannot hold.
@@ -4191,17 +4382,22 @@ function setRunLossy(hasUnsafeNumbers: boolean): void {
 // The result on screen is no longer about this document. NEVER re-run for them:
 // the script is the user's, and a re-run is theirs to ask for.
 function markRunResultStale(): void {
-  if (runResultText) runStaleBadge.hidden = false;
+  if (!runResultText) return;
+  runStaleWanted = true;
+  runStaleBadge.hidden = runFace === 'functions';
 }
 
 function clearRunResult(): void {
   runResultText = '';
+  runStaleWanted = false;
   runStaleBadge.hidden = true;
-  runResultLabel.textContent = 'result';
+  runResultLabel.textContent = 'nothing run yet';
   resultTree.resetSelection();
   resultTree.setTotal(0);
+  // The library is the other face of these two surfaces: while it is up, an
+  // emptied result must not push it off screen.
   runViewport.hidden = true;
-  runEmpty.hidden = false;
+  runEmpty.hidden = runFace === 'functions';
   for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = true;
 }
 
@@ -4248,7 +4444,13 @@ async function ensureRunEditor(): Promise<void> {
     doc: loadLastScript(),
     placeholder: RUN_PLACEHOLDER,
     onRun: () => void runScript(),
-    onChange: saveLastScript,
+    // Every keystroke is both a scratch save and the answer to "has this
+    // drifted from the record it came from" — the head's `unsaved` mark is
+    // only honest if it is recomputed here.
+    onChange: (code) => {
+      saveLastScript(code);
+      paintRunHead();
+    },
   });
 }
 
@@ -4275,8 +4477,18 @@ async function openRun(): Promise<void> {
   if (!runResultChannel) runResultChannel = createWorkerChannel('result');
   await showRunSource();
   await ensureRunEditor();
-  void renderScriptChips();
-  runEditor?.focus();
+  await renderLibrary();
+  // Someone with a library came here to press one of their functions, so that
+  // is what run mode opens on; someone with none came here to write one, and
+  // gets the editor they would have had to open anyway.
+  const library = await store.listScripts();
+  if (library.length > 0) {
+    setRunFace('functions');
+    setAuthoring(false);
+  } else {
+    setRunFace('result');
+    setAuthoring(true);
+  }
 }
 
 runSrcSwitch.addEventListener('click', (e) => {
@@ -4323,7 +4535,9 @@ async function paintResultLabel(): Promise<void> {
   const count = root.type === 'object' || root.type === 'array'
     ? ` ${fmtNumber(root.childCount)}`
     : '';
-  runResultLabel.textContent = `result · ${root.type}${count}`;
+  // The switch beside it already says `result`; saying it again here put the
+  // word twice on one strip. What the label is for is what CAME BACK.
+  runResultLabel.textContent = `${root.type}${count}`;
 }
 
 // Hand the result to its own worker and read it back as a document. The guard
@@ -4342,7 +4556,11 @@ async function showResultDocument(text: string): Promise<void> {
     return;
   }
   runResultText = text;
+  runStaleWanted = false;
   runStaleBadge.hidden = true;
+  // A finished run is what the column is for: it takes the result face, so the
+  // library steps aside for the answer it was pressed for.
+  setRunFace('result');
   runEmpty.hidden = true;
   runViewport.hidden = false;
   for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = false;
