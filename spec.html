@@ -9,9 +9,9 @@ SPDX-License-Identifier: MIT -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <link rel="stylesheet" href="/src/style.css" />
   <title>jsonloupe — what it actually does</title>
-  <meta name="description" content="Six guarantees jsonloupe makes about large, precise JSON: lossless numbers, a virtualized tree, payload decoding, semantic compare, editing with undo, and exact transport sizing." />
+  <meta name="description" content="Eight guarantees jsonloupe makes about large, precise JSON: lossless numbers, a virtualized tree, payload decoding, semantic compare, editing with undo, exact transport sizing, nested JSON to linked tables, and a library of functions you keep." />
   <meta property="og:title" content="jsonloupe — what it actually does" />
-  <meta property="og:description" content="Six guarantees, in the order they matter when a payload lands on you." />
+  <meta property="og:description" content="Eight guarantees, in the order they matter when a payload lands on you." />
   <meta property="og:type" content="website" />
   <!-- Same pre-paint theme gate as index.html: the stylesheet's bare :root is
        the dark palette, so without this a light-theme user gets slammed into
@@ -33,7 +33,7 @@ SPDX-License-Identifier: MIT -->
   <main class="sp-main">
     <div class="sp-intro">
       <h1>What it actually does</h1>
-      <p>Six guarantees, in the order they matter when a payload lands on you. Internals are documented in SPEC.md.</p>
+      <p>Eight guarantees, in the order they matter when a payload lands on you. Internals are documented in SPEC.md.</p>
     </div>
 
     <div class="sp-row">
@@ -65,6 +65,16 @@ SPDX-License-Identifier: MIT -->
       <span class="sp-num">06</span>
       <h2>Transport size inspector</h2>
       <p>Exact UTF-8 → Zstd → Base64 → envelope byte counts against editable budgets, so you know before the broker rejects it.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">07</span>
+      <h2>Nested JSON to linked tables</h2>
+      <p>Every repeating array becomes its own sheet, joined to its parent by an id already in the data — never <code>items/0/sku</code> columns. The mapping you approve is a small file that produces the same columns next month, through the browser, the CLI or the MCP server.</p>
+    </div>
+    <div class="sp-row">
+      <span class="sp-num">08</span>
+      <h2>Functions you keep</h2>
+      <p>Name a script and press it over tomorrow's file, or run several as one report. Each learns which paths it reads, so a document missing them is named before the run rather than after an empty result — and the library exports as a playbook file carrying the questions, never the data.</p>
     </div>
   </main>
 
