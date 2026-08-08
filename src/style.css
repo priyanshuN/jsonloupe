@@ -1495,8 +1495,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
      — a hairline, not nothing. */
   box-shadow: none;
 }
-/* Rule 2, the SECTION LABEL rank — this is the pattern the rank is named for. */
-.codec-card h2 {
+/* Rule 2, the SECTION LABEL rank — this is the pattern the rank is named for.
+   The converter's `preview` names a band inside its surface too, and had
+   invented its own dim 12px treatment; markup stays lowercase, the caps are the
+   rank's. */
+.codec-card h2,
+#convert-preview-head > span:first-child {
   margin: 0;
   font-size: var(--fs-chip);
   font-weight: 400;
@@ -3515,140 +3519,185 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    live preview under it. The preview is the product — a non-developer decides
    whether an item should be its own row only by seeing the rows — so it gets
    the space and the rail stays narrow. Contract rules 1/2/4/6 apply unchanged:
-   28px controls, lowercase labels, the --gap scale, and exactly one accent
+   rule 1's two sizes and nothing between them — 28px in the bars, mini on the
+   column rows — lowercase labels, the --gap scale, and exactly one accent
    control in this view — download, which commits the work, on rule 6's
-   outline; the fill is the landing's alone. */
+   outline; the fill is the landing's alone. Almost every rule here is now a
+   width, a height or a grid track: ground, border, radius, type and the focus
+   ring belong to the shared recipes this block used to shadow. */
 
 .convert-bar {
   display: flex;
   align-items: center;
   gap: var(--gap-3);
-  padding: 9px 14px;
+  /* Rule 11's strip geometry. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   flex-shrink: 0;
   flex-wrap: wrap;
 }
-#convert-title { font: 12.5px var(--mono); color: var(--c-key); }
-#convert-count { color: var(--text-dim); font-size: 12px; }
-.convert-map-name,
-#convert-saved,
-.convert-inline-field input,
+/* Rule 18: --c-key paints JSON values, and "tables in this document" is prose
+   about the view. Same treatment #sem-title has for the same job — the dim mono
+   descriptor trailing a surface title. */
+#convert-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font: var(--fs-body) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Rule 13: a figure that changes between documents, sitting behind an identity
+   — #doc-stats' role, so #doc-stats' treatment. */
+#convert-count { color: var(--text-faint); font-size: var(--fs-chip); font-variant-numeric: tabular-nums; }
+/* Rule 1's mini metrics, and nothing else: these fields sit inline on a column
+   row, so they take the 20px height. Ground, border, radius, ink, type and rule
+   5's ring all arrive from rule 14's one recipe — the block that used to stand
+   here was a thirteenth way to draw a field, on --bg-inset, which rule 14
+   reserves for read-only OUTPUT. The :where() mirrors the recipe's own checkbox
+   exclusion so `skip row` keeps rule 7's widget. */
 .convert-source,
 .convert-mode,
-.convert-col-options input,
+.convert-col-options input:where(:not([type='checkbox'])),
 .convert-col-options select,
-.convert-link-name {
-  height: var(--ctl-h-mini);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-inset);
-  color: var(--text);
-  font: 11.5px var(--mono);
-}
-.convert-map-name { width: 150px; padding: 0 var(--gap-2); }
+.convert-link-name { min-height: var(--ctl-h-mini); }
+/* Rule 14 owns the inset; the bar owns the width. */
+.convert-map-name { width: 150px; }
 #convert-saved { max-width: 170px; }
 
 #convert-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 #convert-body { flex: 1; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; min-height: 0; }
 
+/* Rule 11: the rail frames the document rather than being one, so it is chrome
+   — the correction #sidebar took when --bg-elevated left it white on white in
+   light. Structurally it is #recents: a narrow column of pickable rows, so the
+   rows carry the inset and bleed edge to edge instead of being inset cards. */
 #convert-tables {
   border-right: 1px solid var(--border);
   overflow-y: auto;
-  padding: var(--gap-2);
+  padding: var(--gap-2) 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap-1);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
 
 .convert-table {
-  padding: var(--gap-2);
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
+  padding: var(--gap-2) var(--gap-3);
   cursor: pointer;
 }
 .convert-table:hover { background: var(--bg-hover); }
-.convert-table.on { background: var(--bg-sel); border-color: var(--border-strong); }
-.convert-table.off { opacity: 0.5; }
+/* Rule 18: inset 2px is the one selected marker. A border that materialises
+   under selection was a second device for the same meaning. */
+.convert-table.on { background: var(--bg-sel); box-shadow: inset 2px 0 0 var(--accent); }
+/* The app's one de-emphasis opacity, shared with .convert-col.off and
+   button:disabled — "switched off" had three values. */
+.convert-table.off { opacity: 0.45; }
 .convert-table-head { display: flex; align-items: center; gap: var(--gap-2); }
-.convert-meta { margin-left: auto; color: var(--text-faint); font: 11.5px var(--mono); white-space: nowrap; }
-.convert-where { margin: var(--gap-1) 0 0 calc(var(--icon) + var(--gap-2)); color: var(--text-faint); font-size: 11.5px; }
+/* Rule 13: row counts right-aligned in a stacked column. */
+.convert-meta {
+  margin-left: auto;
+  color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.convert-where { margin: var(--gap-1) 0 0 calc(var(--icon) + var(--gap-2)); color: var(--text-faint); font-size: var(--fs-chip); }
 
-/* Names are edited in place: the value IS the heading, so it reads as text
-   until you touch it rather than announcing itself as a form field. */
+/* Names are edited in place, but rule 14 is explicit that a field's ground must
+   always read as "type here" — invisible-until-hovered was the taste the rule
+   exists to end, and its `outline: none` left the only two fields in the app a
+   keyboard user could land on with no visible focus. Ground, border, radius,
+   type and rule 5's ring come from the recipe; only the mini height and the
+   tighter inline inset are structural. */
 .convert-name,
 .convert-colname {
   flex: 1;
   min-width: 0;
-  height: var(--ctl-h-mini);
-  padding: 0 var(--gap-1);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text);
-  font: 12.5px var(--mono);
+  min-height: var(--ctl-h-mini);
+  padding: 0 var(--gap-2);
 }
-.convert-name:hover,
-.convert-colname:hover { border-color: var(--border); }
-.convert-name:focus,
-.convert-colname:focus { border-color: var(--accent); background: var(--bg-inset); outline: none; }
 
-#convert-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+/* Rule 11: the column editor and the preview under it are the document being
+   shaped, so this whole column is CANVAS — the bars inside it are the chrome. */
+#convert-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg-canvas); }
+/* Rule 11's strip geometry, and the two grounds it prescribes: the columns head
+   is a bar stacked directly under .convert-bar, so it takes the second chrome
+   tier; the preview head has the column list above it and takes plain chrome.
+   Centred rather than baseline-aligned because these heads hold controls, and
+   rule 3 centres a control on the box, never on the text baseline. */
 #convert-cols-head,
 #convert-preview-head {
   display: flex;
-  align-items: baseline;
-  gap: var(--gap-2);
-  padding: var(--gap-2) 14px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-#convert-preview-head { border-top: 1px solid var(--border); }
-#convert-detail-name { font: 12.5px var(--mono); color: var(--c-key); }
-#convert-detail-src,
-#convert-preview-head span:first-child { color: var(--text-dim); font-size: 12px; }
-#convert-preview-note { color: var(--text-faint); font-size: 11.5px; margin-left: auto; }
-#convert-preview-note.bad { color: var(--c-string); }
-
-#convert-cols { overflow-y: auto; padding: var(--gap-2) 14px; max-height: 48%; }
-.convert-col {
-  display: grid;
-  grid-template-columns: auto minmax(110px, 0.8fr) 90px minmax(130px, 1fr) repeat(3, 24px);
   align-items: center;
   gap: var(--gap-2);
-  padding: 3px 0;
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-chrome);
+}
+#convert-cols-head { background: var(--bg-chrome-2); }
+#convert-preview-head { border-top: 1px solid var(--border); }
+/* Rule 18: a sheet name is user-authored output, not a JSON key. #doc-title's
+   rank — the strongest identity in a bar. */
+#convert-detail-name { font: 700 var(--fs-code) var(--mono); color: var(--text); }
+#convert-detail-src { color: var(--text-dim); font: var(--fs-body) var(--mono); }
+/* Rule 13: these digits change on every keystroke in the editor above. */
+#convert-preview-note { color: var(--text-faint); font-size: var(--fs-chip); font-variant-numeric: tabular-nums; margin-left: auto; }
+/* Rule 15 tier 3: an invalid mapping is the one thing here you must fix before
+   anything below it means anything, so it takes ink, hairline and fill. It was
+   drawn in --c-string, which is green in light — a failure in the success hue,
+   and rule 18's colours paint JSON values and nothing else. */
+#convert-preview-note.bad {
+  padding: 1px var(--gap-2);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--r-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+#convert-cols { overflow-y: auto; padding: var(--gap-2) var(--gap-3); max-height: 48%; }
+/* Rule 1: the action cluster is three MINI controls — 24px was a third size the
+   app does not have. Rule 8b: one --row-h across every scrolling list of rows,
+   which is what the 3px padding was standing in for. */
+.convert-col {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 0.8fr) 90px minmax(130px, 1fr) repeat(3, var(--ctl-h-mini));
+  align-items: center;
+  gap: var(--gap-2);
+  min-height: var(--row-h);
 }
 .convert-col.off { opacity: 0.45; }
 .convert-source { min-width: 0; width: 100%; padding: 0 var(--gap-2); }
 .convert-mode { min-width: 0; width: 100%; }
-.convert-col-action { width: 24px; min-width: 24px; padding: 0; }
+/* Rule 23 for the size — 11px had no step. The ink moves up because read /
+   write / date / if missing / skip row are LABELS on the row's controls, and
+   .disc-key is the app's inline label: --text-dim, not --text-faint, which is
+   the 3.0-floor rank for placeholders and captions. These were the smallest and
+   the faintest text in the view at the same time. */
 .convert-col-options {
   grid-column: 2 / -1;
   display: flex;
   align-items: center;
   gap: var(--gap-3);
-  color: var(--text-faint);
-  font-size: 11px;
-  padding-bottom: 3px;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  padding-bottom: var(--gap-1);
 }
 .convert-col-options label { display: inline-flex; align-items: center; gap: var(--gap-1); }
-.convert-col-options input { width: 150px; padding: 0 var(--gap-1); }
-.convert-col-options select { max-width: 180px; }
-.convert-skip input { width: auto; }
-.convert-inline-field { display: inline-flex; align-items: center; gap: var(--gap-1); color: var(--text-faint); font-size: 11px; }
-.convert-inline-field input { width: 72px; padding: 0 var(--gap-1); }
-.convert-link-name { width: 130px; padding: 0 var(--gap-1); }
-.convert-type {
-  font: 11.5px var(--mono);
-  color: var(--accent);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  padding: 0 6px;
-  white-space: nowrap;
-}
-.convert-note { margin: 0 0 var(--gap-2); color: var(--text-faint); font-size: 11.5px; }
-.convert-empty { padding: var(--gap-3); color: var(--text-dim); font-size: 12.5px; }
+.convert-col-options input:where(:not([type='checkbox'])) { width: 150px; padding: 0 var(--gap-2); }
+/* Without min-width the datetime format list ('yyyy-MM-dd HH:mm:ss') sets the
+   flex line's floor and pushes the row past its own max-width. */
+.convert-col-options select { max-width: 180px; min-width: 0; }
+/* Rule 14's standing-label pattern (.field > .field-prefix) supplies the shell,
+   the label and the focus ring; only the width is local to the bar. */
+.convert-inline-field { flex: 0 0 auto; width: 150px; min-width: 0; }
+.convert-link-name { width: 130px; padding: 0 var(--gap-2); }
+/* A label wrapping a field, not a caption, so it takes --text-dim's floor —
+   the same call .convert-col-options gets above. */
+.convert-note { margin: 0 0 var(--gap-2); color: var(--text-dim); font-size: var(--fs-chip); }
 
 /* Rung 3 of the baseDate ladder: where a time has no date to borrow, ask —
    never quietly use the day the conversion happens to run on. */
@@ -3658,63 +3707,79 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   gap: var(--gap-2);
   margin-bottom: var(--gap-2);
   padding: var(--gap-2);
-  border: 1px solid var(--border-strong);
+  /* Rule 15 tier 2 — notice it, then proceed: these rows will convert either
+     way, but not with a date anyone chose. It was wearing --bg-inset and
+     --border-strong, which rule 14 reserves for read-only output, so a prompt
+     for input was dressed as a result. */
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
   border-radius: var(--r-sm);
-  background: var(--bg-inset);
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.convert-date {
-  height: var(--ctl-h);
-  padding: 0 var(--gap-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
-  color: var(--text);
-  font: 12.5px var(--mono);
+  font-size: var(--fs-body);
+  color: var(--warn);
 }
 
-#convert-preview { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
+/* Rule 11: the preview inherits #convert-detail's canvas — it was the one pane
+   in the app painted --bg, which in light is the chrome tint, so the reading
+   surface wore chrome while the bars above it wore white. */
+#convert-preview { flex: 1; overflow: auto; min-height: 0; }
 #convert-report {
   flex-shrink: 0;
   max-height: 150px;
   overflow: auto;
-  padding: var(--gap-2) 14px;
+  padding: var(--gap-2) var(--gap-3);
   border-top: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
 }
 #convert-report strong { color: var(--text); margin-right: var(--gap-3); }
 .convert-report-tables { display: inline-flex; flex-wrap: wrap; gap: var(--gap-3); }
-#convert-report ul { margin: var(--gap-1) 0 0 18px; padding: 0; }
+#convert-report ul { margin: var(--gap-1) 0 0 var(--gap-4); padding: 0; }
 #convert-report .bad { color: var(--warn); }
 #convert-report .ok { color: var(--ok); margin-left: var(--gap-3); }
-.convert-grid { border-collapse: collapse; font: 12px var(--mono); white-space: nowrap; }
+/* The preview is the table view's material rendered by a second component, so
+   it reads at the table view's density: .tcell's type and insets, .trow's
+   --row-h and zebra. Rule 13 for the figures — a preview of a spreadsheet is
+   the strongest case of stacked digits in the app. */
+.convert-grid {
+  border-collapse: collapse;
+  font: var(--fs-body) var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .convert-grid th,
 .convert-grid td {
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 4px 10px;
+  height: var(--row-h);
+  border-right: 1px solid var(--border-soft);
+  border-bottom: none;
+  padding: 0 11px;
   text-align: left;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Rule 11's converse: a sticky column header is the top edge of the DOCUMENT,
+   not something floating over it — canvas, with a strong bottom edge. The ink
+   is --text and not .tcell.th's --c-key because these headings are output
+   column names the user typed, not the document's keys (rule 18). Weight 700,
+   because 500 is the synthesized smear rule 22 exists to kill. */
 .convert-grid th {
   position: sticky;
   top: 0;
-  background: var(--bg-elevated);
-  color: var(--c-key);
-  font-weight: 500;
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text);
+  font-weight: 700;
+  padding: var(--gap-2) 11px;
   z-index: 1;
 }
 .convert-grid td.empty { color: var(--text-faint); }
+/* Rule 8b's banding, from .trow — what lets the per-cell bottom rule go. */
+.convert-grid tbody tr:nth-child(even) td { background: var(--bg-inset); }
 .convert-grid tbody tr:hover td { background: var(--bg-hover); }
 
 @media (max-width: 900px) {
   #convert-body { grid-template-columns: 180px 1fr; }
-  .convert-col { grid-template-columns: auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, 24px); }
+  .convert-col { grid-template-columns: auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, var(--ctl-h-mini)); }
   .convert-inline-field { display: none; }
 }
 

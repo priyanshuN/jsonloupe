@@ -513,11 +513,24 @@ function sanitizeFilePart(s: string, max: number): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);
 }
 
+// Two names for one document, and they are deliberately not the same string.
+// docStem is the filename half — sanitized and capped, safe to hand to a
+// download — while docTitle is what a human reads. A document called `route
+// json (prod).json` is `route_json_prod` in a filename and `route json (prod)`
+// in a label, and sanitizing the one a person sees is how a saved mapping ends
+// up named after a file path.
+function docStem(): string {
+  return sanitizeFilePart(currentTitle.replace(/\.[^.]*$/, ''), 60) || 'data';
+}
+
+function docTitle(): string {
+  return currentTitle.replace(/\.[^.]+$/, '').trim() || 'document';
+}
+
 // Filename from the open doc's title + a path/suffix, e.g. orders_users.csv.
 function csvFilename(suffix: string): string {
-  const base = sanitizeFilePart((currentTitle || 'data').replace(/\.[^.]*$/, ''), 60) || 'data';
   const tail = sanitizeFilePart(suffix, 40);
-  return `${base}${tail ? '_' + tail : ''}.csv`;
+  return `${docStem()}${tail ? '_' + tail : ''}.csv`;
 }
 
 // Same mechanism as downloadText, for anything that is bytes rather than text
@@ -1539,6 +1552,8 @@ const converter = new ConvertView(
     missing: $<HTMLInputElement>('#convert-missing'),
     arrayJoin: $<HTMLInputElement>('#convert-array-join'),
     addColumn: $<HTMLButtonElement>('#convert-add-column'),
+    spec: $<HTMLButtonElement>('#convert-spec'),
+    download: $<HTMLButtonElement>('#convert-dl'),
     report: $('#convert-report'),
   },
   {
@@ -1559,20 +1574,27 @@ const converter = new ConvertView(
     touchMapping: (id) => store.touchConvertSpec(id),
     download: downloadBlob,
     toast: showToast,
-    docName: () => sanitizeFilePart((currentTitle || 'data').replace(/\.[^.]*$/, ''), 60) || 'data',
+    emptyState,
+    // The bottom strip is the shell's, so the converter is handed the two
+    // setters and nothing more. Its lead goes down as plain text rather than a
+    // path: `problems › jobs` is the view's own vocabulary for an anchor, and
+    // the path treatment is reserved for real JSON paths.
+    setLead: (text) => setStatusLead(text),
+    setNote: setStatusNote,
+    docTitle,
+    docStem,
   },
 );
 
 convertBtn.addEventListener('click', () => {
   showPane('convert');
-  // The converter keeps its own counts in its own bar, so the strip would
-  // otherwise still be showing the tree's path — and its copy chips, pointing
-  // at a row that is no longer on screen. This is the pane's resting line
-  // instead (rule 19).
-  setStatusLead('Pick a table, adjust its columns, then download.');
-  void converter.open().catch((err: Error) => showToast(err.message));
+  // The strip is left to the view: open() lays down the pane's resting line
+  // before its first await and keeps it live from there, which is more than the
+  // shell can do from out here — it knows which table is selected and this does
+  // not. The counts stay in the converter's own bar, as the table view's do.
+  void converter.open().catch((err: Error) => showToast(err.message, 'bad'));
 });
-$('#convert-close').addEventListener('click', () => showPane('tree'));
+$('#convert-close').addEventListener('click', () => showTree());
 $('#convert-spec').addEventListener('click', () => converter.downloadSpec());
 $('#convert-import').addEventListener('click', () => $<HTMLInputElement>('#convert-import-file').click());
 $<HTMLInputElement>('#convert-import-file').addEventListener('change', async (event) => {
@@ -1583,7 +1605,7 @@ $<HTMLInputElement>('#convert-import-file').addEventListener('change', async (ev
   try {
     converter.importSpecText(await file.text(), file.name);
   } catch (error) {
-    showToast(error instanceof Error ? error.message : String(error));
+    showToast(error instanceof Error ? error.message : String(error), 'bad');
   }
 });
 $('#convert-target').addEventListener('click', () => $<HTMLInputElement>('#convert-target-file').click());
@@ -1595,11 +1617,11 @@ $<HTMLInputElement>('#convert-target-file').addEventListener('change', async (ev
   try {
     converter.importTargetHeadersText(await file.text(), file.name);
   } catch (error) {
-    showToast(error instanceof Error ? error.message : String(error));
+    showToast(error instanceof Error ? error.message : String(error), 'bad');
   }
 });
 $('#convert-dl').addEventListener('click', () => {
-  void converter.downloadResult().catch((err: Error) => showToast(err.message));
+  void converter.downloadResult().catch((err: Error) => showToast(err.message, 'bad'));
 });
 
 baselineRecents.addEventListener('click', async (event) => {
@@ -4330,8 +4352,7 @@ runDownloadBtn.addEventListener('click', () => setDownloadSubject('result', runD
 // not a payload to unwrap.
 runOpenBtn.addEventListener('click', () => {
   if (!runResultText) return;
-  const base = currentTitle.replace(/\.[^.]+$/, '').trim();
-  void openText(runResultText, `${base || 'document'} · result.json`, null, null, null, true);
+  void openText(runResultText, `${docTitle()} · result.json`, null, null, null, true);
 });
 
 // ---------- keyboard ----------

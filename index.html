@@ -34,12 +34,15 @@
   <!-- The icon set (contract rule 3): one 16-unit box, ONE stroke width — set
        once in CSS on .ic, not per symbol — round caps and joins, currentColor
        ink. Defined once here as <symbol>s and
-       referenced with <use> from markup and from main.ts's icon(), so a
-       dynamically built button cannot draw a seventh weight. The six replace
+       referenced with <use> from markup and from the icon() helper, so a
+       dynamically built button cannot draw a ninth weight. These replace
        ◂ ⇆ ⟳ ⤓ ⚠ ☾ — characters whose weight no font metric could reconcile, two
        of which are missing on common stacks and one of which arrives in full
-       emoji colour. ⋯ × ▸ ▾ stay as characters: universally covered, and the
-       carets are load-bearing at 13px in a mono column. -->
+       emoji colour — and ↑ ↓, which put a third optical weight beside × in the
+       converter's one three-button cluster. ⋯ × ▸ ▾ stay as characters:
+       universally covered, and the carets are load-bearing at 13px in a mono
+       column. Every glyph centres on y=8 so buttons sitting side by side do
+       not read as drifting apart. -->
   <svg class="icon-sprite" aria-hidden="true">
     <symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M9.5 3.5 5 8l4.5 4.5" />
@@ -53,6 +56,14 @@
     </symbol>
     <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.5v7.5" /><path d="M4.75 6.75 8 10l3.25-3.25" /><path d="M3 13.25h10" />
+    </symbol>
+    <!-- The column cluster's ordering pair, mirrored about y=8 and carrying
+         i-download's chevron so the three arrowheads in that bar agree. -->
+    <symbol id="i-move-up" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 12.5V3.5" /><path d="M4.75 6.75 8 3.5l3.25 3.25" />
+    </symbol>
+    <symbol id="i-move-down" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 3.5v9" /><path d="M4.75 9.25 8 12.5l3.25-3.25" />
     </symbol>
     <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.6 14.4 13.4H1.6Z" /><path d="M8 6.6v3" /><path d="M8 11.6h.01" />
@@ -570,26 +581,37 @@
              own row only by seeing the rows. -->
         <div id="convert-view" hidden>
           <div class="convert-bar">
-            <span id="convert-title">tables in this document</span>
-            <span id="convert-count"></span>
+            <!-- The same heading cluster the compare view titles itself with,
+                 so a view names itself on rule 2's surface-title rank once
+                 rather than a fourth way. -->
+            <div class="sem-heading">
+              <strong>Convert</strong>
+              <span id="convert-title">tables in this document</span>
+              <span id="convert-count"></span>
+            </div>
             <input id="convert-map-name" class="convert-map-name" aria-label="Mapping name" placeholder="mapping name">
             <select id="convert-saved" aria-label="Saved mappings">
               <option value="">starter mapping</option>
             </select>
-            <button id="convert-save" title="Save this mapping in this browser">save</button>
-            <button id="convert-forget" title="Delete the selected saved mapping" disabled>forget</button>
-            <button id="convert-import" title="Import a saved mapping spec">import spec</button>
+            <button id="convert-save" type="button" title="Save this mapping in this browser">save</button>
+            <button id="convert-forget" class="btn-quiet" type="button" title="Delete the selected saved mapping" disabled>forget</button>
+            <button id="convert-import" type="button" title="Import a saved mapping spec">import spec</button>
             <input id="convert-import-file" type="file" accept=".json,application/json" hidden>
-            <button id="convert-target" title="Use the first row of a CSV as the target columns">target CSV</button>
-            <input id="convert-target-file" type="file" accept=".csv,text/csv,text/plain" hidden>
             <span class="spacer"></span>
+            <!-- Rule 10: these two write the whole mapping's output rather than
+                 the selected table's, so they stand beside the format switch —
+                 the other output-wide decision — and not in a table's head.
+                 The label stands inside the field (rule 14) so the placeholder
+                 is free to carry the example. -->
+            <label class="field convert-inline-field"><span class="field-prefix">missing</span><input id="convert-missing" aria-label="Default missing value"></label>
+            <label class="field convert-inline-field"><span class="field-prefix">arrays</span><input id="convert-array-join" value="; " aria-label="Array join separator"></label>
             <div class="mode-switch" id="convert-format" role="group" aria-label="Output format">
-              <button data-fmt="xlsx" class="on" title="One spreadsheet, one sheet per table, already linked by id">Excel</button>
-              <button data-fmt="csv" title="One CSV file per table">CSV</button>
+              <button type="button" data-fmt="xlsx" class="on" title="One spreadsheet, one sheet per table, already linked by id">Excel</button>
+              <button type="button" data-fmt="csv" title="One CSV file per table">CSV</button>
             </div>
-            <button id="convert-spec" title="Download the mapping spec — re-run it later, or hand it to an agent">spec</button>
-            <button id="convert-dl" class="primary" title="Convert and download">download</button>
-            <button id="convert-close">back to tree</button>
+            <button id="convert-spec" type="button" title="Download the mapping spec — re-run it later, or hand it to an agent"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>spec</button>
+            <button id="convert-dl" class="primary" type="button" title="Convert and download"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>download</button>
+            <button id="convert-close" type="button">back to tree</button>
           </div>
           <div id="convert-body">
             <div id="convert-tables" role="list" aria-label="Detected tables"></div>
@@ -598,9 +620,12 @@
                 <span id="convert-detail-name"></span>
                 <span id="convert-detail-src"></span>
                 <span class="spacer"></span>
-                <label class="convert-inline-field">missing <input id="convert-missing" aria-label="Default missing value"></label>
-                <label class="convert-inline-field">arrays <input id="convert-array-join" value="; " aria-label="Array join separator"></label>
-                <button id="convert-add-column" title="Add an output column">+ column</button>
+                <!-- Rule 10: target CSV rewrites the SELECTED table's columns,
+                     so it belongs on that table's own head next to + column,
+                     not in the view's bar among the whole-mapping ops. -->
+                <button id="convert-target" type="button" title="Use the first row of a CSV as the target columns">target CSV</button>
+                <input id="convert-target-file" type="file" accept=".csv,text/csv,text/plain" hidden>
+                <button id="convert-add-column" type="button" title="Add an output column">+ column</button>
               </div>
               <div id="convert-cols" role="list" aria-label="Columns"></div>
               <div id="convert-preview-head">

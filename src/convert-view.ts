@@ -39,12 +39,23 @@ export interface ConvertCallbacks {
   removeMapping(id: string): Promise<void>;
   touchMapping(id: string): Promise<void>;
   download(name: string, bytes: Uint8Array | string, mime: string): void;
-  toast(message: string): void;
-  docName(): string;
+  toast(message: string, tone?: 'info' | 'bad'): void;
+  /** The shell's one empty state, so the second line cannot be dropped here either. */
+  emptyState(line: string, hint: string, opts?: { pane?: boolean }): HTMLElement;
+  // The status strip belongs to the shell, but every pane has to keep it live —
+  // a strip still describing the tree while the user is eight column edits deep
+  // is stale, and stale is the failure the strip was built to end.
+  setLead(text: string): void;
+  setNote(text: string, tone?: 'error' | ''): void;
+  /** What the document is called; what a file made from it is called. Not the same string. */
+  docTitle(): string;
+  docStem(): string;
 }
 
 const PREVIEW_ROWS = 12;
 const DEBOUNCE_MS = 120;
+// The strip's resting line for this pane: what to do when nothing is chosen yet.
+const RESTING_LEAD = 'Pick a table, adjust its columns, then download.';
 const DATETIME_FORMATS = [
   'yyyy-MM-dd HH:mm:ss',
   'yyyy-MM-dd',
@@ -162,6 +173,22 @@ export function dateInputValue(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// A button drawn from the sprite at the top of index.html, so a control built
+// here carries the same box, stroke and ink as one written in markup. The shell
+// has the same three lines; it cannot be borrowed, because the shell imports
+// this module and the reference would have to come back the other way.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function icon(name: 'move-up' | 'move-down'): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ic');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   cls?: string,
@@ -201,6 +228,8 @@ export class ConvertView {
       missing: HTMLInputElement;
       arrayJoin: HTMLInputElement;
       addColumn: HTMLButtonElement;
+      spec: HTMLButtonElement;
+      download: HTMLButtonElement;
       report: HTMLElement;
     },
     private cbs: ConvertCallbacks,
@@ -224,6 +253,13 @@ export class ConvertView {
     this.els.addColumn.addEventListener('click', () => this.addColumn());
     this.els.saved.addEventListener('change', () => void this.loadSelectedMapping());
     this.els.save.addEventListener('click', () => void this.saveMapping());
+    // Enter in a named field commits what the field is for, as it does in the
+    // diff head and the ask row.
+    this.els.mappingName.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      void this.saveMapping();
+    });
     this.els.forget.addEventListener('click', () => void this.forgetMapping());
   }
 
@@ -239,11 +275,12 @@ export class ConvertView {
     this.els.tables.replaceChildren();
     this.els.cols.replaceChildren();
     this.els.preview.replaceChildren();
-    this.els.previewNote.textContent = 'inspecting this document…';
-    this.els.previewNote.classList.remove('bad');
+    this.showPreviewNote('inspecting this document…');
     this.els.detailName.textContent = '';
     this.els.detailSrc.textContent = '';
     this.els.report.hidden = true;
+    this.cbs.setLead(RESTING_LEAD);
+    this.syncActions();
     const { inspection, spec } = await this.cbs.inspect();
     if (mine !== this.epoch) return;
     this.inspection = inspection;
@@ -252,7 +289,7 @@ export class ConvertView {
     this.offCols.clear();
     this.selected = 0;
     this.currentMappingId = null;
-    this.els.mappingName.value = `${this.cbs.docName()} mapping`;
+    this.els.mappingName.value = `${this.cbs.docTitle()} mapping`;
     this.syncOutputControls();
     const fmt = spec.output.format;
     for (const b of this.els.format.querySelectorAll<HTMLButtonElement>('button')) {
@@ -284,6 +321,14 @@ export class ConvertView {
   private syncOutputControls(): void {
     this.els.missing.value = this.full?.output.onMissing ?? '';
     this.els.arrayJoin.value = this.full?.output.arrayJoin ?? '; ';
+  }
+
+  /** An action with nothing to act on is disabled, not left live to fail on click. */
+  private syncActions(): void {
+    this.els.addColumn.disabled = !this.full?.tables[this.selected];
+    const convertible = !!this.effective()?.tables.length;
+    this.els.spec.disabled = !convertible;
+    this.els.download.disabled = !convertible;
   }
 
   private async refreshSavedMappings(selectId = this.currentMappingId): Promise<void> {
@@ -326,7 +371,7 @@ export class ConvertView {
       await this.cbs.touchMapping(id);
       await this.refreshSavedMappings(id);
     } catch (error) {
-      this.cbs.toast(`mapping opened, but usage could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+      this.cbs.toast(`mapping opened, but usage could not be saved: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   }
 
@@ -345,6 +390,7 @@ export class ConvertView {
     this.els.report.hidden = true;
     this.renderTables();
     this.renderDetail();
+    this.syncActions();
     void this.refreshPreview();
   }
 
@@ -364,7 +410,7 @@ export class ConvertView {
       await this.refreshSavedMappings(saved.id);
       this.cbs.toast('mapping saved in this browser');
     } catch (error) {
-      this.cbs.toast(`mapping could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+      this.cbs.toast(`mapping could not be saved: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   }
 
@@ -376,7 +422,7 @@ export class ConvertView {
       await this.refreshSavedMappings(null);
       this.cbs.toast('saved mapping forgotten');
     } catch (error) {
-      this.cbs.toast(`mapping could not be forgotten: ${error instanceof Error ? error.message : String(error)}`);
+      this.cbs.toast(`mapping could not be forgotten: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   }
 
@@ -423,7 +469,12 @@ export class ConvertView {
     host.textContent = '';
     if (!this.full || !this.full.tables.length) {
       this.els.count.textContent = '';
-      host.append(el('p', 'convert-empty', 'No tables here — this document has no repeating list of objects in it.'));
+      host.append(this.cbs.emptyState(
+        'No tables here',
+        'This document has no repeating list of objects to flatten. Try a document with an array of objects in it.',
+        { pane: true },
+      ));
+      this.syncActions();
       return;
     }
     const n = this.full.tables.length;
@@ -468,12 +519,13 @@ export class ConvertView {
       });
       host.append(row);
     });
+    this.syncActions();
   }
 
   private renameTable(from: string, to: string): void {
     if (!this.full || from === to) return;
     if (this.full.tables.some((t) => t.name === to)) {
-      this.cbs.toast(`there is already a table called ${to}`);
+      this.cbs.toast(`there is already a table called ${to}`, 'bad');
       this.renderTables();
       return;
     }
@@ -500,10 +552,16 @@ export class ConvertView {
     if (!t) {
       this.els.detailName.textContent = '';
       this.els.detailSrc.textContent = '';
+      host.append(this.cbs.emptyState('No table selected', 'Pick one on the left to edit its columns.'));
+      this.cbs.setLead(RESTING_LEAD);
+      this.syncActions();
       return;
     }
     this.els.detailName.textContent = t.name;
     this.els.detailSrc.textContent = friendlyPath(t.anchor);
+    // The strip says which table the columns below belong to, in the same
+    // vocabulary the rail uses.
+    this.cbs.setLead(friendlyPath(t.anchor));
 
     // Rung 3 of the baseDate ladder made visible: where a time has no date to
     // borrow, the UI asks rather than quietly using the day of the conversion.
@@ -542,6 +600,7 @@ export class ConvertView {
     for (const c of t.columns) {
       host.append(this.columnRow(t.name, c));
     }
+    this.syncActions();
   }
 
   private columnRow(table: string, c: ColumnSpec): HTMLElement {
@@ -615,17 +674,25 @@ export class ConvertView {
       void this.refreshPreview();
     });
 
-    const up = el('button', 'convert-col-action', '↑') as HTMLButtonElement;
+    // The list runs down and the output runs across, so the glyph and the words
+    // have to name different axes: the arrows say where the row goes, the labels
+    // say what that does to the sheet.
+    const up = el('button', 'btn-icon btn-mini btn-quiet') as HTMLButtonElement;
     up.type = 'button';
-    up.title = 'Move column left';
+    up.title = 'Move this column earlier in the output';
+    up.setAttribute('aria-label', 'Move this column earlier');
+    up.append(icon('move-up'));
     up.addEventListener('click', () => this.moveColumn(c, -1));
-    const down = el('button', 'convert-col-action', '↓') as HTMLButtonElement;
+    const down = el('button', 'btn-icon btn-mini btn-quiet') as HTMLButtonElement;
     down.type = 'button';
-    down.title = 'Move column right';
+    down.title = 'Move this column later in the output';
+    down.setAttribute('aria-label', 'Move this column later');
+    down.append(icon('move-down'));
     down.addEventListener('click', () => this.moveColumn(c, 1));
-    const remove = el('button', 'convert-col-action', '×') as HTMLButtonElement;
+    const remove = el('button', 'btn-icon btn-mini btn-quiet', '×') as HTMLButtonElement;
     remove.type = 'button';
     remove.title = 'Remove column';
+    remove.setAttribute('aria-label', 'Remove column');
     remove.addEventListener('click', () => this.removeColumn(c));
 
     row.append(chk, name, mode, source, list, up, down, remove);
@@ -730,7 +797,7 @@ export class ConvertView {
     });
     missing.append(missingInput);
     const skip = el('label', 'convert-skip');
-    const skipInput = el('input') as HTMLInputElement;
+    const skipInput = el('input', 'chk') as HTMLInputElement;
     skipInput.type = 'checkbox';
     skipInput.checked = c.skipRowIfMissing === true;
     skipInput.addEventListener('change', () => {
@@ -800,6 +867,9 @@ export class ConvertView {
   /** Live preview on real rows — the part that makes the mapping decidable. */
   private refreshPreview(): void {
     window.clearTimeout(this.timer);
+    // Unticking the last table changes what can be converted without redrawing
+    // anything, so the download buttons are settled here rather than in a render.
+    this.syncActions();
     // Invalidate an in-flight preview as soon as an edit happens, not only when
     // the debounced replacement starts. Otherwise an older result can flash for
     // the debounce window after the user has already changed the mapping.
@@ -810,34 +880,59 @@ export class ConvertView {
   private async doPreview(mine: number): Promise<void> {
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
-      this.els.preview.textContent = '';
-      this.els.previewNote.textContent = 'nothing selected';
+      this.showPreviewNote('nothing selected');
+      this.els.preview.replaceChildren(this.cbs.emptyState(
+        'Nothing to preview',
+        'Tick at least one table in the list on the left.',
+        { pane: true },
+      ));
       return;
     }
-    const res = await this.cbs.preview(spec, PREVIEW_ROWS);
+    let res: PreviewResult | { errors: SpecError[] };
+    try {
+      res = await this.cbs.preview(spec, PREVIEW_ROWS);
+    } catch (error) {
+      // Nobody catches this above — the debounce timer discards the promise —
+      // so a failed round-trip would otherwise leave the previous mapping's rows
+      // on screen as if they were the current ones.
+      if (mine !== this.epoch) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.els.preview.textContent = '';
+      this.showPreviewNote(`preview failed: ${message}`, 'error');
+      this.cbs.toast(`preview failed: ${message}`, 'bad');
+      return;
+    }
     if (mine !== this.epoch) return; // a later edit already won
 
     if ('errors' in res) {
       this.els.preview.textContent = '';
-      this.els.previewNote.textContent = res.errors[0]?.message ?? 'this mapping is not valid';
-      this.els.previewNote.classList.add('bad');
+      this.showPreviewNote(res.errors[0]?.message ?? 'this mapping is not valid', 'error');
       return;
     }
-    this.els.previewNote.classList.remove('bad');
 
     const name = this.full?.tables[this.selected]?.name;
     const t = res.tables.find((x) => x.name === name) ?? res.tables[0];
     if (!t) {
       this.els.preview.textContent = '';
-      this.els.previewNote.textContent = 'this table is not included';
+      this.showPreviewNote('this table is not included');
       return;
     }
     const warn = res.warnings.filter((w) => w.table === t.name);
     const warningCount = warn.reduce((total, item) => total + item.count, 0);
-    this.els.previewNote.textContent =
-      `${t.total} row${t.total === 1 ? '' : 's'}` +
-      (warningCount ? ` · ${warningCount} value${warningCount === 1 ? '' : 's'} need review` : '');
+    this.showPreviewNote(
+      `${t.total.toLocaleString()} row${t.total === 1 ? '' : 's'}`
+      + (warningCount
+        ? ` · ${warningCount.toLocaleString()} value${warningCount === 1 ? '' : 's'} need review`
+        : ''),
+    );
     this.renderGrid(t.columns, t.rows);
+  }
+
+  /** The preview's verdict, said twice: beside the rows it describes, and on the strip. */
+  private showPreviewNote(text: string, tone: 'error' | '' = ''): void {
+    this.els.previewNote.textContent = text;
+    this.els.previewNote.classList.toggle('bad', tone === 'error');
+    this.cbs.setNote(text, tone);
   }
 
   private renderGrid(cols: string[], rows: string[][]): void {
@@ -866,29 +961,37 @@ export class ConvertView {
   downloadSpec(): void {
     const spec = this.effective();
     if (!spec) return;
-    this.cbs.download(`${this.cbs.docName()}.spec.json`, JSON.stringify(spec, null, 2), 'application/json');
+    this.cbs.download(`${this.cbs.docStem()}.spec.json`, JSON.stringify(spec, null, 2), 'application/json');
   }
 
   async downloadResult(): Promise<void> {
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
-      this.cbs.toast('nothing to convert — every table is unticked');
+      // Two different emptinesses: nothing was found, or everything found was
+      // switched off. Only the second one is something the user can undo.
+      this.cbs.toast(this.full?.tables.length
+        ? 'nothing to convert — every table is unticked'
+        : 'nothing to convert — no tables were detected in this document', 'bad');
       return;
     }
     const res = await this.cbs.run(spec);
     if ('errors' in res) {
-      this.cbs.toast(res.errors[0]?.message ?? 'this mapping is not valid');
+      this.cbs.toast(res.errors[0]?.message ?? 'this mapping is not valid', 'bad');
       return;
     }
-    const stem = this.cbs.docName();
+    const stem = this.cbs.docStem();
     if (res.format === 'xlsx') {
       this.cbs.download(`${stem}.xlsx`, res.bytes,
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     } else {
-      this.cbs.download(`${stem}-tables.zip`, res.bytes, 'application/zip');
+      this.cbs.download(`${stem}_tables.zip`, res.bytes, 'application/zip');
     }
     this.renderReport(res.report);
-    this.cbs.toast(`${res.rows} row(s) across ${spec.tables.length} table(s)`);
+    const tables = spec.tables.length;
+    this.cbs.toast(
+      `${res.rows.toLocaleString()} row${res.rows === 1 ? '' : 's'}`
+      + ` across ${tables} table${tables === 1 ? '' : 's'}`,
+    );
   }
 
   private renderReport(report: ConvertReport): void {
@@ -906,7 +1009,8 @@ export class ConvertView {
       for (const warning of report.warnings) {
         const where = warning.column ? `${warning.table}.${warning.column}` : warning.table;
         const sample = warning.sample === undefined ? '' : ` · e.g. ${warning.sample}`;
-        list.append(el('li', undefined, `${where}: ${warningLabel(warning)} on ${warning.count.toLocaleString()} value(s)${sample}`));
+        list.append(el('li', undefined,
+          `${where}: ${warningLabel(warning)} on ${warning.count.toLocaleString()} value${warning.count === 1 ? '' : 's'}${sample}`));
       }
       host.append(list);
     } else if (!report.tables.some((table) => table.skipped)) {
