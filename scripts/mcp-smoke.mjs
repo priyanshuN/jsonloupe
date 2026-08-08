@@ -10,7 +10,7 @@
 //   node scripts/mcp-smoke.mjs
 
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
@@ -135,13 +135,17 @@ try {
   rpc.notify('notifications/initialized', {});
 
   const list = await rpc.request('tools/list', {});
-  const names = (list.result?.tools ?? []).map((t) => t.name);
+  const tools = list.result?.tools ?? [];
+  const names = tools.map((t) => t.name);
+  // inspect / draft_spec / convert were the names held unclaimed for the
+  // converter host; it has landed, so they are part of the one frozen contract.
   check(
     'tools/list is the frozen contract',
-    ['load_doc', 'inspect', 'draft_spec', 'convert', 'get_schema', 'run_query', 'sample', 'diff_docs', 'export_csv']
+    ['load_doc', 'get_schema', 'run_query', 'profile', 'sample', 'diff_docs', 'export_csv', 'export_result', 'inspect', 'draft_spec', 'convert']
       .every((n) => names.includes(n)),
     names.join(','),
   );
+  check('every tool publishes structured output', tools.every((tool) => tool.outputSchema?.required?.includes('ok')));
 
   const call = (name, args) => rpc.request('tools/call', { name, arguments: args });
 
@@ -151,11 +155,33 @@ try {
   const schema = text(await call('get_schema', { docId: 'd1' }));
   check('get_schema is names and types only', schema.includes(`tasks: array(${TASKS})`) && !schema.includes('ORD-'), schema.slice(0, 200));
 
-  const counted = text(await call('run_query', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | count" }));
+  const countedResponse = await call('run_query', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | count" });
+  const counted = text(countedResponse);
   check('run_query counts the failures', counted.includes(`count: ${TASKS / 4}`), counted);
+  check(
+    'run_query also returns bounded structured data',
+    countedResponse.result?.structuredContent?.value === String(TASKS / 4),
+    JSON.stringify(countedResponse.result?.structuredContent).slice(0, 300),
+  );
 
   const grouped = text(await call('run_query', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)" }));
   check('run_query groups by reason', /ADDRESS_NOT_FOUND/.test(grouped), grouped.slice(0, 200));
+
+  const ranked = text(await call('run_query', {
+    docId: 'd1',
+    query: '$.tasks[*] | top(@.weightKg, @.id)',
+    limit: 3,
+  }));
+  check('run_query retains only a bounded top-K', /70000 rows, showing 3/.test(ranked), ranked.slice(0, 300));
+
+  const explicitNull = text(await call('run_query', {
+    docId: 'd1',
+    query: '$.tasks[?(@.failureReason isNull)] | count',
+  }));
+  check('explicit null is distinct from missing and false', explicitNull.includes(`count: ${(TASKS * 3) / 4}`), explicitNull);
+
+  const profiled = text(await call('profile', { docId: 'd1', query: '$.tasks[*]', fields: ['status', 'failureReason', 'weightKg'] }));
+  check('profile replaces several local loops with one compact scan', /matched: 70000/.test(profiled) && /missing 0/.test(profiled), profiled.slice(0, 300));
 
   const sampled = text(await call('sample', { docId: 'd1', path: '$.tasks', n: 2 }));
   check(`sample keeps the int64 exact (${INT64})`, sampled.includes(INT64), sampled.slice(0, 300));
@@ -181,10 +207,23 @@ try {
   const diffed = text(await call('diff_docs', { docIdA: 'd2', docIdB: 'd1', keySpec: 'id' }));
   check('diff_docs compares the two loads', /d2 → d1: \d+ changed/.test(diffed), diffed.slice(0, 200));
 
-  const csv = text(await call('export_csv', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | pluck(@.id, @.failureReason)", outPath: csvOut }));
-  check('export_csv writes a file and returns only its size', csv.includes(csvOut) && !csv.includes('ADDRESS_NOT_FOUND'), csv);
-  const csvBytes = (await stat(csvOut)).size;
-  check('the CSV on disk is real', csvBytes > 10_000, `${csvBytes} bytes`);
+  const csv = text(await call('export_result', { docId: 'd1', query: "$.tasks[?(@.status == 'FAILED')] | pluck(@.id, @.failureReason)", format: 'csv', outPath: csvOut }));
+  check(
+    'export_result streams every row and returns only metadata',
+    csv.includes(`rows: ${TASKS / 4}`) && csv.includes('complete: true') && csv.includes('atomic: true') && !csv.includes('ADDRESS_NOT_FOUND'),
+    csv,
+  );
+  const csvBuf = await readFile(csvOut);
+  check('the CSV on disk is real', csvBuf.length > 10_000, `${csvBuf.length} bytes`);
+  const csvRows = csvBuf.toString('utf8').split('\r\n').filter(Boolean).length - 1;
+  check('the CSV is complete beyond the old 5,000-row display cap', csvRows === TASKS / 4, `${csvRows} rows`);
+  const refused = text(await call('export_result', {
+    docId: 'd1',
+    query: '$.tasks[*] | pluck(@.id)',
+    format: 'csv',
+    outPath: csvOut,
+  }));
+  check('exports refuse an existing path unless overwrite is explicit', /refusing to overwrite/.test(refused), refused);
 
   // Compressed intake: a document handed over as a Base64-Zstd blob, the way it
   // comes out of a database column. (Zstd in node:zlib is Node 22.15+; older

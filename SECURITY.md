@@ -22,7 +22,8 @@ With no key configured, **no network request ever leaves the page**. Verify this
 yourself: `grep -rn "fetch(" src/`.
 
 The MCP server (`npx -y -p jsonloupe jsonloupe-mcp`) makes **zero network calls of any kind**: it
-speaks JSON-RPC on stdio and reads only the file paths its client passes it.
+speaks JSON-RPC on stdio, reads only input paths its client passes it, and writes
+only export paths the client explicitly requests.
 
 ## What the Ask feature transmits
 

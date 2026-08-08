@@ -1,21 +1,30 @@
 // Virtualized tree: renders only the visible slice at fixed row height.
-// Row data comes from the worker asynchronously; stale responses are dropped
+// Row data comes from a worker asynchronously; stale responses are dropped
 // by epoch so fast scrolling never paints out-of-date slices.
+//
+// The component is bound to its rows through these callbacks alone, so a second
+// instance over a second worker is just a second callback set — which is what
+// run mode's result pane is.
 
 import type { Row } from './protocol';
 
+// The optional members are CAPABILITIES the host grants this tree, not options:
+// a row offers `tbl` only where something can open a table, and a value is
+// editable only where there is a document to commit the edit to. The run
+// result's tree has neither — it is derived data, not a document you own — and
+// it says so by leaving them out rather than by passing no-ops.
 export interface TreeCallbacks {
   fetchRows(start: number, count: number): Promise<Row[]>;
   onToggle(id: number, index: number): void;
   onCopyPath(id: number): void;
   onCopyValue(id: number): void;
   onUnpack(id: number, index: number): void;
-  onTable(id: number): void;
-  onSelect(index: number): void;
+  onTable?(id: number): void;
+  onSelect?(index: number): void;
   /** Raw JSON literal to prefill the inline editor for a leaf node. */
-  getEditText(id: number): Promise<string>;
+  getEditText?(id: number): Promise<string>;
   /** Commit an inline value edit; returns ok:false (with a reason) to keep editing. */
-  onEditCommit(id: number, index: number, text: string): Promise<{ ok: boolean; error?: string }>;
+  onEditCommit?(id: number, index: number, text: string): Promise<{ ok: boolean; error?: string }>;
 }
 
 const ROW_H = 28;
@@ -51,15 +60,29 @@ export class VirtualTree {
       const index = Number(rowEl.dataset.index);
       if (t.closest('.btn-path')) return cbs.onCopyPath(id);
       if (t.closest('.btn-copy')) return cbs.onCopyValue(id);
-      if (t.closest('.btn-table')) return cbs.onTable(id);
+      if (t.closest('.btn-table')) return cbs.onTable?.(id);
       if (t.closest('.btn-unpack')) return cbs.onUnpack(id, index);
-      this.selected = index;
-      cbs.onSelect(index);
+      this.select(index, { scroll: false });
       if (rowEl.dataset.children === '1') cbs.onToggle(id, index);
-      else this.schedule();
     });
-    // Double-click a primitive value → inline edit.
+    // Rows are focusable (they carry the actions, which used to be reachable
+    // only by pointer), and focus IS selection here — arriving by Tab must
+    // answer "where am I" the same way arriving by click does. Delegated,
+    // because the rows themselves are recycled on every render.
+    layer.addEventListener('focusin', (e) => {
+      const t = e.target as HTMLElement;
+      // Focus landing on a row ACTION is not a selection — clicking `copy` has
+      // never moved the selection and must not start now.
+      if (t.closest('button')) return;
+      const rowEl = t.closest('.row') as HTMLElement | null;
+      if (!rowEl) return;
+      const index = Number(rowEl.dataset.index);
+      if (index === this.selected) return;
+      this.select(index, { scroll: false });
+    });
+    // Double-click a primitive value → inline edit, where this tree can edit.
     layer.addEventListener('dblclick', (e) => {
+      if (!cbs.getEditText || !cbs.onEditCommit) return;
       const t = e.target as HTMLElement;
       if (!t.classList.contains('val')) return;
       const rowEl = t.closest('.row') as HTMLElement | null;
@@ -73,10 +96,12 @@ export class VirtualTree {
 
   private async startEdit(rowEl: HTMLElement, row: Row): Promise<void> {
     if (this.editing) return;
+    const { getEditText, onEditCommit } = this.cbs;
+    if (!getEditText || !onEditCommit) return;
     const valEl = rowEl.querySelector('.val') as HTMLElement | null;
     if (!valEl) return;
     this.editing = true; // pauses render() so the input isn't clobbered
-    const literal = await this.cbs.getEditText(row.id);
+    const literal = await getEditText(row.id);
     if (!valEl.isConnected) {
       this.editing = false;
       this.schedule();
@@ -98,7 +123,7 @@ export class VirtualTree {
         this.schedule();
         return;
       }
-      const r = await this.cbs.onEditCommit(row.id, row.index, input.value);
+      const r = await onEditCommit(row.id, row.index, input.value);
       if (r.ok) {
         this.editing = false;
         this.schedule();
@@ -122,16 +147,31 @@ export class VirtualTree {
     input.addEventListener('blur', () => void finish(true));
   }
 
-  select(i: number): void {
+  // `scroll:false` for selections that came from the row itself (a click, a
+  // focus): the row is already on screen, and repainting the class beats a
+  // re-render that would replace the very element holding focus.
+  select(i: number, o?: { scroll?: boolean }): void {
     if (this.total === 0) return;
     this.selected = Math.max(0, Math.min(this.total - 1, i));
-    const top = this.selected * ROW_H;
-    const st = this.viewport.scrollTop;
-    const h = this.viewport.clientHeight;
-    if (top < st) this.viewport.scrollTop = top;
-    else if (top + ROW_H > st + h) this.viewport.scrollTop = top + ROW_H - h;
-    this.schedule();
-    this.cbs.onSelect(this.selected);
+    if (o?.scroll === false) {
+      this.paintSelection();
+    } else {
+      const top = this.selected * ROW_H;
+      const st = this.viewport.scrollTop;
+      const h = this.viewport.clientHeight;
+      if (top < st) this.viewport.scrollTop = top;
+      else if (top + ROW_H > st + h) this.viewport.scrollTop = top + ROW_H - h;
+      this.schedule();
+    }
+    this.cbs.onSelect?.(this.selected);
+  }
+
+  // The selection marker is one class on one row, so moving it does not need a
+  // rebuild of the visible slice — and must not be one while a row has focus.
+  private paintSelection(): void {
+    for (const el of this.layer.children) {
+      el.classList.toggle('sel', Number((el as HTMLElement).dataset.index) === this.selected);
+    }
   }
 
   selectedIndex(): number {
@@ -192,19 +232,32 @@ export class VirtualTree {
     const rows = await this.cbs.fetchRows(start, count);
     if (ep !== this.epoch) return;
     this.lastRows = rows;
+    // Every row in this slice is about to be replaced, taking focus with it. A
+    // keyboard user is standing on the selected row, so hand it back to that
+    // row's replacement — enough for a recycled list without a roving index.
+    const hadFocus = this.layer.contains(document.activeElement);
     const frag = document.createDocumentFragment();
     for (const r of rows) frag.appendChild(this.rowEl(r));
     this.layer.replaceChildren(frag);
     this.layer.style.transform = `translateY(${start * ROW_H}px)`;
     this.flashIndex = -1;
+    if (hadFocus) {
+      this.layer
+        .querySelector<HTMLElement>(`.row[data-index="${this.selected}"]`)
+        ?.focus({ preventScroll: true });
+    }
   }
 
   private rowEl(r: Row): HTMLElement {
     const el = document.createElement('div');
-    el.className = `row${r.index === this.flashIndex ? ' flash' : ''}${r.index === this.selected ? ' sel' : ''}`;
+    // focus-ring is rule 5's one ring, carried to a widget that is not a button.
+    el.className = `row focus-ring${r.index === this.flashIndex ? ' flash' : ''}${r.index === this.selected ? ' sel' : ''}`;
     el.dataset.id = String(r.id);
     el.dataset.index = String(r.index);
     el.dataset.children = r.hasChildren ? '1' : '0';
+    // Reachable without a pointer: the row is the tab stop, and its actions
+    // appear on focus exactly as they do on hover (style.css rule 20).
+    el.tabIndex = 0;
 
     const num = document.createElement('span');
     num.className = 'rownum';
@@ -278,13 +331,19 @@ export class VirtualTree {
       el.appendChild(size);
     }
 
+    // The gutter these sit in is reserved on EVERY row (style.css rule 20), so
+    // arriving on a row cannot re-truncate the value already under the pointer.
+    // Two actions on most rows; `tbl` is the array-only third, and there is no
+    // per-row menu to move it into — it fades in with the other two.
     const actions = document.createElement('span');
     actions.className = 'actions';
     const btns: [string, string, string][] = [
       ['btn-path', 'path', 'Copy path'],
       ['btn-copy', 'copy', 'Copy value as JSON'],
     ];
-    if (r.type === 'array' && r.hasChildren) btns.push(['btn-table', 'tbl', 'View array as table']);
+    if (this.cbs.onTable && r.type === 'array' && r.hasChildren) {
+      btns.push(['btn-table', 'tbl', 'View array as table']);
+    }
     for (const [cls, label, title] of btns) {
       const b = document.createElement('button');
       b.className = cls;

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <title>jsonloupe — styleguide</title>
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <script>
+    // Same pre-paint gate as the app; ?theme= wins so the split view can force
+    // one theme per iframe.
+    (function () {
+      try {
+        var q = new URLSearchParams(location.search).get('theme');
+        var t = q || localStorage.getItem('wb-theme');
+        if (t !== 'light' && t !== 'dark')
+          t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+      } catch (e) { /* fine */ }
+    })();
+  </script>
+  <style>
+    /* Page-local layout only — every color, radius, weight and speed below
+       comes from the app tokens, which is the point of the page. */
+    .sg { max-width: 1060px; margin: 0 auto; padding: 26px 28px 80px; }
+    .sg-head { display: flex; align-items: center; gap: var(--gap-3); margin-bottom: 8px; }
+    .sg-head h1 { margin: 0; font-size: var(--fs-title); font-weight: 700; color: var(--text); }
+    .sg-sub { color: var(--text-dim); font: var(--fs-body) var(--mono); }
+    .sg section { margin-top: 34px; }
+    .sg h2 {
+      margin: 0 0 12px;
+      font-size: var(--fs-chip);
+      font-weight: 400;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+    }
+    .sg-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-3); padding: 14px; background: var(--bg-canvas); border: 1px solid var(--border); border-radius: var(--r); }
+    .sg-row + .sg-row { margin-top: 10px; }
+    .sg-row.on-chrome { background: var(--bg-chrome); }
+    .sg-note { flex-basis: 100%; color: var(--text-faint); font: var(--fs-chip) var(--mono); }
+    .sg-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .sw { border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
+    .sw-fill { height: 44px; }
+    .sw-name { padding: 6px 9px; font: var(--fs-chip) var(--mono); color: var(--text-dim); background: var(--bg-canvas); border-top: 1px solid var(--border); }
+    .sg-type div { padding: 4px 0; }
+    .sg iframe { width: 100%; height: 1400px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--bg); }
+    .sg-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  </style>
+</head>
+<body>
+  <!-- The sprite, mirrored from index.html (canonical copy lives there; keep
+       both in sync when a symbol changes). No stroke-width here either — the
+       .ic knob rules (contract rule 3). -->
+  <svg class="icon-sprite" aria-hidden="true">
+    <symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5 5 8l4.5 4.5" /></symbol>
+    <symbol id="i-compare" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h10" /><path d="M10.5 3.5 13 6l-2.5 2.5" /><path d="M13 10H3" /><path d="M5.5 7.5 3 10l2.5 2.5" /></symbol>
+    <symbol id="i-reload" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8A5 5 0 1 1 11.5 4.5" /><path d="M8.5 4.5h3v-3" /></symbol>
+    <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v7.5" /><path d="M4.75 6.75 8 10l3.25-3.25" /><path d="M3 13.25h10" /></symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.6 14.4 13.4H1.6Z" /><path d="M8 6.6v3" /><path d="M8 11.6h.01" /></symbol>
+    <symbol id="i-theme" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8.5A6 6 0 1 1 7.5 2 4.7 4.7 0 0 0 14 8.5Z" /></symbol>
+  </svg>
+
+  <div class="sg" id="sg-main">
+    <div class="sg-head">
+      <h1>styleguide</h1>
+      <span class="sg-sub">every control · every tier · every state — the stare page (contract rule 23)</span>
+      <span class="spacer" style="flex:1"></span>
+      <div class="mode-switch" id="sg-theme" role="group" aria-label="Theme">
+        <button type="button" data-theme="dark">dark</button>
+        <button type="button" data-theme="light">light</button>
+      </div>
+      <button class="btn-quiet" id="sg-split-btn" title="Both themes side by side">split view</button>
+    </div>
+
+    <section>
+      <h2>type ranks — rule 2 &amp; 22</h2>
+      <div class="sg-row sg-type" style="display:block">
+        <div style="font-size:var(--fs-title); font-weight:700; color:var(--text)">Surface title — 16px/700, names a thing you opened</div>
+        <div style="font-size:var(--fs-chip); font-weight:400; color:var(--accent); text-transform:uppercase; letter-spacing:0.7px">section label — 11.5px/400 caps, names a band inside one</div>
+        <div style="font:400 var(--fs-body) var(--sans); color:var(--text)">Body sans 12.5/400 — the app's speaking voice, weight 400 everywhere</div>
+        <div style="font:400 var(--fs-body) var(--sans); color:var(--text-dim)">Dim — supporting copy on canvas and chrome</div>
+        <div style="font:400 var(--fs-body) var(--sans); color:var(--text-faint)">Faint — placeholders and captions (≥3.0:1, lint-enforced)</div>
+        <div style="font:var(--fs-body) var(--mono); color:var(--text)">mono 12.5 — values, chips, statuses</div>
+        <div style="font:700 var(--fs-code) var(--mono); color:var(--text)">doc title — 700 mono, the strongest identity in the toolbar</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>type ramp — rule 23</h2>
+      <div class="sg-row sg-type" style="display:block">
+        <div style="font-size:var(--fs-micro)">--fs-micro 10 — superscripts and the smallest annotations</div>
+        <div style="font-size:var(--fs-label)">--fs-label 10.5 — uppercase micro-labels</div>
+        <div style="font-size:var(--fs-chip)">--fs-chip 11.5 — chips, badges, section labels, footnotes</div>
+        <div style="font-size:var(--fs-body)">--fs-body 12.5 — controls and body, the app's voice</div>
+        <div style="font-size:var(--fs-code)">--fs-code 13 — the editor and the doc title</div>
+        <div style="font-size:var(--fs-base)">--fs-base 14 — the page's base size</div>
+        <div style="font-size:var(--fs-lede)">--fs-lede 15 — ledes and dialog subtitles</div>
+        <div style="font-size:var(--fs-title)">--fs-title 16 — surface titles</div>
+        <div class="sg-note" style="margin-top:6px">the only sizes the workbench may use — landing/spec display sizes are rule 22's exception</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>buttons — three tiers, class-declared (rule 6)</h2>
+      <div class="sg-row">
+        <button>default</button>
+        <button class="primary">primary</button>
+        <button class="btn-quiet">quiet</button>
+        <button disabled>default disabled</button>
+        <button class="primary" disabled>primary disabled</button>
+        <button class="btn-quiet" disabled>quiet disabled</button>
+        <span class="sg-note">tier travels with the element — never inferred from the bar it stands in</span>
+      </div>
+      <div class="sg-row on-chrome">
+        <button>default</button>
+        <button class="primary">primary</button>
+        <button class="btn-quiet">quiet</button>
+        <button class="btn-icon btn-quiet" aria-label="icon-only quiet"><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg></button>
+        <button class="btn-quiet"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>icon + label</button>
+        <span class="sg-note">same tiers on chrome — hover each; one hover treatment, one focus ring (rule 5)</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>chips, toggles &amp; switches</h2>
+      <div class="sg-row on-chrome">
+        <button class="tb-chip">chip</button>
+        <button class="tb-chip on">chip on</button>
+        <div class="mode-switch"><button class="on">tree</button><button>code</button><button>split</button><button>run</button></div>
+        <div class="mode-switch mode-switch-mini"><button class="on">tree</button><button>code</button></div>
+        <button id="repair-badge"><svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>input repaired</button>
+        <button id="payload-badge" class="btn-quiet">decoded payload</button>
+        <span class="sg-note">tint = ON only (rule 6) · mode-switch .on stays neutral · repair badge is status tier 2, not a button tier</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>fields — one recipe (rule 14)</h2>
+      <div class="sg-row on-chrome">
+        <div class="tb-search" style="max-width:280px"><input placeholder="search — press /" spellcheck="false"></div>
+        <input placeholder="bare input — same recipe" spellcheck="false" style="max-width:220px">
+        <span class="sg-note">canvas ground on chrome, accent focus ring — focus each to compare</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>icons — one sprite, one stroke knob (rule 3)</h2>
+      <div class="sg-row">
+        <svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg>
+        <span style="color:var(--text-dim)">⋯ × ▸ ▾ ★ ☆</span>
+        <span class="sg-note">stroke-width lives on .ic only — exactly 1 device px; characters survive only where universal</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>surface ladder — rule 11</h2>
+      <div class="sg-swatches" id="sg-surfaces"></div>
+    </section>
+
+    <section>
+      <h2>ink &amp; status tokens</h2>
+      <div class="sg-swatches" id="sg-inks"></div>
+    </section>
+  </div>
+
+  <div class="sg" id="sg-splitview" hidden>
+    <div class="sg-head">
+      <h1>styleguide — both themes</h1>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn-quiet" id="sg-single-btn">single view</button>
+    </div>
+    <div class="sg-split">
+      <iframe title="dark styleguide"></iframe>
+      <iframe title="light styleguide"></iframe>
+    </div>
+  </div>
+
+  <script>
+    const doc = document.documentElement;
+    const themeGroup = document.getElementById('sg-theme');
+    function paintTheme() {
+      for (const b of themeGroup.querySelectorAll('button'))
+        b.classList.toggle('on', b.dataset.theme === doc.dataset.theme);
+    }
+    themeGroup.addEventListener('click', (e) => {
+      const t = e.target.closest('button')?.dataset.theme;
+      if (!t) return;
+      doc.dataset.theme = t;
+      paintTheme();
+      renderSwatches();
+    });
+    paintTheme();
+
+    // Swatches read the LIVE computed tokens, so this page can never drift
+    // from the stylesheet it documents.
+    const surfaceTokens = ['bg-well', 'bg', 'bg-chrome', 'bg-chrome-2', 'bg-canvas', 'bg-elevated', 'bg-elevated-2', 'bg-inset', 'bg-hover'];
+    const inkTokens = ['text', 'text-dim', 'text-faint', 'accent', 'brand', 'ok', 'warn', 'danger', 'c-key', 'c-string', 'c-number', 'c-boolean'];
+    function renderSwatches() {
+      const cs = getComputedStyle(doc);
+      const sw = (t, ink) => {
+        const v = cs.getPropertyValue('--' + t).trim();
+        if (!v) return '';
+        const fill = ink
+          ? `<div class="sw-fill" style="background:var(--bg-canvas); display:flex; align-items:center; justify-content:center; color:${v}; font:700 var(--fs-lede) var(--mono)">Ag 42</div>`
+          : `<div class="sw-fill" style="background:${v}"></div>`;
+        return `<div class="sw">${fill}<div class="sw-name">--${t} · ${v}</div></div>`;
+      };
+      document.getElementById('sg-surfaces').innerHTML = surfaceTokens.map((t) => sw(t, false)).join('');
+      document.getElementById('sg-inks').innerHTML = inkTokens.map((t) => sw(t, true)).join('');
+    }
+    renderSwatches();
+
+    // Split view: two iframes of this page, one theme forced each.
+    const main = document.getElementById('sg-main');
+    const split = document.getElementById('sg-splitview');
+    document.getElementById('sg-split-btn').addEventListener('click', () => {
+      const frames = split.querySelectorAll('iframe');
+      frames[0].src = 'styleguide.html?theme=dark';
+      frames[1].src = 'styleguide.html?theme=light';
+      main.hidden = true; split.hidden = false;
+    });
+    document.getElementById('sg-single-btn').addEventListener('click', () => {
+      split.hidden = true; main.hidden = false;
+    });
+  </script>
+</body>
+</html>

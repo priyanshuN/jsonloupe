@@ -40,8 +40,12 @@ import {
   type TransportMeasure,
 } from './transport';
 import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayload } from './nl';
-import { currentTheme, toggleTheme, onThemeChange } from './theme';
+import { applyTheme, currentTheme, onThemeChange } from './theme';
 import type { CodeEditor } from './code';
+import type { ScriptEditor } from './run-editor';
+import { scriptChipLabel } from './run-script';
+import type { RunResult } from './run-exec';
+import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
 // 404s on its first lazy import (e.g. the CodeMirror chunks). Vite surfaces
@@ -58,59 +62,15 @@ window.addEventListener('vite:preloadError', (e) => {
 
 // ---------- worker rpc ----------
 
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-const WORKER_TIMEOUT_MS = 120_000;
-const pending = new Map<number, {
-  resolve: (result: unknown) => void;
-  reject: (error: Error) => void;
-  timer: number;
-}>();
-let seq = 0;
+// The document's worker, and the only one the app itself talks to. Run mode
+// spawns a SECOND instance for its result (`runResultChannel` below): the
+// mechanics are shared, this instance is the document's, and nothing a user
+// script does can reach it.
+const docChannel = createWorkerChannel('document');
 
 function call<T>(msg: Record<string, unknown>): Promise<T> {
-  const reqId = ++seq;
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      pending.delete(reqId);
-      reject(new Error(`worker request timed out: ${String(msg.type)}`));
-    }, WORKER_TIMEOUT_MS);
-    pending.set(reqId, {
-      resolve: resolve as (result: unknown) => void,
-      reject,
-      timer,
-    });
-    worker.postMessage({ ...msg, reqId });
-  });
+  return docChannel.call<T>(msg);
 }
-
-worker.onmessage = (e: MessageEvent) => {
-  const { reqId } = e.data as { reqId: number };
-  const waiter = pending.get(reqId);
-  if (!waiter) return;
-  pending.delete(reqId);
-  clearTimeout(waiter.timer);
-  const data = e.data as { error?: unknown; ok?: unknown };
-  if (typeof data.error === 'string' && data.ok === undefined) {
-    waiter.reject(new Error(data.error));
-  } else {
-    waiter.resolve(e.data);
-  }
-};
-
-function rejectPendingWorkerCalls(reason: string): void {
-  for (const waiter of pending.values()) {
-    clearTimeout(waiter.timer);
-    waiter.reject(new Error(reason));
-  }
-  pending.clear();
-}
-
-worker.onerror = (event) => {
-  rejectPendingWorkerCalls(event.message || 'worker crashed');
-};
-worker.onmessageerror = () => {
-  rejectPendingWorkerCalls('worker response could not be decoded');
-};
 
 type WorkerPayloadDecodeResult =
   | { ok: true; text: string; metadata: PayloadDecodeMetadata }
@@ -171,7 +131,7 @@ const repairBadge = $<HTMLButtonElement>('#repair-badge');
 const payloadBadge = $<HTMLButtonElement>('#payload-badge');
 const originalBtn = $<HTMLButtonElement>('#original-btn');
 const filterBtn = $<HTMLButtonElement>('#filter-btn');
-const crumb = $('#crumb');
+const statusBar = $('#status-bar');
 const diffView = $('#diff-view');
 const diffTitle = $('#diff-title');
 const diffIgnore = $<HTMLInputElement>('#diff-ignore');
@@ -182,8 +142,7 @@ const semTitle = $('#sem-title');
 const semSummaryBtn = $<HTMLButtonElement>('#sem-summary');
 const semCloseBtn = $<HTMLButtonElement>('#sem-close');
 const semFilters = $('#sem-filters');
-const semPlan = $<HTMLDetailsElement>('#sem-plan');
-const semPlanSummary = $('#sem-plan-summary');
+const semPlanBtn = $<HTMLButtonElement>('#sem-plan-btn');
 const semPlanBody = $('#sem-plan-body');
 const semWarning = $('#sem-warning');
 const semLeftTitle = $('#sem-left-title');
@@ -191,7 +150,6 @@ const semRightTitle = $('#sem-right-title');
 const semViewport = $('#sem-viewport');
 const semSpacer = $('#sem-spacer');
 const semLayer = $('#sem-layer');
-const semCrumb = $('#sem-crumb');
 const tableView = $('#table-view');
 const tableTitle = $('#table-title');
 const tableCountEl = $('#table-count');
@@ -208,31 +166,186 @@ const paneArea = $('#pane-area');
 const splitDivider = $<HTMLElement>('#split-divider');
 const codeView = $('#code-view');
 const codeHost = $('#code-host');
-const codeStatus = $('#code-status');
+const toolbarTreeOps = $('#tb-tree-ops');
+const treeBar = $('#tree-bar');
+const treeBarOps = $('#tree-bar-ops');
+const codeBar = $('#code-bar');
+const codeBarOps = $('#code-bar-ops');
+const collapseBtn = $<HTMLButtonElement>('#collapse-btn');
+const treeCopyBtn = $<HTMLButtonElement>('#fmt-btn');
+const treeDownloadBtn = $<HTMLButtonElement>('#dl-btn');
 
 // Split-view line map: `$`-path → 1-based line in the code editor.
 let codeLineMap = new Map<string, number>();
 
-type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic' | 'convert';
+// ---------- status strip: the app's bottom edge (style.css rule 19) ----------
+
+// One strip under every pane, rebuilt from this state on every write — so a
+// note left behind by the view you just left can never survive into the next
+// one, which is how the app ended up with two half-strips and four views that
+// ran to the window edge.
+//
+//   lead  — the view's "where am I": a path, a caret, a diff verdict.
+//   chips — the actions that lead earns (copy $path, /pointer, .js).
+//   trail — what the view wants to say ABOUT it, parked at the right edge: the
+//           editor's unapplied state, a live match count, the same-value chip.
+//
+// `tone` is rule 15's mapping. '' and dirty/error/saved are ink only — they
+// update as you work and you are already looking at them. 'bulk' is the one
+// tier-2 state here (ink + hairline): a replace-all you did not type out is a
+// change to notice before moving on.
+type StatusTone = '' | 'dirty' | 'bulk' | 'error' | 'saved';
+
+interface StatusState {
+  lead: string;
+  leadIsPath: boolean;
+  chips: HTMLElement[];
+  trailChips: HTMLElement[];
+  note: string;
+  tone: StatusTone;
+  count: string;
+}
+
+const statusState: StatusState = {
+  lead: '', leadIsPath: false, chips: [], trailChips: [], note: '', tone: '', count: '',
+};
+
+function renderStatus(): void {
+  const lead = document.createElement('span');
+  lead.className = statusState.leadIsPath ? 'status-lead is-path' : 'status-lead';
+  lead.textContent = statusState.lead;
+  if (statusState.lead) lead.title = statusState.lead;
+  statusBar.replaceChildren(lead, ...statusState.chips);
+  const trail = document.createElement('span');
+  trail.className = 'status-trail';
+  if (statusState.note) {
+    const note = document.createElement('span');
+    note.className = statusState.tone ? `status-note ${statusState.tone}` : 'status-note';
+    note.textContent = statusState.note;
+    note.title = statusState.note;
+    trail.appendChild(note);
+  }
+  if (statusState.count) {
+    const count = document.createElement('span');
+    count.className = 'status-count';
+    count.textContent = statusState.count;
+    trail.appendChild(count);
+  }
+  trail.append(...statusState.trailChips);
+  if (trail.childElementCount > 0) statusBar.appendChild(trail);
+}
+
+// Setting the lead clears both chip groups: chips belong to the thing the lead
+// is pointing at, and it just stopped pointing there.
+function setStatusLead(
+  text: string,
+  o?: { path?: boolean; chips?: HTMLElement[]; trailChips?: HTMLElement[] },
+): void {
+  statusState.lead = text;
+  statusState.leadIsPath = o?.path ?? false;
+  statusState.chips = o?.chips ?? [];
+  statusState.trailChips = o?.trailChips ?? [];
+  renderStatus();
+}
+
+function setStatusNote(text: string, tone: StatusTone = ''): void {
+  statusState.note = text;
+  statusState.tone = tone;
+  renderStatus();
+}
+
+function setStatusCount(text: string): void {
+  statusState.count = text;
+  renderStatus();
+}
+
+// A chip the lead earned late (the tree's `decode payload` needs a worker round
+// trip to know whether the value is one).
+function addStatusTrailChip(chip: HTMLElement): void {
+  statusState.trailChips.push(chip);
+  renderStatus();
+}
+
+type Pane = 'tree' | 'code' | 'diff' | 'table' | 'split' | 'semantic' | 'run' | 'convert';
 let activePane: Pane = 'tree';
 function showPane(p: Pane): void {
   activePane = p;
   const split = p === 'split';
+  const run = p === 'run';
   paneArea.classList.toggle('split', split);
-  treePane.hidden = !(p === 'tree' || split);
-  codeView.hidden = !(p === 'code' || split);
+  paneArea.classList.toggle('run', run);
+  // In run mode the left half is the SOURCE pane — whichever of the two the
+  // mini-switch is on.
+  treePane.hidden = !(p === 'tree' || split || (run && runSource === 'tree'));
+  codeView.hidden = !(p === 'code' || split || (run && runSource === 'code'));
   splitDivider.hidden = !split;
+  runPane.hidden = !run;
   diffView.hidden = p !== 'diff';
   semanticView.hidden = p !== 'semantic';
   tableView.hidden = p !== 'table';
   convertView.hidden = p !== 'convert';
-  crumb.hidden = p === 'semantic' || p === 'convert';
   viewer.classList.toggle('semantic-open', p === 'semantic');
-  // The mode switch reflects tree/code/split; transient sub-views have no tab.
-  setModeTab(p === 'tree' || p === 'code' || p === 'split' ? p : null);
+  // style.css reads this to decide which strips a layout is allowed: the tree
+  // ops group upstairs when the tree stands alone, the split strip when it does
+  // not (contract rule 10, revised).
+  viewer.dataset.pane = p;
+  // Top-layer panels outlive the pane that opened them (rule 21) — the plan
+  // panel would otherwise still be floating over the tree.
+  if (p !== 'semantic') closeSemPlan();
+  // Every way out of run mode goes through here — another view, a comparison, a
+  // new document — so the result worker is torn down in exactly one place.
+  if (!run) exitRunMode();
+  placeTreeOps(p);
+  placeRunSourceSwitch(p);
+  // The mode switch reflects the four layouts; transient sub-views have no tab.
+  setModeTab(p === 'tree' || p === 'code' || p === 'split' || run ? p : null);
+  // The search header's `· source` qualifier is pane-dependent — keep it live.
+  const hitHeader = searchPanel.querySelector('.hit-header');
+  if (hitHeader) hitHeader.textContent = searchHeaderText() ?? '';
+  paintStatusForPane();
 }
 
-function setModeTab(mode: 'tree' | 'code' | 'split' | null): void {
+// Handing the bottom edge to the pane taking over. Only the views that keep a
+// standing lead are repainted here — table, diff and compare write theirs when
+// they open, and nothing else can overwrite it now that there is one strip.
+// Reads activePane through the two ownership predicates rather than taking the
+// pane as an argument: which surface owns the lead is not the pane alone in run
+// mode, and one answer to that question beats two.
+function paintStatusForPane(): void {
+  const codeUp = codeOnScreen();
+  // The editor's note and its search count are the editor's: off screen, the
+  // shortcut they name is not even bound. The unapplied buffer itself survives
+  // — loadCodeContent re-reads it the next time the pane opens.
+  setStatusCount('');
+  setStatusNote(codeUp ? codeStatusText : '', codeUp ? codeStatusKind : '');
+  // In split the tree owns the lead and the code pane owns the note, which is
+  // the arrangement 8g wanted: the path you are reading and the fact that the
+  // buffer under it is not the parsed document, on one line. Run mode has one
+  // source pane, so the lead is that pane's.
+  if (treeOwnsStatus()) updateCrumbSoon();
+  else if (codeOwnsLead()) setStatusLead(caretLead);
+}
+
+// One set of buttons with one set of listeners, moved rather than duplicated:
+// the tree's three document ops live on the global toolbar while the tree is
+// the only pane, and in the bar of the pane they act on once there is a second
+// pane to scope them to — the tree half in split, the source half in run mode
+// (whichever of the two it is showing).
+function placeTreeOps(p: Pane): void {
+  const sourceBar = p === 'run' && runSource === 'code' ? codeBarOps : treeBarOps;
+  const host = p === 'split' || p === 'run' ? sourceBar : toolbarTreeOps;
+  host.append(collapseBtn, treeCopyBtn, treeDownloadBtn);
+}
+
+// The source pane's tree/code switch: run mode only, and it stands in the bar
+// of whichever pane it is switching — the label of that bar, in effect.
+function placeRunSourceSwitch(p: Pane): void {
+  runSrcSwitch.hidden = p !== 'run';
+  if (p !== 'run') return;
+  (runSource === 'code' ? codeBar : treeBar).prepend(runSrcSwitch);
+}
+
+function setModeTab(mode: 'tree' | 'code' | 'split' | 'run' | null): void {
   for (const b of modeSwitch.querySelectorAll<HTMLButtonElement>('button')) {
     b.classList.toggle('on', b.dataset.mode === mode);
   }
@@ -266,9 +379,61 @@ const PASTE_ECHO_MAX = 2_000_000;
 
 // ---------- helpers ----------
 
+// One icon set (style.css contract rule 3): the <symbol> sprite at the top of
+// index.html is the only place the paths live, so a button built here gets the
+// same box, the same 1.5 stroke and the same currentColor ink as one written in
+// markup — which is the whole point of dropping the six characters.
+type IconName = 'back' | 'compare' | 'reload' | 'download' | 'warn' | 'theme';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function icon(name: IconName): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'ic');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+
+// One empty state, two sizes (style.css contract rule 17): a dim line naming
+// the emptiness plus a fainter one saying what to do next. Built here rather
+// than at each call site so the second line cannot be forgotten again.
+function emptyState(
+  line: string,
+  hint: string,
+  opts?: { className?: string; pane?: boolean },
+): HTMLElement {
+  const el = document.createElement('div');
+  el.className = opts?.className ?? 'empty-state';
+  if (opts?.pane) el.classList.add('is-pane');
+  el.append(line);
+  const sub = document.createElement('span');
+  sub.className = 'empty-hint';
+  sub.textContent = hint;
+  el.appendChild(sub);
+  return el;
+}
+
+// Placing a top-layer popover under its own trigger (style.css rule 21): the
+// browser gives light dismiss and Esc, anchor positioning is not portable yet,
+// so this is the part that stays ours. Right-aligned under the trigger, clamped
+// to the viewport so a narrow window slides the panel in rather than off.
+function positionUnder(panel: HTMLElement, anchorEl: HTMLElement): void {
+  const anchor = anchorEl.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.max(gap, Math.min(anchor.right - box.width, window.innerWidth - box.width - gap));
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.top = `${Math.round(anchor.bottom + gap)}px`;
+}
+
 let toastTimer = 0;
-function showToast(msg: string): void {
+// `bad` is the failure tier (style.css contract rule 15): a copy that worked and
+// a file that could not be read must not be announced in the same colour.
+function showToast(msg: string, tone: 'info' | 'bad' = 'info'): void {
   toast.textContent = msg;
+  toast.classList.toggle('bad', tone === 'bad');
   toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (toast.hidden = true), 1800);
@@ -279,6 +444,7 @@ function showToast(msg: string): void {
 // clears the button via textContent assignment.
 function showToastAction(msg: string, actionLabel: string, onAction: () => void): void {
   toast.replaceChildren();
+  toast.classList.remove('bad');
   const span = document.createElement('span');
   span.textContent = msg + ' — ';
   const btn = document.createElement('button');
@@ -329,7 +495,19 @@ async function pickPayloadFiles(
   }
 }
 
-// ---------- CSV download ----------
+// ---------- downloads ----------
+
+function downloadText(text: string, filename: string, mime: string): void {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 function sanitizeFilePart(s: string, max: number): string {
   return s.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);
@@ -342,19 +520,7 @@ function csvFilename(suffix: string): string {
   return `${base}${tail ? '_' + tail : ''}.csv`;
 }
 
-function downloadCsv(text: string, filename: string): void {
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-// Same mechanism as downloadCsv, for anything that is bytes rather than text
+// Same mechanism as downloadText, for anything that is bytes rather than text
 // (a workbook, a zip of CSVs) or carries its own filename already.
 function downloadBlob(filename: string, data: Uint8Array | string, mime: string): void {
   const part: BlobPart = typeof data === 'string' ? data : new Uint8Array(data);
@@ -371,10 +537,10 @@ function downloadBlob(filename: string, data: Uint8Array | string, mime: string)
 async function exportCsv(source: 'table' | 'query', suffix: string): Promise<void> {
   const r = await call<{ ok: boolean; text?: string; error?: string }>({ type: 'csv', source });
   if (!r.ok || r.text === undefined) {
-    showToast(r.error ?? 'CSV export failed');
+    showToast(r.error ?? 'CSV export failed', 'bad');
     return;
   }
-  downloadCsv(r.text, csvFilename(suffix));
+  downloadText(r.text, csvFilename(suffix), 'text/csv;charset=utf-8');
   showToast('CSV downloaded');
 }
 
@@ -590,10 +756,11 @@ async function runTransportInspector(): Promise<void> {
   const selectedBaselinePayload = diffBaselineProvenance;
   transportError.hidden = true;
   transportResults.replaceChildren();
-  const loading = document.createElement('div');
-  loading.className = 'transport-loading';
-  loading.textContent = 'Compressing the exact document bytes…';
-  transportResults.appendChild(loading);
+  transportResults.appendChild(
+    emptyState('Compressing the exact document bytes…', 'Recompression runs in the worker.', {
+      className: 'transport-loading',
+    }),
+  );
 
   try {
     const { settings, envelope, budgets } = readTransportSettings();
@@ -744,7 +911,7 @@ for (const control of [
 $('#transport-run').addEventListener('click', () => void runTransportInspector());
 transportIncludeBaseline.addEventListener('change', () => void runTransportInspector());
 transportBtn.addEventListener('click', () => {
-  if (codeDirty && (activePane === 'code' || activePane === 'split')) {
+  if (codeDirty && codeOnScreen()) {
     showToast('Apply or discard code edits before measuring transport size');
     return;
   }
@@ -835,7 +1002,7 @@ function attachInitialSave(
     return renderRecents();
   }).catch((error) => {
     if (documentToken === currentDocumentToken) {
-      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`);
+      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   });
 }
@@ -867,13 +1034,17 @@ function persistCurrentSnapshot(
 
   void write.then(renderRecents).catch((error) => {
     if (documentToken === currentDocumentToken) {
-      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`);
+      showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
     }
   });
 }
 
+// Every path that changes the document's CONTENT lands here — an inline tree
+// edit, an Apply, an undo — which makes it the one place a shown run result
+// learns that it is no longer about this document.
 function markCurrentContentEdited(): void {
   currentDocumentRevision++;
+  markRunResultStale();
   if (!currentProvenance) return;
   currentProvenance = null;
   payloadBadge.hidden = true;
@@ -916,7 +1087,7 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
   try {
     raw = JSON.parse(value.text);
   } catch {
-    showToast('could not read this string value');
+    showToast('could not read this string value', 'bad');
     return;
   }
   if (typeof raw !== 'string') {
@@ -929,7 +1100,7 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
     parentDocumentToken !== currentDocumentToken
   ) return;
   if (!decoded.ok) {
-    showToast(decoded.error.message);
+    showToast(decoded.error.message, 'bad');
     return;
   }
   // Read the parent's id here rather than at entry: the guards above proved the
@@ -956,21 +1127,36 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
   );
 }
 
+// The strip's resting line in the tree: an empty bottom edge would be the one
+// view that still says nothing (rule 19 — every view carries a "where am I",
+// including "nowhere yet").
+const TREE_STATUS_RESTING = 'Select a row to see its path.';
+
+// The crumb is debounced and then awaits the worker, so by the time it has an
+// answer the bottom edge may belong to another view. It only ever paints while
+// the tree is on screen.
+function treeOwnsStatus(): boolean {
+  if (activePane === 'run') return runSource === 'tree'; // the source pane's lead
+  return activePane === 'tree' || activePane === 'split';
+}
+
 let crumbTimer = 0;
 function updateCrumbSoon(): void {
   clearTimeout(crumbTimer);
+  // Nothing selected needs no worker round trip, so paint the resting line now
+  // rather than in 90ms — this is the reset path when a document opens, and the
+  // last document's path must not sit there in the meantime. The timer still
+  // runs: the selected row's own slice may not have been fetched yet.
+  if (tree.selectedIndex() < 0) setStatusLead(TREE_STATUS_RESTING);
   crumbTimer = window.setTimeout(async () => {
+    if (!treeOwnsStatus()) return;
     const r = tree.getSelected();
     if (!r) {
-      crumb.replaceChildren();
+      setStatusLead(TREE_STATUS_RESTING);
       return;
     }
     const p = await call<{ jsonpath: string; pointer: string; js: string }>({ type: 'nodePaths', id: r.id });
-    crumb.replaceChildren();
-    const path = document.createElement('span');
-    path.className = 'crumb-path';
-    path.textContent = p.jsonpath;
-    crumb.appendChild(path);
+    if (!treeOwnsStatus()) return;
     const chip = (label: string, text: string, title: string): HTMLButtonElement => {
       const b = document.createElement('button');
       b.className = 'crumb-chip';
@@ -979,22 +1165,29 @@ function updateCrumbSoon(): void {
       b.addEventListener('click', () => void copyText(text).then(() => showToast(text)));
       return b;
     };
-    crumb.append(
-      chip('copy $path', p.jsonpath, 'Copy JSONPath'),
-      chip('/pointer', p.pointer, 'Copy RFC-6901 JSON Pointer'),
-      chip('.js', p.js, 'Copy JS accessor'),
-    );
+    // Copy chips ride with the path; the ones that open something else are
+    // trailing chips, at the strip's right edge.
+    const trailChips: HTMLElement[] = [];
     if (!r.hasChildren) {
       const same = document.createElement('button');
       same.className = 'crumb-chip same';
       same.textContent = '≡ same value';
       same.title = 'Find every node in this document holding the same value';
       same.addEventListener('click', () => void findSameValue(r.id));
-      crumb.appendChild(same);
+      trailChips.push(same);
     }
+    setStatusLead(p.jsonpath, {
+      path: true,
+      chips: [
+        chip('copy $path', p.jsonpath, 'Copy JSONPath'),
+        chip('/pointer', p.pointer, 'Copy RFC-6901 JSON Pointer'),
+        chip('.js', p.js, 'Copy JS accessor'),
+      ],
+      trailChips,
+    });
     if (!r.hasChildren && r.type === 'string') {
       const value = await call<{ text: string }>({ type: 'nodeValue', id: r.id });
-      if (tree.getSelected()?.id !== r.id) return;
+      if (tree.getSelected()?.id !== r.id || !treeOwnsStatus()) return;
       try {
         const raw: unknown = JSON.parse(value.text);
         if (typeof raw === 'string') {
@@ -1005,7 +1198,7 @@ function updateCrumbSoon(): void {
             decode.textContent = 'decode payload';
             decode.title = `Open this ${sniff.format} value as a derived JSON document`;
             decode.addEventListener('click', () => void openNestedPayload(r.id, p.jsonpath));
-            crumb.appendChild(decode);
+            addStatusTrailChip(decode);
           }
         }
       } catch {
@@ -1026,7 +1219,7 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
   onCopyValue: (id) => void copyValueOf(id),
   onUnpack: async (id, index) => {
     const r = await call<{ ok: boolean; totalRows: number; error?: string }>({ type: 'unpack', id, index });
-    if (!r.ok) showToast(r.error ?? 'not valid JSON');
+    if (!r.ok) showToast(r.error ?? 'not valid JSON', 'bad');
     else tree.setTotal(r.totalRows);
   },
   onTable: (id) => void openTable(id),
@@ -1046,7 +1239,7 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
       return { ok: false, error: 'document changed while the edit was applying' };
     }
     if (!r.ok) {
-      showToast(r.error ?? 'edit rejected');
+      showToast(r.error ?? 'edit rejected', 'bad');
       return { ok: false, error: r.error };
     }
     // The value changed under our feet — currentText/code map are now stale.
@@ -1080,7 +1273,7 @@ async function refreshAfterDocChange(totalRows: number, documentToken: number): 
   persistCurrentSnapshot(currentText, null);
   tree.setTotal(totalRows);
   tree.resetSelection();
-  crumb.textContent = '';
+  updateCrumbSoon();
   tree.refresh();
   if (!codeView.hidden) void loadCodeContent();
 }
@@ -1118,62 +1311,113 @@ function syncCodeToSelectionSoon(): void {
   }, 60);
 }
 
+// ---------- document rows ----------
+
+// ONE document row, used by the sidebar's Recents and by the baseline picker.
+// The two lists show the same three facts from the same store and used to be
+// built differently — name over meta here, name + size on one line there, and a
+// hover that meant "you are pointing at this" in one and materialised an accent
+// border in the other. Name over meta, size and age as one dim line, band on
+// hover, in both.
+type DocRowAction = 'dif' | 'pin' | 'del';
+
+function docRow(
+  d: store.DocMeta,
+  opts: { active?: boolean; actions: DocRowAction[]; focusable?: boolean },
+): HTMLElement {
+  const row = document.createElement('div');
+  // `pinned` is chrome-only: it keeps the star visible when the row is not
+  // hovered, so a never-pruned document says so without a tooltip.
+  row.className = `doc-row${opts.active ? ' active' : ''}${d.pinned ? ' pinned' : ''}`;
+  row.dataset.id = d.id;
+  // The picker's rows were real <button>s; they carry nested action buttons now,
+  // so they keep the keyboard route explicitly rather than losing it.
+  if (opts.focusable) {
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.classList.add('focus-ring');
+  }
+
+  const title = document.createElement('div');
+  title.className = 'doc-row-title';
+  title.textContent = `${d.handle ? '⛃ ' : ''}${d.provenance ? '↳ ' : ''}${d.title}`;
+  if (d.handle || d.provenance) {
+    const notes = [
+      d.handle ? 'Linked to a file on disk — reloadable' : '',
+      d.provenance
+        ? `Decoded from ${d.provenance.sourceTitle}${d.provenance.sourcePath ? ` at ${d.provenance.sourcePath}` : ''}`
+        : '',
+    ].filter(Boolean);
+    title.title = notes.join('\n');
+  }
+  row.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'doc-row-meta';
+  // The open document says so: a timestamp on the row you are reading answers a
+  // question nobody is asking.
+  meta.textContent = `${fmtBytes(d.size)} · ${opts.active ? 'open' : relTime(d.updatedAt)}`;
+  row.appendChild(meta);
+
+  if (opts.actions.length) {
+    const actions = document.createElement('div');
+    actions.className = 'doc-row-actions';
+    for (const kind of opts.actions) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `${kind} btn-icon btn-mini`;
+      if (kind === 'dif') {
+        btn.appendChild(icon('compare'));
+        btn.title = 'Compare this baseline side by side with the open document';
+        btn.setAttribute('aria-label', btn.title);
+      } else if (kind === 'pin') {
+        btn.textContent = d.pinned ? '★' : '☆';
+        btn.title = d.pinned ? 'Unpin' : 'Pin (never pruned)';
+      } else {
+        btn.textContent = '×';
+        btn.title = 'Delete';
+      }
+      actions.appendChild(btn);
+    }
+    row.appendChild(actions);
+  }
+
+  return row;
+}
+
+// Pin and delete act on the store, not on whichever list happens to be showing
+// the document, so both lists route through one handler and then re-render
+// themselves. Returns whether the click was one of those actions.
+async function runDocRowAction(target: HTMLElement, id: string): Promise<boolean> {
+  if (target.closest('.pin')) {
+    await store.togglePin(id);
+    return true;
+  }
+  if (target.closest('.del')) {
+    await store.removeDoc(id);
+    if (currentDocId === id) currentDocId = null;
+    return true;
+  }
+  return false;
+}
+
 // ---------- recents ----------
 
 async function renderRecents(): Promise<void> {
   const docs = await store.listDocs();
   recentsEl.replaceChildren();
   if (!docs.length) {
-    const empty = document.createElement('div');
-    empty.className = 'recents-empty';
-    empty.textContent = 'Nothing yet — paste some JSON.';
-    recentsEl.appendChild(empty);
+    recentsEl.appendChild(
+      emptyState('No documents yet', 'Paste JSON or drop a file to begin.', {
+        className: 'recents-empty',
+      }),
+    );
     return;
   }
   for (const d of docs) {
-    const el = document.createElement('div');
-    // `pinned` is chrome-only: it keeps the star visible when the row is not
-    // hovered, so a never-pruned document says so without a tooltip.
-    el.className = `recent${d.id === currentDocId ? ' active' : ''}${d.pinned ? ' pinned' : ''}`;
-    el.dataset.id = d.id;
-
-    const title = document.createElement('div');
-    title.className = 'r-title';
-    title.textContent = `${d.handle ? '⛃ ' : ''}${d.provenance ? '↳ ' : ''}${d.title}`;
-    if (d.handle || d.provenance) {
-      const notes = [
-        d.handle ? 'Linked to a file on disk — reloadable' : '',
-        d.provenance
-          ? `Decoded from ${d.provenance.sourceTitle}${d.provenance.sourcePath ? ` at ${d.provenance.sourcePath}` : ''}`
-          : '',
-      ].filter(Boolean);
-      title.title = notes.join('\n');
-    }
-    el.appendChild(title);
-
-    const meta = document.createElement('div');
-    meta.className = 'r-meta';
-    meta.textContent = `${fmtBytes(d.size)} · ${relTime(d.updatedAt)}`;
-    el.appendChild(meta);
-
-    const actions = document.createElement('div');
-    actions.className = 'r-actions';
-    const dif = document.createElement('button');
-    dif.className = 'dif btn-icon btn-mini';
-    dif.textContent = '⇆';
-    dif.title = 'Compare this baseline side by side with the open document';
-    const pin = document.createElement('button');
-    pin.className = 'pin btn-icon btn-mini';
-    pin.textContent = d.pinned ? '★' : '☆';
-    pin.title = d.pinned ? 'Unpin' : 'Pin (never pruned)';
-    const del = document.createElement('button');
-    del.className = 'del btn-icon btn-mini';
-    del.textContent = '×';
-    del.title = 'Delete';
-    actions.append(dif, pin, del);
-    el.appendChild(actions);
-
-    recentsEl.appendChild(el);
+    recentsEl.appendChild(
+      docRow(d, { active: d.id === currentDocId, actions: ['dif', 'pin', 'del'] }),
+    );
   }
 }
 
@@ -1204,7 +1448,7 @@ async function openStoredDoc(id: string): Promise<'opened' | 'missing' | 'supers
 
 recentsEl.addEventListener('click', async (e) => {
   const t = e.target as HTMLElement;
-  const item = t.closest('.recent') as HTMLElement | null;
+  const item = t.closest('.doc-row') as HTMLElement | null;
   if (!item) return;
   const id = item.dataset.id!;
   if (t.closest('.dif')) {
@@ -1219,18 +1463,11 @@ recentsEl.addEventListener('click', async (e) => {
     await compareRecent(id);
     return;
   }
-  if (t.closest('.pin')) {
-    await store.togglePin(id);
+  if (await runDocRowAction(t, id)) {
     await renderRecents();
     return;
   }
-  if (t.closest('.del')) {
-    await store.removeDoc(id);
-    if (currentDocId === id) currentDocId = null;
-    await renderRecents();
-    return;
-  }
-  if (await openStoredDoc(id) === 'missing') showToast('document body missing');
+  if (await openStoredDoc(id) === 'missing') showToast('document body missing', 'bad');
 });
 
 // A visible, document-level entry point for semantic comparison. The picker is
@@ -1241,6 +1478,14 @@ async function showBaselinePicker(): Promise<void> {
     showToast('open a document first');
     return;
   }
+  if (!(await renderBaselineList())) return;
+  baselinePicker.showModal();
+}
+
+// Split from showBaselinePicker so a pin or a delete inside the dialog can
+// repaint the list without reopening the modal. Returns false when a newer
+// document open won the race, which is when the caller must not show it.
+async function renderBaselineList(): Promise<boolean> {
   const documentRevision = currentDocumentRevision;
   const currentId = currentDocId;
   const currentBody = currentText;
@@ -1254,34 +1499,21 @@ async function showBaselinePicker(): Promise<void> {
     }
     docs.push(doc);
   }
-  if (documentRevision !== currentDocumentRevision) return;
+  if (documentRevision !== currentDocumentRevision) return false;
   baselineRecents.replaceChildren();
   if (docs.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'baseline-empty';
-    empty.textContent = 'No other recent documents yet. Choose a file to use as the baseline.';
-    baselineRecents.appendChild(empty);
-  } else {
-    for (const doc of docs) {
-      const option = document.createElement('button');
-      option.type = 'button';
-      option.className = 'baseline-option';
-      option.dataset.id = doc.id;
-
-      const name = document.createElement('span');
-      name.className = 'baseline-name';
-      name.textContent = doc.title;
-      const size = document.createElement('span');
-      size.className = 'baseline-size';
-      size.textContent = fmtBytes(doc.size);
-      const age = document.createElement('span');
-      age.className = 'baseline-age';
-      age.textContent = `${relTime(doc.updatedAt)}${doc.handle ? ' · linked file' : ''}`;
-      option.append(name, size, age);
-      baselineRecents.appendChild(option);
-    }
+    baselineRecents.appendChild(
+      emptyState('No other documents to compare against', 'Choose a file to use as the baseline.', {
+        className: 'baseline-empty',
+      }),
+    );
+    return true;
   }
-  baselinePicker.showModal();
+  for (const doc of docs) {
+    // No `dif` here: choosing the row IS the comparison in this dialog.
+    baselineRecents.appendChild(docRow(doc, { actions: ['pin', 'del'], focusable: true }));
+  }
+  return true;
 }
 
 compareBtn.addEventListener('click', () => void showBaselinePicker());
@@ -1333,6 +1565,11 @@ const converter = new ConvertView(
 
 convertBtn.addEventListener('click', () => {
   showPane('convert');
+  // The converter keeps its own counts in its own bar, so the strip would
+  // otherwise still be showing the tree's path — and its copy chips, pointing
+  // at a row that is no longer on screen. This is the pane's resting line
+  // instead (rule 19).
+  setStatusLead('Pick a table, adjust its columns, then download.');
   void converter.open().catch((err: Error) => showToast(err.message));
 });
 $('#convert-close').addEventListener('click', () => showPane('tree'));
@@ -1365,11 +1602,32 @@ $('#convert-dl').addEventListener('click', () => {
   void converter.downloadResult().catch((err: Error) => showToast(err.message));
 });
 
-baselineRecents.addEventListener('click', (event) => {
-  const option = (event.target as HTMLElement).closest<HTMLButtonElement>('.baseline-option');
-  if (!option?.dataset.id) return;
+baselineRecents.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
+  const row = target.closest<HTMLElement>('.doc-row');
+  if (!row?.dataset.id) return;
+  const id = row.dataset.id;
+  if (await runDocRowAction(target, id)) {
+    await renderRecents();
+    await renderBaselineList();
+    return;
+  }
   baselinePicker.close();
-  void compareRecent(option.dataset.id);
+  void compareRecent(id);
+});
+
+// The rows are divs so they can carry action buttons; Enter and Space still
+// pick one, the way the <button> they replaced did.
+baselineRecents.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const target = event.target as HTMLElement;
+  // An action button inside the row fires its own click natively; synthesising
+  // a second one on the row would pick the baseline as well as pin it.
+  if (target.closest('button')) return;
+  const row = target.closest<HTMLElement>('.doc-row');
+  if (!row) return;
+  event.preventDefault();
+  row.click();
 });
 
 async function compareBaselineFile(file: File): Promise<void> {
@@ -1384,7 +1642,7 @@ async function compareBaselineFile(file: File): Promise<void> {
     baselinePicker.close();
     await compareWith(payload.text, payload.title, null, payload.provenance);
   } catch (error) {
-    showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+    showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'bad');
   }
 }
 
@@ -1434,7 +1692,7 @@ async function openText(
   // a small compressed blob that inflates past the cap is caught too.
   if (text.length > MAX_DOC_BYTES) {
     if (keepCurrentOnFailure) {
-      showToast(`reload rejected: ${oversizeMessage(text.length)}`);
+      showToast(`reload rejected: ${oversizeMessage(text.length)}`, 'bad');
       return false;
     }
     showParseError({ ok: false, error: oversizeMessage(text.length), line: null, column: null, context: null });
@@ -1453,7 +1711,7 @@ async function openText(
       if (requestToken !== openRequestToken) return false;
       if (!decoded.ok) {
         if (keepCurrentOnFailure) {
-          showToast(`reload rejected: ${decoded.error.message}`);
+          showToast(`reload rejected: ${decoded.error.message}`, 'bad');
           return false;
         }
         showParseError({
@@ -1487,7 +1745,7 @@ async function openText(
   if (requestToken !== openRequestToken) return false;
   if (!res.ok) {
     if (keepCurrentOnFailure) {
-      showToast(`reload rejected: ${res.error}`);
+      showToast(`reload rejected: ${res.error}`, 'bad');
       return false;
     }
     landing.hidden = false;
@@ -1512,7 +1770,7 @@ async function openText(
     if (!keepCurrentOnFailure) {
       void store.touchDoc(existingId).then(renderRecents).catch((error) => {
         if (documentToken === currentDocumentToken) {
-          showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`);
+          showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
         }
       });
     }
@@ -1544,12 +1802,16 @@ async function openText(
   searchPanel.hidden = true;
   searchBox.value = '';
   resetAskPanel();
+  resetRunState(res.hasUnsafeNumbers);
+  // A new document brings its own name; the last one's chosen download name is
+  // not it.
+  downloadName = '';
   filterOn = false;
   filterScrollSnapshot = null;
   filterBtn.classList.remove('on');
   filterBtn.textContent = 'filter';
   tree.resetSelection();
-  crumb.textContent = '';
+  // showPane repaints the strip; with nothing selected that is the resting line.
   showPane('tree');
   // A document is open, so this visitor is now a user: any later return to the
   // landing ("+ new", "◂ back") gets the compact paste view, not the pitch, and
@@ -1647,7 +1909,7 @@ async function importFiles(
     try {
       payload = await readPayloadFile(file);
     } catch (error) {
-      showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+      showToast(`${file.name}: ${error instanceof Error ? error.message : String(error)}`, 'bad');
       continue;
     }
     if (i === entries.length - 1) {
@@ -1715,7 +1977,7 @@ reloadBtn.addEventListener('click', async () => {
       if (!stillCurrent()) return;
       if (!handle.requestPermission || (await handle.requestPermission({ mode: 'read' })) !== 'granted') {
         if (!stillCurrent()) return;
-        showToast('file permission denied');
+        showToast('file permission denied', 'bad');
         return;
       }
     }
@@ -1744,7 +2006,7 @@ reloadBtn.addEventListener('click', async () => {
     await autoDiffAfterReload(prevText, reloadedDocumentToken);
   } catch (error) {
     if (requestToken !== openRequestToken) return;
-    showToast(error instanceof Error ? error.message : 'could not read file (moved or deleted?)');
+    showToast(error instanceof Error ? error.message : 'could not read file (moved or deleted?)', 'bad');
   }
 });
 
@@ -1823,6 +2085,9 @@ window.addEventListener('drop', async (e) => {
 // a cold visitor backing out of payload tools, who has not opened anything yet.
 function goLanding(): void {
   beginOpenRequest();
+  // Back/+new skip showPane, so the run teardown must happen here too — a
+  // result worker holding a large parsed result must not outlive the visit.
+  exitRunMode();
   viewer.hidden = true;
   codecPane.hidden = true;
   landing.hidden = false;
@@ -1853,6 +2118,9 @@ function showCodec(): void {
 
 function setCodecTrace(text: string, state: 'ok' | 'bad' | null): void {
   codecTrace.textContent = text;
+  // It rides the output box's label row now, so a long trace ellipsizes there
+  // and keeps the whole of itself in the tooltip.
+  codecTrace.title = text;
   codecTrace.hidden = !text;
   codecTrace.classList.toggle('ok', state === 'ok');
   codecTrace.classList.toggle('bad', state === 'bad');
@@ -1877,6 +2145,18 @@ function showDecodedPayload(
   showToast(`decoded ${exactBytes(provenance.decodedBytes)}`);
 }
 
+// The trace names the failure; these four bytes name the input. "not a zstd
+// frame · first 4 bytes were 7b 22 6f 72" is the difference between a mystery
+// and "you pasted JSON" — and the bytes are already in hand at the failure.
+// Returns '' when there is nothing to show, which is its own answer.
+function firstBytesHex(input: string | ArrayBuffer, count = 4): string {
+  const bytes =
+    typeof input === 'string'
+      ? new TextEncoder().encode(input.slice(0, count)).subarray(0, count)
+      : new Uint8Array(input, 0, Math.min(count, input.byteLength));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join(' ');
+}
+
 async function decodeInPayloadTools(
   input: string | ArrayBuffer,
   sourceTitle: string,
@@ -1886,8 +2166,14 @@ async function decodeInPayloadTools(
     codecDecodedText = '';
     codecDecodedProvenance = null;
     codecOutD.value = '';
-    setCodecTrace(`${decoded.error.code} · ${decoded.error.message}`, 'bad');
-    showToast(decoded.error.message);
+    const bytes = firstBytesHex(input);
+    // Bytes lead, wordy message last: the trace ellipsizes at the label row's
+    // right edge, and the clue must survive the cut — the prose can go.
+    setCodecTrace(
+      `${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
+      'bad',
+    );
+    showToast(decoded.error.message, 'bad');
     return;
   }
   showDecodedPayload(
@@ -1912,7 +2198,7 @@ $('#zstd-btn').addEventListener('click', async () => {
   try {
     b64 = await compressToB64(source);
   } catch (err) {
-    showToast(`compress failed: ${String(err)}`);
+    showToast(`compress failed: ${String(err)}`, 'bad');
     return;
   }
   if (documentRevision !== currentDocumentRevision) return;
@@ -1938,7 +2224,7 @@ $('#codec-run-c').addEventListener('click', async () => {
     codecOutC.value = await compressToB64(src);
     showToast(`${fmtBytes(src.length)} → ${fmtBytes(codecOutC.value.length)} b64`);
   } catch (err) {
-    showToast(`compress failed: ${String(err)}`);
+    showToast(`compress failed: ${String(err)}`, 'bad');
   }
 });
 
@@ -1957,7 +2243,7 @@ $('#codec-use-current').addEventListener('click', async () => {
     codecOutC.value = encoded;
     showToast(`${fmtBytes(source.length)} → ${fmtBytes(encoded.length)} b64`);
   } catch (err) {
-    showToast(`compress failed: ${String(err)}`);
+    showToast(`compress failed: ${String(err)}`, 'bad');
   }
 });
 
@@ -2020,7 +2306,7 @@ payloadBadge.addEventListener('click', () => {
   codecOutD.value = '';
   codecOutD.placeholder = 'Current decoded document — use “open as document” to return to it.';
   setCodecTrace(
-    `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''}\n${provenanceTrace(currentProvenance)}`,
+    `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''} · ${provenanceTrace(currentProvenance)}`,
     'ok',
   );
 });
@@ -2032,7 +2318,7 @@ originalBtn.addEventListener('click', async () => {
   const sourceDocId = currentProvenance?.sourceDocId;
   if (!sourceDocId) return;
   if (await openStoredDoc(sourceDocId) === 'missing') {
-    showToast('original document is no longer in recents');
+    showToast('original document is no longer in recents', 'bad');
   }
 });
 
@@ -2050,13 +2336,13 @@ docTitleEl.addEventListener('click', async () => {
   await renderRecents();
 });
 
-$('#collapse-btn').addEventListener('click', async () => {
+collapseBtn.addEventListener('click', async () => {
   const r = await call<{ totalRows: number }>({ type: 'collapseAll' });
   tree.setTotal(r.totalRows);
   treeViewport.scrollTop = 0;
 });
 
-$('#fmt-btn').addEventListener('click', async () => {
+treeCopyBtn.addEventListener('click', async () => {
   const r = await call<{ text: string }>({ type: 'stringify', space: 2 });
   await copyText(r.text);
   showToast('pretty JSON copied');
@@ -2068,13 +2354,88 @@ $('#min-btn').addEventListener('click', async () => {
   showToast('minified JSON copied');
 });
 
-$('#dl-btn').addEventListener('click', () => {
-  const blob = new Blob([currentText], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = /\.[a-z]+$/i.test(currentTitle) ? currentTitle : 'document.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
+// ---------- download: naming the file ----------
+
+// A pasted document has no filename, and `document.json` in the downloads
+// folder is indistinguishable from the last four of them — so ⇩ asks first.
+// The chosen name is remembered for THIS document only and is deliberately not
+// written back into currentTitle, which names the document everywhere else.
+const dlNameForm = $<HTMLFormElement>('#dl-name');
+const dlNameInput = $<HTMLInputElement>('#dl-name-input');
+let downloadName = '';
+// The result pane's ⇩ opens the same popover for the same reason (`result.json`
+// four times over is no better than `document.json` four times over), so the
+// form serves two subjects and remembers which button opened it.
+type DownloadSubject = 'document' | 'result';
+let dlSubject: DownloadSubject = 'document';
+let dlAnchor: HTMLElement = treeDownloadBtn;
+let resultDownloadName = '';
+
+const hasExtension = (name: string): boolean => /\.[a-z0-9]+$/i.test(name);
+
+function defaultDownloadName(): string {
+  if (dlSubject === 'result') return resultDownloadName || 'result.json';
+  return downloadName || (hasExtension(currentTitle) ? currentTitle : 'document.json');
+}
+
+// Which button was pressed decides what the form is naming. Set on the click,
+// which the browser dispatches before it runs the popover's activation
+// behaviour — so beforetoggle below already knows.
+function setDownloadSubject(subject: DownloadSubject, anchor: HTMLElement): void {
+  dlSubject = subject;
+  dlAnchor = anchor;
+}
+
+// Path separators and control characters are what a browser would silently
+// rewrite (or refuse) anyway; an extensionless name gets .json so the file
+// opens in something rather than nothing.
+function sanitizeDownloadName(raw: string): string {
+  const name = raw.replace(/[\\/\u0000-\u001f]+/g, '').trim().slice(0, 120);
+  if (!name) return defaultDownloadName();
+  return hasExtension(name) ? name : `${name}.json`;
+}
+
+// Tracked, not read back: hidePopover() on a popover that is not showing
+// throws, and a browser without popover support never opens this one at all
+// (style.css keeps it display:none there) — same reasoning as #sem-plan-body.
+let dlNameOpen = false;
+
+// beforetoggle fires synchronously inside the show algorithm, so the frame
+// scheduled here still lands before the popover's first paint.
+dlNameForm.addEventListener('beforetoggle', (event) => {
+  dlNameOpen = (event as ToggleEvent).newState === 'open';
+  dlAnchor.setAttribute('aria-expanded', String(dlNameOpen));
+  if (!dlNameOpen) return;
+  dlNameInput.value = defaultDownloadName();
+  // Basename pre-selected, so typing replaces the name and keeps the extension
+  // — the edit this popover exists for.
+  const dot = dlNameInput.value.lastIndexOf('.');
+  requestAnimationFrame(() => {
+    positionUnder(dlNameForm, dlAnchor);
+    dlNameInput.focus();
+    dlNameInput.setSelectionRange(0, dot > 0 ? dot : dlNameInput.value.length);
+  });
+});
+
+// Submit, not click: Enter in the field downloads, same idiom as the ask
+// panel's key row.
+dlNameForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = sanitizeDownloadName(dlNameInput.value);
+  if (dlSubject === 'result') {
+    resultDownloadName = name;
+    downloadText(runResultText, name, 'application/json');
+  } else {
+    downloadName = name;
+    downloadText(currentText, name, 'application/json');
+  }
+  if (dlNameOpen) dlNameForm.hidePopover();
+});
+
+treeDownloadBtn.addEventListener('click', () => setDownloadSubject('document', treeDownloadBtn));
+
+window.addEventListener('resize', () => {
+  if (dlNameOpen) positionUnder(dlNameForm, dlAnchor);
 });
 
 // ---------- toolbar overflow menu ----------
@@ -2115,12 +2476,43 @@ let codeEditor: CodeEditor | null = null;
 let codeBusy = false;
 let codeDirty = false;
 
-function setCodeStatus(kind: '' | 'dirty' | 'error' | 'saved', msg: string): void {
-  codeDirty = kind === 'dirty' || kind === 'error';
-  codeStatus.className = kind;
-  codeStatus.textContent = msg;
-  // The bar ellipsizes the status at narrow split widths; hover shows it all.
-  codeStatus.title = msg;
+// Mod-s is what code.ts binds; it is ⌘S on an Apple keyboard and Ctrl+S on
+// every other one, and the strip has to name the one the reader actually has.
+const APPLY_SHORTCUT = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+  ? '⌘S'
+  : 'Ctrl+S';
+const UNAPPLIED_HINT = `unapplied · ${APPLY_SHORTCUT} to apply`;
+
+// The editor's status is held here as well as painted, because the strip is
+// shared: leaving the pane hands the bottom edge to another view, and coming
+// back has to restore what the buffer was last saying (see paintStatusForPane).
+let codeStatusText = '';
+let codeStatusKind: StatusTone = '';
+// The caret, as the code pane's lead. Kept even while the tree owns the strip
+// in split, so switching to code alone answers "where am I" immediately.
+let caretLead = '';
+
+// The editor is up in three of the layouts, and three things key off that one
+// fact: its tenancy on the status strip (its note and its search count are only
+// true while it is visible — and it can still dispatch transactions while
+// hidden, since a theme change reconfigures it, so every publish asks first),
+// and whether a structural search hit can be followed into it.
+function codeOnScreen(): boolean {
+  return activePane === 'code' || activePane === 'split' || (activePane === 'run' && runSource === 'code');
+}
+
+// Its note and its count belong to the editor wherever it is on screen; the
+// LEAD is only its own where there is no tree beside it to own that (in split
+// the tree does, and in run mode it depends which source pane is up).
+function codeOwnsLead(): boolean {
+  return activePane === 'code' || (activePane === 'run' && runSource === 'code');
+}
+
+function setCodeStatus(kind: StatusTone, msg: string): void {
+  codeDirty = kind === 'dirty' || kind === 'bulk' || kind === 'error';
+  codeStatusText = msg;
+  codeStatusKind = kind;
+  if (codeOnScreen()) setStatusNote(msg, kind);
 }
 
 function showCodeTooBig(): void {
@@ -2128,11 +2520,18 @@ function showCodeTooBig(): void {
     codeEditor.destroy();
     codeEditor = null;
   }
-  const div = document.createElement('div');
-  div.className = 'code-toobig';
-  div.textContent = `This document is ${fmtBytes(currentText.length)} — too large for the editable code view.\nUse the tree, or download the original.`;
-  codeHost.replaceChildren(div);
-  setCodeStatus('', '');
+  codeHost.replaceChildren(
+    emptyState(
+      'This document is too large to edit as text',
+      `${fmtBytes(currentText.length)} · use the tree, or download the original bytes.`,
+      { className: 'code-toobig' },
+    ),
+  );
+  // No editor means no caret, and a caret left over from the last document is
+  // worse than none. The strip keeps the fact instead.
+  caretLead = '';
+  setCodeStatus('', `too large to edit as text · ${fmtBytes(currentText.length)}`);
+  if (codeOwnsLead()) setStatusLead('');
 }
 
 async function ensureEditor(): Promise<void> {
@@ -2145,10 +2544,13 @@ async function ensureEditor(): Promise<void> {
     // A deploy replaced the hashed chunks this tab's bundle points at (Pages
     // keeps no old assets). vite:preloadError reloads once; this is the
     // fallback when that already ran or the failure is something else.
-    const div = document.createElement('div');
-    div.className = 'code-toobig';
-    div.textContent = 'jsonloupe was updated since this tab loaded.\nReload the page to open the code view.';
-    codeHost.replaceChildren(div);
+    codeHost.replaceChildren(
+      emptyState(
+        'jsonloupe was updated since this tab loaded',
+        'Reload the page to open the code view.',
+        { className: 'code-toobig' },
+      ),
+    );
     setCodeStatus('error', 'reload needed');
     return;
   }
@@ -2156,8 +2558,30 @@ async function ensureEditor(): Promise<void> {
   codeEditor = await CodeEditor.create({
     host: codeHost,
     theme: currentTheme(),
-    onChange: () => setCodeStatus('dirty', 'edited — ⌘S / Apply to re-parse'),
+    onChange: () => setCodeStatus('dirty', `edited — ${UNAPPLIED_HINT}`),
     onSave: () => void applyCode(),
+    onCaret: (line, column) => {
+      caretLead = `line ${line} · col ${column}`;
+      // In split the tree's path is the lead and this is only kept warm; the
+      // caret is the answer to "where am I" when code is the whole view.
+      if (codeOwnsLead()) setStatusLead(caretLead);
+    },
+    // 8a's count, delivered to the app's own strip instead of being drawn
+    // inside CodeMirror's panel. It is only ever live while that panel is.
+    onSearchCount: (label) => {
+      if (codeOnScreen()) setStatusCount(label ?? '');
+    },
+    // 8g: the sentence the interface never said. Tier 2 (rule 15) because a
+    // bulk rewrite you did not type is a change to notice before moving on —
+    // and it stands until Apply re-parses or the buffer is reloaded.
+    onReplaceAll: (count) => setCodeStatus('bulk', `${count} replaced · ${UNAPPLIED_HINT}`),
+    // Synchronous by necessity — it answers a click that is already happening.
+    // The app's two <dialog>s are bespoke surfaces; a third one for a gate that
+    // fires above 500 matches would be a third copy of the same shell.
+    confirmReplaceAll: (label) =>
+      window.confirm(
+        `Replace ${label}?\n\nThis rewrites the editor buffer immediately. The tree, table and queries only change when you apply.`,
+      ),
   });
 }
 
@@ -2179,39 +2603,35 @@ async function loadCodeContent(): Promise<void> {
   setCodeStatus('', 'in sync with the tree');
 }
 
-async function openCode(): Promise<void> {
-  showPane('code');
-  if (codeBusy) return;
+// Bring the editor up on the current document. Returns false when it did not
+// happen — another mount is already in flight, or the document is past the size
+// the editor takes — so callers do not follow up on a pane that is showing a
+// fallback. Three views mount the same editor; the guards belong with it.
+async function mountCodeEditor(): Promise<boolean> {
+  if (codeBusy) return false;
   if (currentText.length > CODE_MAX) {
     showCodeTooBig();
-    return;
+    return false;
   }
   codeBusy = true;
   try {
     await ensureEditor();
     await loadCodeContent();
-    codeEditor?.focus();
+    return true;
   } finally {
     codeBusy = false;
   }
 }
 
+async function openCode(): Promise<void> {
+  showPane('code');
+  if (await mountCodeEditor()) codeEditor?.focus();
+}
+
 async function openSplit(): Promise<void> {
   showPane('split');
   tree.refresh();
-  if (codeBusy) return;
-  if (currentText.length > CODE_MAX) {
-    showCodeTooBig();
-    return;
-  }
-  codeBusy = true;
-  try {
-    await ensureEditor();
-    await loadCodeContent();
-    syncCodeToSelectionSoon();
-  } finally {
-    codeBusy = false;
-  }
+  if (await mountCodeEditor()) syncCodeToSelectionSoon();
 }
 
 function showTree(): void {
@@ -2239,12 +2659,20 @@ async function applyCode(): Promise<void> {
   currentText = text;
   markCurrentContentEdited();
   docStatsEl.textContent = `${fmtBytes(text.length)} · parsed in ${res.parseMs} ms${res.jsonl ? ' · JSONL' : ''}`;
+  // The applied text is a different document to the one the script ran over —
+  // markCurrentContentEdited above has already marked any result stale — and its
+  // numbers may have gained or lost exactness.
+  setRunLossy(res.hasUnsafeNumbers);
   persistCurrentSnapshot(text, null);
   tree.setTotal(res.totalRows);
   tree.resetSelection();
   setCodeStatus('saved', 'applied ✓ — tree updated');
-  // In split, reformat to canonical + rebuild the line map so reveal stays accurate.
+  // In split, reformat to canonical + rebuild the line map so reveal stays
+  // accurate. Elsewhere the buffer keeps the user's text and diverges from the
+  // map — clear it so follow-the-hit misses to the tree instead of flashing a
+  // wrong line.
   if (paneArea.classList.contains('split')) await loadCodeContent();
+  else codeLineMap = new Map();
 }
 
 async function formatCode(): Promise<void> {
@@ -2266,6 +2694,7 @@ modeSwitch.addEventListener('click', (e) => {
   if (!btn) return;
   if (btn.dataset.mode === 'code') void openCode();
   else if (btn.dataset.mode === 'split') void openSplit();
+  else if (btn.dataset.mode === 'run') void openRun();
   else showTree();
 });
 
@@ -2340,15 +2769,18 @@ function renderHits(results: SearchHit[], header?: string): void {
     searchPanel.appendChild(h);
   }
   if (!results.length) {
-    const none = document.createElement('div');
-    none.className = 'hit none';
-    none.textContent = 'no matches';
-    searchPanel.appendChild(none);
+    searchPanel.appendChild(
+      emptyState('No matches', 'Try fewer characters, or wrap the text in slashes for a regex.', {
+        className: 'hit none',
+      }),
+    );
   }
   results.forEach((hit, i) => {
     const el = document.createElement('div');
     el.className = 'hit';
     el.dataset.i = String(i);
+    // The path the code pane follows this hit by (see the click handler).
+    el.dataset.path = hit.pathText;
     const path = document.createElement('span');
     path.className = 'hit-path';
     path.textContent = hit.pathText;
@@ -2383,12 +2815,24 @@ async function runSearch(): Promise<void> {
     return;
   }
   const total = r.total ?? r.results.length;
-  const header = !total
-    ? undefined
-    : total > r.results.length
-      ? `${total} matches — showing first ${r.results.length}`
-      : `${total} ${total === 1 ? 'match' : 'matches'}`;
-  renderHits(r.results, header);
+  searchTotals = total ? { total, shown: r.results.length } : null;
+  renderHits(r.results, searchHeaderText());
+}
+
+// This box searches the SOURCE document. Everywhere else that is the only
+// document on screen; in run mode there is a second one in the result pane,
+// so the count says which of the two it counted. The suffix is pane-dependent,
+// so the header re-renders from these totals on pane changes — baking it in at
+// search time left a stale `· source` behind after leaving run mode.
+let searchTotals: { total: number; shown: number } | null = null;
+
+function searchHeaderText(): string | undefined {
+  if (!searchTotals) return undefined;
+  const { total, shown } = searchTotals;
+  const scope = activePane === 'run' ? ' · source' : '';
+  return total > shown
+    ? `${total} matches${scope} — showing first ${shown}`
+    : `${total} ${total === 1 ? 'match' : 'matches'}${scope}`;
 }
 
 async function findSameValue(id: number): Promise<void> {
@@ -2412,9 +2856,20 @@ searchBox.addEventListener('keydown', (e) => {
 
 searchPanel.addEventListener('click', async (e) => {
   const el = (e.target as HTMLElement).closest('.hit') as HTMLElement | null;
-  if (!el || el.classList.contains('none')) return;
+  // Only a real hit carries an index; the empty and error states share the
+  // class but reveal nothing, so gate on the index rather than on each of them.
+  if (!el || el.dataset.i === undefined) return;
   const r = await call<{ rowIndex: number; totalRows: number }>({ type: 'reveal', index: Number(el.dataset.i) });
-  showPane('tree');
+  // Follow the hit into the code pane wherever one is on screen, instead of
+  // pulling the user back to the tree. The hit's path is already the split
+  // view's line-map key — both come from the worker's one path formatter — so
+  // this reuses that map rather than inventing a position of its own. It is an
+  // EVENT: the line flashes and the pane keeps its cursor, its selection and
+  // its find/replace state. With no line for the path (raw source mode, or
+  // past the map's cap) the tree is still the answer, exactly as before.
+  const line = codeEditor && el.dataset.path ? codeLineMap.get(el.dataset.path) : undefined;
+  if (codeOnScreen() && line !== undefined) codeEditor?.flashLine(line);
+  else showPane('tree');
   tree.setTotal(r.totalRows);
   if (r.rowIndex >= 0) tree.scrollToIndex(r.rowIndex);
 });
@@ -2478,7 +2933,7 @@ async function compareRecent(otherId: string): Promise<void> {
   const text = await store.getText(otherId);
   if (documentRevision !== currentDocumentRevision) return;
   if (text === undefined) {
-    showToast('baseline body missing');
+    showToast('baseline body missing', 'bad');
     return;
   }
   if (text === currentText) {
@@ -2537,7 +2992,7 @@ async function runDiffWith(
     keys: diffKey.value,
   });
   if (!res.ok) {
-    showToast(res.error);
+    showToast(res.error, 'bad');
     return;
   }
   renderDiff(res);
@@ -2588,17 +3043,34 @@ function renderDiff(res: DiffResult): void {
     }
   }
   if (!any) {
-    const none = document.createElement('div');
-    none.className = 'diff-group same';
-    none.textContent = '✓ no differences' + (diffIgnore.value.trim() ? ' (with ignores applied)' : '');
-    diffBody.appendChild(none);
+    // A whole-document verdict, not a heading over a group of rows — so it is
+    // the empty state (contract rule 17), not a .diff-group that opts out of
+    // its own type.
+    diffBody.appendChild(
+      emptyState(
+        'Documents are identical',
+        diffIgnore.value.trim()
+          ? 'Nothing differs once the ignored keys are applied.'
+          : 'Every key and value matched.',
+        { pane: true },
+      ),
+    );
   }
   if (res.truncated) {
     const note = document.createElement('div');
-    note.className = 'diff-group trunc';
+    note.className = 'diff-note';
     note.textContent = 'output truncated at 2000 entries — add ignores to narrow it down';
     diffBody.appendChild(note);
   }
+  // The view's "where am I" for the strip (rule 19): its counts if it found
+  // anything, its verdict if it did not. The `+` is the same truncation mark
+  // the group heads carry.
+  const plus = res.truncated ? '+' : '';
+  setStatusLead(
+    any
+      ? `${res.changed.length}${plus} changed · ${res.added.length}${plus} added · ${res.removed.length}${plus} removed`
+      : 'no differences',
+  );
 }
 
 diffBody.addEventListener('click', async (e) => {
@@ -2638,20 +3110,17 @@ const semanticCompare = new SemanticCompareView(semViewport, semSpacer, semLayer
       if (activePane === 'semantic') semanticCompare.setTotal(r.totalRows);
     });
   },
+  // Compare had a second status strip of its own (28px, no ground, 12px inset,
+  // its own markup) saying the same kind of thing #crumb said 2px taller. There
+  // is one strip now (rule 19): the aligned path leads, the match detail is the
+  // note beside it.
   onSelect: (row) => {
-    semCrumb.replaceChildren();
-    const path = document.createElement('span');
-    path.className = 'crumb-path';
-    path.textContent = row.pathText;
-    semCrumb.appendChild(path);
-    const detail = document.createElement('span');
-    detail.className = 'sem-crumb-detail';
     const pair =
       row.leftIndex !== undefined && row.rightIndex !== undefined && row.leftIndex !== row.rightIndex
         ? ` · index ${row.leftIndex} → ${row.rightIndex}`
         : '';
-    detail.textContent = ` · ${row.status}${row.matchLabel ? ` · ${row.matchLabel}` : ''}${pair}`;
-    semCrumb.appendChild(detail);
+    setStatusLead(row.pathText, { path: true });
+    setStatusNote(`${row.status}${row.matchLabel ? ` · ${row.matchLabel}` : ''}${pair}`);
   },
 });
 
@@ -2689,7 +3158,7 @@ function renderSemanticSummary(res: CompareOk): void {
     identities ? `${identities} identity-aligned` : '',
     conservative ? `${conservative} need review` : '',
   ].filter(Boolean);
-  semPlanSummary.textContent = `alignment plan · ${bits.join(' · ')}`;
+  semPlanBtn.textContent = `alignment plan · ${bits.join(' · ')}`;
 
   const warnings: string[] = [];
   if (res.truncated) {
@@ -2718,10 +3187,11 @@ function renderSemanticPlan(plans: AlignmentPlan[]): void {
     else grouped.set(plan.path, [plan]);
   }
   if (grouped.size === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'sem-plan-empty';
-    empty.textContent = 'No arrays found — object keys are aligned by name.';
-    semPlanBody.appendChild(empty);
+    semPlanBody.appendChild(
+      emptyState('No arrays were aligned', 'Object keys are aligned by name instead.', {
+        className: 'sem-plan-empty',
+      }),
+    );
     return;
   }
 
@@ -2803,13 +3273,17 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   semTitle.textContent = 'aligning…';
   semLeftTitle.textContent = `${diffOtherTitle} · baseline`;
   semRightTitle.textContent = `${currentTitle} · current`;
-  semCrumb.textContent = 'Select an aligned row to inspect its match.';
   semWarning.hidden = true;
-  semPlan.open = false;
+  closeSemPlan();
   semanticCompare.reset();
   searchPanel.hidden = true;
-  $('#ask-panel').hidden = true;
+  askPanel.hidden = true;
+  // Run mode is a pane layout now, so leaving it is showPane's job — the panel
+  // that had to be force-closed here no longer exists.
   showPane('semantic');
+  // showPane hands compare the bottom edge; this is its resting line until a
+  // row is picked.
+  setStatusLead('Select an aligned row to inspect its match.');
 
   const res = await call<CompareOk | CompareError>({
     type: 'compareInit',
@@ -2820,7 +3294,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   });
   if (token !== semanticOpenToken) return;
   if (!res.ok) {
-    showToast(res.error);
+    showToast(res.error, 'bad');
     showPane(failurePane);
     return;
   }
@@ -2832,6 +3306,35 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   semViewport.scrollTop = 0;
 }
 
+// The alignment plan is a popover (index.html, style.css rule 21): the browser
+// renders it in the top layer, so .sem-toolbar's overflow-x cannot clip it, and
+// light dismiss + Esc come with the attribute. Placing it under its own trigger
+// is positionUnder's job, shared with the download-name popover.
+const positionSemPlan = (): void => positionUnder(semPlanBody, semPlanBtn);
+
+// Tracked rather than read back off the element: `hidePopover()` on a popover
+// that is not showing throws, and a browser without popover support would throw
+// on the :popover-open selector too. This stays false there, which is exactly
+// the degradation the stylesheet's display rules assume.
+let semPlanOpen = false;
+
+function closeSemPlan(): void {
+  if (semPlanOpen) semPlanBody.hidePopover();
+}
+
+// beforetoggle, not toggle: it fires synchronously inside the browser's show
+// algorithm, so a frame scheduled from here still lands before the popover's
+// first paint. `toggle` is queued as a task and can arrive after one, which is
+// a visible jump from wherever the unpositioned panel fell.
+semPlanBody.addEventListener('beforetoggle', (event) => {
+  semPlanOpen = (event as ToggleEvent).newState === 'open';
+  semPlanBtn.setAttribute('aria-expanded', String(semPlanOpen));
+  if (semPlanOpen) requestAnimationFrame(positionSemPlan);
+});
+window.addEventListener('resize', () => {
+  if (semPlanOpen) positionSemPlan();
+});
+
 semFilters.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-filter]');
   if (!button) return;
@@ -2840,7 +3343,7 @@ semFilters.addEventListener('click', (event) => {
   void call<CompareOk | CompareError>({ type: 'compareSetView', filter }).then((res) => {
     if (activePane !== 'semantic' || semanticFilter !== filter) return;
     if (!res.ok) {
-      showToast(res.error);
+      showToast(res.error, 'bad');
       return;
     }
     semanticCompare.setTotal(res.totalRows);
@@ -2878,6 +3381,8 @@ semCloseBtn.addEventListener('click', () => {
 
 // ---------- table view ----------
 
+// Must equal .trow's height in style.css (contract rule 8b: one row rhythm
+// across every scrolling list). Virtualized, so the two cannot drift apart.
 const TROW_H = 28;
 let tableCols: string[] = [];
 let tableTotal = 0;
@@ -2955,6 +3460,9 @@ async function openTable(id: number): Promise<void> {
   tableSpacer.style.height = `${tableTotal * TROW_H}px`;
   tableViewportEl.scrollTop = 0;
   showPane('table');
+  // The table's "where am I" is the array it was opened on (rule 19); its row
+  // count is already stated in the bar and does not need saying twice.
+  setStatusLead(currentTablePath, { path: true });
   void renderTable();
 }
 
@@ -3066,6 +3574,17 @@ function fmtNumber(v: number): string {
   return v.toLocaleString('en-IN', { maximumFractionDigits: 3 });
 }
 
+// Two of the result shapes offer the same export, so they build it the same way
+// — one label, one icon, one handler.
+function queryCsvButton(): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.title = 'Download this query result as CSV (RFC 4180)';
+  btn.append(icon('download'), 'CSV');
+  btn.addEventListener('click', () => void exportCsv('query', 'query'));
+  return btn;
+}
+
 // `preview` = live engine-only render while the user is editing the query
 // input; it is styled as provisional and omits the mutating/navigating actions
 // (filter/copy/CSV/reveal) so a half-typed query can't fire a side effect.
@@ -3119,12 +3638,7 @@ function renderAskResult(res: QueryResp, preview = false): void {
       more.textContent = `… +${res.groups.length - 50} more groups`;
       askResult.appendChild(more);
     }
-    if (!preview) {
-      const csvBtn = document.createElement('button');
-      csvBtn.textContent = '⤓ CSV';
-      csvBtn.addEventListener('click', () => void exportCsv('query', 'query'));
-      askResult.appendChild(csvBtn);
-    }
+    if (!preview) askResult.appendChild(queryCsvButton());
   } else if (res.kind === 'rows') {
     const label = document.createElement('div');
     label.className = 'ask-label';
@@ -3156,10 +3670,7 @@ function renderAskResult(res: QueryResp, preview = false): void {
         const objs = res.rows.map((r) => Object.fromEntries(res.cols.map((c, i) => [c, r[i]])));
         void copyText(JSON.stringify(objs, null, 2)).then(() => showToast(`${res.rows.length} rows copied`));
       });
-      const csvBtn = document.createElement('button');
-      csvBtn.textContent = '⤓ CSV';
-      csvBtn.addEventListener('click', () => void exportCsv('query', 'query'));
-      askResult.append(copyBtn, csvBtn);
+      askResult.append(copyBtn, queryCsvButton());
     }
   } else {
     const label = document.createElement('div');
@@ -3393,26 +3904,448 @@ askSaved.addEventListener('click', async (e) => {
   if (!chip) return;
   const id = chip.dataset.id!;
   if ((e.target as HTMLElement).closest('.chip-del')) {
-    await store.removeQuery(id);
+    await store.removeSaved(id);
     await renderSavedChips();
     return;
   }
   const saved = (await store.listQueries()).find((s) => s.id === id);
   if (!saved) return;
   askBox.value = saved.question;
-  void store.touchQuery(id);
+  void store.touchSaved(id);
   await runAsk(saved.query); // engine-only re-run: no API call
+});
+
+// ---------- run mode: source | result ----------
+
+// The ask panel answers questions in the query language; this view answers the
+// ones no query language should have to — a filter with a regex in it, a sum
+// over a computed field, a reshape. It is the fourth LAYOUT of the document
+// rather than a panel over it: source pane on the left, the script's result on
+// the right, both real document surfaces.
+//
+// Two workers, and neither of them is the document's. The script runs in an
+// ephemeral sandbox (run-sandbox.ts) holding nothing but a copy of the text,
+// terminated on the result or on the timeout — which is what keeps
+// `while (true) {}` from taking the app with it. The RESULT then goes into a
+// second doc-worker instance, which owns it exactly as the first owns the
+// document, so a 40 MB result scrolls the way a 40 MB file does. That worker
+// dies on the way out of run mode: results are large and two documents in
+// memory when only one is on screen is a cost with nothing to show for it.
+
+const RUN_TIMEOUT_MS = 10_000;
+const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
+const RUN_PLACEHOLDER = 'data.tasks.filter(t => t.status === "FAILED").length';
+
+const runPane = $('#run-pane');
+const runLossy = $('#run-lossy');
+const runEditorHost = $('#run-editor');
+const runExecBtn = $<HTMLButtonElement>('#run-exec');
+const runStatus = $('#run-status');
+const runErrorEl = $('#run-error');
+const runConsole = $<HTMLDetailsElement>('#run-console');
+const runConsoleBody = $('#run-console-body');
+const runSaved = $('#run-saved');
+const runSaveChip = $<HTMLButtonElement>('#run-save');
+const runSrcSwitch = $('#run-src-switch');
+const runResultLabel = $('#run-result-label');
+const runStaleBadge = $('#run-stale');
+const runViewport = $('#run-viewport');
+const runEmpty = $('#run-empty');
+const runCopyBtn = $<HTMLButtonElement>('#run-copy');
+const runDownloadBtn = $<HTMLButtonElement>('#run-dl');
+const runOpenBtn = $<HTMLButtonElement>('#run-open');
+
+let runEditor: ScriptEditor | null = null;
+let runInFlight = false;
+/** The last run's whole compact result — what copy, download and open hand over. */
+let runResultText = '';
+/** The result's own doc worker. Non-null exactly while run mode is on screen. */
+let runResultChannel: WorkerChannel | null = null;
+/** Which pane the left half is showing. Whatever the user arrived from. */
+let runSource: 'tree' | 'code' = 'tree';
+
+runEmpty.replaceChildren(
+  emptyState(
+    'run a script — the result renders here',
+    'The result is a document: it expands, scrolls and downloads like one.',
+    { pane: true },
+  ),
+);
+
+// Every result action answers null once that worker is gone — leaving run mode
+// terminates it, which rejects whatever was in flight, and the pane those rows
+// would have painted is already off screen. A failure on a channel that is
+// STILL the current one is a real one and says so.
+async function resultCall<T>(msg: Record<string, unknown>): Promise<T | null> {
+  const channel = runResultChannel;
+  if (!channel) return null;
+  try {
+    return await channel.call<T>(msg);
+  } catch (error) {
+    if (channel !== runResultChannel) return null; // torn down under the request
+    showToast(`result pane: ${error instanceof Error ? error.message : String(error)}`, 'bad');
+    return null;
+  }
+}
+
+// The result's tree. Same component, same row-slice protocol, a second callback
+// set over a second worker — no fork, and no table or inline editing, because a
+// derived value is not a document you own (see TreeCallbacks).
+const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'), {
+  fetchRows: async (start, count) => {
+    const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start, count });
+    return r?.rows ?? [];
+  },
+  onToggle: (id, index) => {
+    void resultCall<{ totalRows: number }>({ type: 'toggle', id, index }).then((r) => {
+      if (r) resultTree.setTotal(r.totalRows);
+    });
+  },
+  onCopyPath: (id) => {
+    void resultCall<{ text: string }>({ type: 'nodePath', id }).then((r) => {
+      if (r) void copyText(r.text).then(() => showToast(r.text));
+    });
+  },
+  onCopyValue: (id) => {
+    void resultCall<{ text: string }>({ type: 'nodeValue', id }).then((r) => {
+      if (r) void copyText(r.text).then(() => showToast('value copied'));
+    });
+  },
+  onUnpack: (id, index) => {
+    void resultCall<{ ok: boolean; totalRows: number; error?: string }>({ type: 'unpack', id, index })
+      .then((r) => {
+        if (!r) return;
+        if (!r.ok) showToast(r.error ?? 'not valid JSON', 'bad');
+        else resultTree.setTotal(r.totalRows);
+      });
+  },
+});
+
+function loadLastScript(): string {
+  try {
+    return localStorage.getItem(RUN_SCRIPT_KEY) ?? '';
+  } catch {
+    return ''; // private mode
+  }
+}
+
+function saveLastScript(code: string): void {
+  try { localStorage.setItem(RUN_SCRIPT_KEY, code); } catch { /* private mode */ }
+}
+
+function setRunStatus(msg: string): void {
+  runStatus.hidden = !msg;
+  runStatus.textContent = msg;
+}
+
+// ---------- saved scripts: the ask panel's chips, over the same store ----------
+//
+// A script you kept is the same object to the user as a question you kept — it
+// wears the same chip, deletes the same way, and outlives the document it was
+// written against — so it shares the ask panel's markup, its stylesheet and its
+// object store (db.ts). Pressing one loads it AND runs it: re-running is the
+// only reason it was kept.
+
+/** As many as the ask panel shows — a chip row is a shortcut, not an archive. */
+const SCRIPT_CHIPS_SHOWN = 12;
+
+async function renderScriptChips(): Promise<void> {
+  const saved = await store.listScripts();
+  // `+ save` leads the row and is never re-created, so it keeps focus across a
+  // re-render (deleting a chip with the keyboard lands you back on it).
+  runSaved.replaceChildren(runSaveChip);
+  for (const s of saved.slice(0, SCRIPT_CHIPS_SHOWN)) {
+    const chip = document.createElement('span');
+    chip.className = 'ask-chip';
+    chip.dataset.id = s.id;
+    chip.title = s.script;
+    const label = document.createElement('span');
+    label.textContent = scriptChipLabel(s.script);
+    const del = document.createElement('button');
+    del.className = 'chip-del';
+    del.textContent = '×';
+    del.title = 'Forget this script';
+    chip.append(label, del);
+    runSaved.appendChild(chip);
+  }
+}
+
+async function saveCurrentScript(): Promise<void> {
+  const code = runEditor?.getDoc().trim() ?? '';
+  if (!code) {
+    setRunStatus('nothing to save yet — write a script first');
+    return;
+  }
+  await store.saveScript(code);
+  await renderScriptChips();
+  showToast('script saved');
+}
+
+runSaved.addEventListener('click', async (e) => {
+  const target = e.target as HTMLElement;
+  if (target.closest('#run-save')) return void saveCurrentScript();
+  const chip = target.closest<HTMLElement>('.ask-chip');
+  const id = chip?.dataset.id;
+  if (!id) return;
+  if (target.closest('.chip-del')) {
+    await store.removeSaved(id);
+    await renderScriptChips();
+    return;
+  }
+  const saved = (await store.listScripts()).find((s) => s.id === id);
+  if (!saved || !runEditor) return;
+  runEditor.setDoc(saved.script);
+  void store.touchSaved(id);
+  await runScript();
+});
+
+// True for as long as the document is open (style.css rule 15, tier 1): the
+// script sees plain JS numbers, and this document has some it cannot hold.
+function setRunLossy(hasUnsafeNumbers: boolean): void {
+  runLossy.hidden = !hasUnsafeNumbers;
+}
+
+// The result on screen is no longer about this document. NEVER re-run for them:
+// the script is the user's, and a re-run is theirs to ask for.
+function markRunResultStale(): void {
+  if (runResultText) runStaleBadge.hidden = false;
+}
+
+function clearRunResult(): void {
+  runResultText = '';
+  runStaleBadge.hidden = true;
+  runResultLabel.textContent = 'result';
+  resultTree.resetSelection();
+  resultTree.setTotal(0);
+  runViewport.hidden = true;
+  runEmpty.hidden = false;
+  for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = true;
+}
+
+// A new document resets run mode entirely. The script survives, for the same
+// reason the ask panel's question does: it is the user's own input and is meant
+// to be re-run across documents.
+function resetRunState(hasUnsafeNumbers: boolean): void {
+  setRunLossy(hasUnsafeNumbers);
+  runErrorEl.hidden = true;
+  runConsole.hidden = true;
+  runConsole.open = false;
+  setRunStatus('');
+  resultDownloadName = '';
+  clearRunResult();
+}
+
+// Called from showPane on every exit, so there is one teardown rather than one
+// per way out (another view, a comparison, a new document).
+function exitRunMode(): void {
+  if (!runResultChannel) return;
+  runResultChannel.terminate();
+  runResultChannel = null;
+  clearRunResult();
+}
+
+async function ensureRunEditor(): Promise<void> {
+  if (runEditor) return;
+  let mod: typeof import('./run-editor');
+  try {
+    mod = await import('./run-editor');
+  } catch {
+    // A deploy replaced this tab's hashed chunks — same case ensureEditor
+    // handles for the code view, same fallback.
+    runEditorHost.replaceChildren(
+      emptyState(
+        'jsonloupe was updated since this tab loaded',
+        'Reload the page to run scripts.',
+      ),
+    );
+    return;
+  }
+  runEditor = await mod.ScriptEditor.create({
+    host: runEditorHost,
+    doc: loadLastScript(),
+    placeholder: RUN_PLACEHOLDER,
+    onRun: () => void runScript(),
+    onChange: saveLastScript,
+  });
+}
+
+// Whatever the source pane needs to be showing, mounted. Split arrives on the
+// tree, so run mode entered from split defaults to it — the mini-switch is how
+// you get the other one.
+async function showRunSource(): Promise<void> {
+  showPane('run');
+  for (const b of runSrcSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    b.classList.toggle('on', b.dataset.src === runSource);
+  }
+  if (runSource === 'code') await mountCodeEditor();
+  else tree.refresh();
+}
+
+async function openRun(): Promise<void> {
+  // The source pane starts as the view being left — someone reading raw code
+  // keeps reading it; split (and re-entry) fall back to the tree.
+  if (activePane !== 'run') runSource = activePane === 'code' ? 'code' : 'tree';
+  // Entering a pane layout closes the panels stacked above the panes, like
+  // every other pane swap does.
+  searchPanel.hidden = true;
+  askPanel.hidden = true;
+  if (!runResultChannel) runResultChannel = createWorkerChannel('result');
+  await showRunSource();
+  await ensureRunEditor();
+  void renderScriptChips();
+  runEditor?.focus();
+}
+
+runSrcSwitch.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-src]');
+  const src = btn?.dataset.src;
+  if ((src !== 'tree' && src !== 'code') || src === runSource) return;
+  runSource = src;
+  void showRunSource();
+});
+
+function executeInSandbox(docText: string, code: string): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const sandbox = new Worker(new URL('./run-sandbox.ts', import.meta.url), { type: 'module' });
+    let timer = 0;
+    let settled = false;
+    const finish = (res: RunResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sandbox.terminate();
+      resolve(res);
+    };
+    timer = window.setTimeout(
+      () => finish({ ok: false, error: `script timed out after ${RUN_TIMEOUT_MS / 1000}s`, logs: [] }),
+      RUN_TIMEOUT_MS,
+    );
+    sandbox.onmessage = (e: MessageEvent) => finish(e.data as RunResult);
+    sandbox.onerror = (e) => finish({
+      ok: false,
+      error: e.message || 'the sandbox worker could not be started',
+      logs: [],
+    });
+    sandbox.postMessage({ docText, code });
+  });
+}
+
+// The quiet line on the result bar: what came back, and how much of it. Read
+// from row 0 — the root node — rather than re-parsed here, so the type and the
+// count are the ones the pane is actually showing.
+async function paintResultLabel(): Promise<void> {
+  const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start: 0, count: 1 });
+  const root = r?.rows[0];
+  if (!root) return;
+  const count = root.type === 'object' || root.type === 'array'
+    ? ` ${fmtNumber(root.childCount)}`
+    : '';
+  runResultLabel.textContent = `result · ${root.type}${count}`;
+}
+
+// Hand the result to its own worker and read it back as a document. The guard
+// compares the channel it started with: leaving run mode terminates that worker,
+// and a result that arrives afterwards belongs to a pane that is gone.
+async function showResultDocument(text: string): Promise<void> {
+  const channel = runResultChannel;
+  const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text });
+  if (!res || channel !== runResultChannel) return;
+  if (!res.ok) {
+    // JSON.stringify produced this text, so this is a bug rather than bad input
+    // — say so plainly instead of blaming the script.
+    runErrorEl.textContent = `✗ the result could not be re-read: ${res.error}`;
+    runErrorEl.hidden = false;
+    clearRunResult();
+    return;
+  }
+  runResultText = text;
+  runStaleBadge.hidden = true;
+  runEmpty.hidden = true;
+  runViewport.hidden = false;
+  for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = false;
+  resultTree.resetSelection();
+  resultTree.setTotal(res.totalRows);
+  runViewport.scrollTop = 0;
+  await paintResultLabel();
+}
+
+async function renderRunResult(res: RunResult): Promise<void> {
+  runConsole.hidden = res.logs.length === 0;
+  runConsole.open = false;
+  runConsoleBody.textContent = res.logs.join('\n');
+
+  if (!res.ok) {
+    clearRunResult();
+    runErrorEl.textContent = `✗ ${res.error}`;
+    runErrorEl.hidden = false;
+    setRunStatus('');
+    return;
+  }
+  runErrorEl.hidden = true;
+  setRunStatus(`ran in ${res.ms} ms · ${fmtBytes(res.resultText.length)}`);
+  await showResultDocument(res.resultText);
+}
+
+async function runScript(): Promise<void> {
+  if (runInFlight) return;
+  const code = runEditor?.getDoc().trim() ?? '';
+  if (!code) {
+    setRunStatus('write an expression, or statements ending in a `return`');
+    return;
+  }
+  if (!currentText) {
+    setRunStatus('open a document first');
+    return;
+  }
+  // A run outlives the document it was started on if the user opens another
+  // one mid-flight; the result belongs to the old document, so it is dropped
+  // rather than rendered under the new one.
+  const documentRevision = currentDocumentRevision;
+  runInFlight = true;
+  runExecBtn.disabled = true;
+  runErrorEl.hidden = true;
+  setRunStatus('running…');
+  const res = await executeInSandbox(currentText, code);
+  runInFlight = false;
+  runExecBtn.disabled = false;
+  if (documentRevision !== currentDocumentRevision) return;
+  await renderRunResult(res);
+}
+
+runExecBtn.addEventListener('click', () => void runScript());
+
+runCopyBtn.addEventListener('click', async () => {
+  await copyText(runResultText);
+  showToast('result copied');
+});
+
+// The name popover is shared with the document's ⇩ (see setDownloadSubject);
+// this click only says which subject it is about to name.
+runDownloadBtn.addEventListener('click', () => setDownloadSubject('result', runDownloadBtn));
+
+// Promote the result to a document of its own, through the same open path a
+// file takes — so it lands in recents, gets its own tree, and can be compared,
+// queried or run over in turn. Payload decoding is skipped: this text is
+// already JSON, and a result that happens to be a base64 string is a result,
+// not a payload to unwrap.
+runOpenBtn.addEventListener('click', () => {
+  if (!runResultText) return;
+  const base = currentTitle.replace(/\.[^.]+$/, '').trim();
+  void openText(runResultText, `${base || 'document'} · result.json`, null, null, null, true);
 });
 
 // ---------- keyboard ----------
 
 window.addEventListener('keydown', async (e) => {
   const ae = document.activeElement;
-  // The CodeMirror surface is a contenteditable div, not an <input>/<textarea> —
-  // count focus inside it as "typing" so tree j/k/y/c don't steal its keystrokes
-  // (critical in split, where the tree and editor are on screen together).
+  // A CodeMirror surface is a contenteditable div, not an <input>/<textarea> —
+  // count focus inside either of them as "typing" so tree j/k/y/c don't steal
+  // its keystrokes (critical in split, where the tree and editor are on screen
+  // together, and in the run panel, which sits above an open tree).
   const typing =
-    ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement || (ae != null && codeHost.contains(ae));
+    ae instanceof HTMLInputElement ||
+    ae instanceof HTMLTextAreaElement ||
+    (ae != null && (codeHost.contains(ae) || runEditorHost.contains(ae)));
   // '/' focuses search — but not while the code editor is up (it must type '/').
   if (e.key === '/' && !viewer.hidden && !typing && codeView.hidden && activePane !== 'semantic') {
     e.preventDefault();
@@ -3476,21 +4409,32 @@ window.addEventListener('keydown', async (e) => {
 
 // ---------- theme ----------
 
-const themeIc = $('#theme-ic');
-const themeLabel = $('#theme-label');
+// A two-state segmented switch, the same component the toolbar's mode switch
+// uses: both destinations on screen, the current one filled. The old control
+// spelled the state it was already in (`☾ Dark`) and said nothing about what
+// clicking it would do.
+const themeSwitch = $('#theme-switch');
 
-function paintThemeToggle(): void {
+function paintThemeSwitch(): void {
   const t = currentTheme();
-  themeIc.textContent = t === 'dark' ? '☾' : '☀';
-  themeLabel.textContent = t === 'dark' ? 'dark' : 'light';
+  for (const b of themeSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    const on = b.dataset.theme === t;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
 }
 
-$('#theme-btn').addEventListener('click', () => toggleTheme());
+themeSwitch.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-theme]');
+  const choice = btn?.dataset.theme;
+  if (choice !== 'dark' && choice !== 'light') return;
+  applyTheme(choice);
+});
 onThemeChange((t) => {
-  paintThemeToggle();
+  paintThemeSwitch();
   codeEditor?.setTheme(t);
 });
-paintThemeToggle();
+paintThemeSwitch();
 
 // ---------- sample ----------
 
@@ -3510,7 +4454,7 @@ $('#sample-btn').addEventListener('click', () => {
     embeddedPayload: '{"note":"strings that look like JSON get a {…} un-stringify badge"}',
   };
   openText(JSON.stringify(sample, null, 2), 'sample.json', null).catch((error) => {
-    showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`);
+    showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
   });
 });
 

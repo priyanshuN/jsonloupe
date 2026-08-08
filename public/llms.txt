@@ -13,6 +13,13 @@ tool exists). Documents over ~200 MB are refused with a clear message. With no A
 key configured the page makes zero network requests; the optional ask-in-English
 feature sends field names and types only, never values.
 
+The npm package also exposes `jsonloupe-mcp` for local AI agents. It keeps the
+document outside model context, returns ten query details by default, profiles
+multiple or auto-discovered fields in one scan, compares and aggregates
+int64/decimals exactly, and streams complete filtered results atomically to CSV
+or JSONL. One-off analysis tools accept a file path directly and return a
+reusable document id. The MCP server makes no network calls.
+
 ## Docs
 
 - [Feature spec](https://jsonloupe.dev/spec.html): complete description of parsing,
@@ -25,7 +32,7 @@ feature sends field names and types only, never values.
 
 ## Code
 
-- [Source repository](https://github.com/priyanshuN/jsonloupe): MIT, 250 tests
+- [Source repository](https://github.com/priyanshuN/jsonloupe): MIT, 300+ tests
 - [npm package](https://www.npmjs.com/package/jsonloupe): `npx jsonloupe` runs the
   identical app fully offline from a zero-dependency local server
 

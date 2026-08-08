@@ -3,30 +3,61 @@
    ============================================================================
 
    COMPONENT CONTRACT — read this before adding a control anywhere in the app.
-   Chrome drifts when every surface invents its own sizes; these ten rules are
-   the whole vocabulary. If a new control needs something outside them, change
-   the contract deliberately rather than adding a one-off.
+   Chrome drifts when every surface invents its own sizes; these rules are the
+   whole vocabulary. If a new control needs something outside them, change the
+   contract deliberately rather than adding a one-off.
 
     1. Two button sizes exist: regular --ctl-h (28px) for toolbars, panels and
        dialogs, and mini --ctl-h-mini (20px) for controls sitting inline on a
        row or card. There is no third size.
     2. Labels are lowercase — the app's dominant voice. Acronyms keep their
        case (JSON, CSV, MIT); headings and prose sentences stay sentence case.
-    3. One icon grid: --icon (14px) glyphs centred in a fixed square hit area
+       Headings come in exactly two ranks, both already in the file: SURFACE
+       TITLE (16px/700, --text) names a thing you opened — a page, a dialog, a
+       view; SECTION LABEL (11.5px/400, caps, +0.7px, --accent) names a band
+       inside one. A view does not get a third treatment because it is a view.
+    3. One icon grid: --icon (14px), centred in a fixed square hit area
        (.btn-icon / .btn-icon.btn-mini). Glyph-only controls carry aria-label.
+       The icons are an inline SVG SET — the <symbol> sprite at the top of
+       index.html, .ic here, icon() in main.ts: one 16-unit viewBox, fill none,
+       stroke currentColor at the ONE width .ic declares (1.25 — retuned from
+       1.5 when labels dropped to weight 400, rule 22; the symbols carry no
+       stroke-width so the CSS knob is the only one), round caps and joins,
+       flex-shrink 0. The 16 box is an AUTHORING grid, not a second display
+       size; .ic renders at --icon so this rule still describes ONE grid, and
+       1.25 viewBox units land near 1.1 device px there. Six characters used to do
+       this job (◂ ⇆ ⟳ ⤓ ⚠ ☾) and could not: three optical weights on one bar
+       that no font metric can reconcile, ⤓ absent from most Windows UI stacks,
+       ⚠ arriving in full emoji colour on three platforms. Characters survive
+       only where they are universally covered and carry no weight of their own
+       — ⋯ ×, the ▸ ▾ carets (load-bearing at 13px in a mono column) and ★ ☆.
+       An icon inside a button centres on the CONTROL's box, never on the text
+       baseline: button:has(> .ic) is a flex row, which is what made the old
+       arrows sit a pixel low against their own labels.
     4. One gap scale — --gap-1/2/3/4 = 4/8/12/16px — for control spacing;
        toolbar groups are separated by --gap-4.
     5. One focus ring and one hover treatment, defined once (button:focus-visible
        and .focus-ring:focus-visible below) and reused; never restyled locally.
-    6. Accent FILL lands on at most ONE control per view, and only on a button
-       that commits work (.primary: parse, ask run, apply changes…). Buttons
-       that merely reveal something (`ask`, `compare`) wear the soft tint
-       (.accent-soft/.tb-chip.on); toolbar utilities are quiet (text-only);
-       selection states (mode switch .on) are neutral, not accent. Filled
-       surfaces use the --accent-fill* tokens (brand teal + white ink, same
-       pair both themes — fill and tint must read as ONE hue family, never two
-       button species); --accent itself is text/hairline colour and is never
-       used as a fill.
+    6. Three tiers, and the accent does one job in each. FILL is the LANDING's
+       alone — #parse-btn and .lp-cta, where a marketing page may shout once.
+       Inside the workbench there is no fill: every accent button, whether it
+       reveals (`ask`, `compare`, `choose a file…`) or commits (`apply changes`,
+       `ask run`, `recalculate`), wears the OUTLINE — neutral --btn-bg, accent
+       hairline, accent ink at the base weight — defined once on button.primary
+       and never restated. TINT (--accent-soft) means exactly one thing: this
+       toggle is currently ON (.tb-chip.on, #code-raw.on, .sem-filters .on,
+       #ask-btn.on). Everything else is QUIET (text-only), and selection states
+       that are not accent-worthy (mode switch .on) stay neutral. Filled
+       surfaces use the --accent-fill* tokens (brand teal + white ink, same pair
+       both themes); --accent itself is text/hairline colour, never a fill.
+       Reveal, commit and toggle-on all shared the tint until 2026-08-03: three
+       different meanings on one treatment, and over light's white that tint
+       composited to a grubby near-neutral rather than reading teal.
+       A button's tier is a CLASS on the element — .primary, .btn-quiet, or
+       default (bordered) — declared where the button is written, NEVER
+       inferred from the container it stands in. Buttons migrate between bars
+       (the tree ops live in three different hosts); location-scoped tier
+       rules dressed the same button differently per host until 2026-08-08.
     7. Checkboxes and toggles use the one styled component (.chk); stock browser
        widgets are never visible.
     8. Toasts, chips and badges inherit this radius and type scale — --r-sm for
@@ -34,21 +65,240 @@
     9. Third-party chrome gets themed, not tolerated: the CodeMirror search
        panel is restyled to this contract in both themes, pure CSS, near the
        bottom of this file. Its behaviour is CodeMirror's; its look is ours.
-   10. Operations live on the pane they act on (.code-bar / .tree-bar): if you
-       do it while READING a document it is one click on its pane, never behind
-       the ⋯ menu. The global toolbar carries only document/view concerns
-       (back, title, compare, mode, search, ask); ⋯ is once-per-document-or-
-       less residue. An action gets a glyph instead of a word ONLY when the
-       glyph is universal (◂ back, ⋯ more); anything ambiguous keeps its
-       lowercase label.
-   11. This block is the contract. Extend it here when the vocabulary changes.
+   10. Operations live on the pane they act on: if you do it while READING a
+       document it is one click on its pane, never behind the ⋯ menu. The global
+       toolbar carries only document/view concerns (back, title, compare, mode,
+       search, ask); ⋯ is once-per-document-or-less residue. An action gets a
+       glyph instead of a word ONLY when the glyph is universal (back, ⋯ more);
+       anything ambiguous keeps its lowercase label.
+       REVISED 2026-08-04 — A PANE-SCOPED BAR EXISTS ONLY WHEN THERE IS MORE
+       THAN ONE PANE TO SCOPE TO. The tree is the case that proved it: there is
+       only ever one of it, and collapse / copy / download all act on the
+       DOCUMENT, so in single-pane tree mode they ride the toolbar behind a 1px
+       divider (.tb-tree) and .tree-bar does not exist at all — 91px of stacked
+       chrome and two borders became one 44px bar, which is 44px of document
+       back in the app's default view. In SPLIT there genuinely are two panes,
+       so the strip returns as ONE bar cut at the same column as the panes,
+       each half labelled with the pane it governs and both halves on one
+       baseline; main.ts moves the same three buttons down into the tree half
+       rather than duplicating them. The code bar is the one strip that survives
+       single-pane, and not as an exception: its ops act on an editable text
+       buffer and its status readout is that editor's, neither of which the
+       document has. So the test is not "is this a pane" but "is there a second
+       pane, or material the document itself does not own".
+   11. Two surfaces, and neither of them is --bg. CANVAS (--bg-canvas) is where
+       a document is read: the tree pane and the CodeMirror pane, which are one
+       reading surface interrupted by a divider and must never disagree —
+       code.ts's theme reads this same token rather than carrying its own hex,
+       which is how light drifted to #eef1f6 on one side and #ffffff on the
+       other while dark stayed accidentally in sync. CHROME (--bg-chrome) is
+       everything that frames it: the sidebar and EVERY control strip bordered
+       against a pane — #toolbar, .tree-bar, .code-bar, .diff-head, .sem-head,
+       .table-bar, #status-bar, #ask-panel, #search-panel. A bar stacked directly
+       under another bar takes --bg-chrome-2 so the two stay a visible step
+       apart.
+       ONE STRIP GEOMETRY, and it is not negotiable per bar: --gap-2 / --gap-3
+       padding (8/12), min-height 44px. Every strip that misses it puts its
+       first control on a different x from the strip above, and no two stacked
+       bars come out the same height — invisible one at a time, machined vs
+       assembled when you see them stacked. Two exceptions, both stated:
+       #status-bar is a STATUS line, not a control bar, so it keeps 30px (and
+       the vertical padding that holds 30px) while taking the 12px inset like
+       everything else; .sem-toolbar keeps --bg-chrome-2 because it is deliberately a
+       second bar under a first. A list panel (#search-panel) is the one strip
+       whose box is sized by its rows: it delivers the 12px inset and its height
+       through them, because a panel inset that compounds with a row inset puts
+       the first hit 24px in.
+       Its converse: a sticky column header (#table-header, .sem-columns) is
+       the top edge of the DOCUMENT, not something floating over it, so it
+       takes the canvas and a --border-strong bottom edge — never --bg-elevated,
+       which in light is the same #ffffff as the canvas and leaves the bar above
+       it with no ground at all.
+       Chrome must read as a different surface from canvas, but WHICH DIRECTION
+       is per-theme, not constant — dark has headroom above the canvas and goes
+       lighter (#21262f), light has none above white and goes down to the page
+       tint (#eef1f6). Do not "unify" these into one offset; that is the bug,
+       not the fix.
+       Corollary, and the part that is easy to miss: a CONTROL sitting on chrome
+       takes --bg-canvas, not --bg-elevated-2. That token means "one step off
+       white" and is right for non-field controls inside dialogs, which are
+       white (a FIELD takes the canvas everywhere — rule 14 overrides this for
+       them); on tinted chrome it lands 3 units LIGHTER than its own host and
+       the control disappears. .mode-switch (in the toolbar and in the sidebar's
+       theme switch), .tb-search, .crumb-chip, .doc-row-actions button and every
+       field in #ask-panel all hit this the day the bars were tinted. Dark never
+       showed it (that token is 9-12 units off chrome there), so light is where
+       this must always be checked.
+       Last tier: --bg-well, the ground a FLOATING card sits on, deeper than
+       everything else so the card lifts. App mode had the paste card's ground
+       and the sidebar both on #eef1f6 with only the sidebar's 1px border
+       between them. Note it steps the opposite way from --bg-chrome-2 — that
+       stacks a bar above chrome, this sinks a well below it — which is why they
+       cannot share a token even though light has so little room that their
+       values land close.
+   12. Motion is decoration here — every transition and keyframe dresses a state
+       change that has already happened. One prefers-reduced-motion block at the
+       very bottom of this file collapses all of it, so new animation never
+       needs its own opt-out. If you ever add motion that carries MEANING rather
+       than polish, that is the moment to revisit this rule, not to exempt a
+       selector from it. State transitions run at ONE speed: var(--dur)
+       var(--ease), never a literal duration — fourteen identical 0.12s
+       literals were the weight-rot pattern in miniature. Keyframe decorations
+       (toasts, spinners) keep their own timing.
+   13. Digits that stack in a column get font-variant-numeric: tabular-nums —
+       the tree gutter, #doc-stats, .doc-row-meta, .chunk-range, transport
+       figures. Proportional figures make a right-aligned column ripple as it
+       crosses 9 → 99 → 999. On a tool whose subject is numbers this is not
+       optional.
+   14. ONE FIELD RECIPE, for anything you type into: min-height --ctl-h,
+       padding 0 --gap-3, --bg-canvas, 1px --border, 12.5px mono, plus rule 5's
+       focus ring — which is why that ring's selector reads input, textarea,
+       select and not just input. The canvas holds wherever the field sits, on
+       chrome or inside a dialog; a field is the one control whose ground must
+       always read as "type here". Twelve fields were drawn twelve ways before
+       this rule existed. Two variations, both structural rather than taste: a
+       textarea takes vertical padding too (--gap-2/--gap-3) because its text
+       has more than one line, and a field that needs a standing label wears it
+       INSIDE the shell (.field > .field-prefix) so the placeholder carries the
+       example only — a label in the placeholder is the thing that truncates
+       first and it disappears the moment there is content.
+       The corollary that frees a token: --bg-inset + --border-strong stops
+       being a third field style and becomes the READ-ONLY OUTPUT surface —
+       the codec result panes, .disc-pre. Two recipes with a reason, instead of
+       three by accident.
+   15. Status has THREE TIERS and they map to urgency, never to which surface
+       you are standing on. tier 1 INK ONLY — transient and expected (edit
+       status, decode success, a `within` budget verdict); tier 2 INK +
+       HAIRLINE — notice it, then proceed (near-limit, input repaired, an
+       ambiguous row); tier 3 INK + HAIRLINE + SOFT FILL — you must respond
+       (exceeded, parse error, decode failure, key rejected). --ok/--warn/
+       --danger and their -soft pairs already cover all three, so this is a
+       mapping, not new colour. Hue alone does not carry rank: a successful
+       budget check and a failed decode drawn at the same strength are the
+       same device, and the reader has to know the domain to tell them apart.
+   16. The inline pill has TWO SHAPES, split by whether clicking does anything.
+       STATIC TAG — 4px radius, --bg-inset, no border: byte weights, count
+       badges. It is a label, so it gets no affordance. ACTIONABLE CHIP —
+       999px, --bg-canvas ground, accent on hover: crumb chips, saved queries.
+       Four shapes over three surfaces used to make the distinction by
+       accident; this makes the same distinction on purpose.
+   17. ONE EMPTY STATE, two sizes. Both centred, both --sans, both a dim line
+       plus a fainter second line saying what to do next — an empty surface is
+       the first thing a new user reads and the last thing anyone reads when
+       something breaks, so it never stops at naming the emptiness. Only the
+       padding changes, by whether it fills a pane (34px 14px, 13px) or sits in
+       a list or panel (18px 14px, 12.5px). A FAILURE is not an empty state: it
+       takes tier 3 from rule 15 rather than being coloured text in a row.
+   18. One meaning per device, in both directions.
+       COLOUR: --c-key/--c-string/--c-number/--c-boolean/--c-null paint JSON
+       VALUES and nothing else. "Changed" is --warn, which is what --warn means;
+       borrowing the number's hue for it made a syntax token semantic and left
+       the two ambers indistinguishable in light (#b06400 vs #a56a00).
+       LEFT EDGE: an inset 2px bar means SELECTED, everywhere. Inset, because it
+       never changes the element's box, so a selected row cannot shift its own
+       content; and only selected, because a hover bar identical to a selection
+       bar means "your cursor is here" in one pane and "this is the node" in
+       another. Hover keeps its background change and nothing more.
+   19. THE BOTTOM EDGE IS THE APP'S, not the view's. There is ONE status line,
+       #status-bar, and it is the last thing in #viewer under every pane: the
+       geometry #crumb had (30px, the 12px inset, --bg-chrome, top border),
+       present whether or not the view has anything to say. Each view fills the
+       same three slots — LEAD (its "where am I": the tree/table path, the code
+       caret, the diff verdict, the aligned row), CHIPS (what that lead earns)
+       and TRAIL (what the view wants to say about it: the editor's unapplied
+       state, a live match count, the same-value chip). Four of six views used
+       to end in nothing at all, tree and compare ended in two different strips
+       (30px/16px inset/chrome vs 28px/12px/no ground), and the code view had
+       chrome at both edges and its own status line at NEITHER: its readout sat
+       upstairs in .code-bar sharing a row with `apply changes`, while the
+       bottom edge was on loan to CodeMirror's search panel, which was showing
+       the user a live count the app itself never knew about. A view does not
+       get to own the bottom of the window; if it needs to say something, it
+       says it here. An empty strip is a bug, not a state — the resting line
+       ("Select a row to see its path.") is part of the view's job.
+   20. HOVER REVEALS, IT NEVER REFLOWS. A control that appears on a row —
+       .actions in the tree — sits in a gutter that is reserved on every row of
+       that list, always (112px there, the two-action width), and fades in
+       (opacity + visibility) rather than entering the flex line. Actions that
+       arrive at full width push the value aside, so the content moves under
+       the pointer at the exact moment the pointer arrives, and a value that
+       was fully readable truncates by fourteen characters for as long as you
+       are pointing at it. Its other
+       half: the same controls appear on :focus-within and the row is a tab
+       stop, because "hover only" is not a state a keyboard or a touchscreen
+       can enter — display:none took copy-path, copy-value and view-as-table
+       out of the tab order entirely, so a pointer was the only way to them.
+   21. A PANEL THAT FLOATS OVER THE PAGE RENDERS TO THE TOP LAYER — a <dialog>
+       or a [popover], never position:absolute inside a strip. #sem-plan-body
+       was the exception and it proved the rule: it hung off .sem-toolbar, that
+       bar takes overflow-x:auto below 900px, and an ancestor with non-visible
+       overflow clips absolutely-positioned descendants — so the one control
+       that fixes a wrong array alignment was cut down to a 42px strip you
+       scrolled sideways. `popover` also brings light-dismiss and Esc, which
+       the <details> it used to be never had. The one absolute survivor is
+       .menu, which is anchored to #toolbar and has no scrolling ancestor to be
+       clipped by; the day it gains one, it moves too.
+   22. TWO TEXT WEIGHTS EXIST: 400 and 700, on every --sans and --mono surface.
+       The system faces those stacks fall back to (DejaVu on Linux) ship
+       nothing between Book and Bold — any other value gets synthesized by the
+       rasterizer and reads as smear at UI sizes, which is the blur this rule
+       exists to kill. 700 is for the few things that outrank their neighbours:
+       surface titles, the brand mark, the active document, table headers,
+       strong. Everything else — labels, values, controls, chips — is 400; caps,
+       tracking and colour do the ranking, not weight. ONE NAMED EXCEPTION: the
+       landing and spec pages set in --display (Space Grotesk, shipped, real
+       400-700) keep their 500/600 ladder — those faces are real on every
+       platform, so the synthesis argument does not reach them.
+   23. THE TYPE RAMP: eight sizes, tokenized as --fs-{micro,label,chip,body,
+       code,base,lede,title} — the only font sizes the workbench UI may use.
+       22 distinct literal sizes had accreted (six of them within 2.5px of
+       each other); the ramp's step values equal the sizes the app used most,
+       so adoption moved almost nothing. Landing/spec display sizes (17-58px)
+       stay literal under rule 22's exception. Letter-spacing belongs to the
+       two uppercase label RANKS, not to individual selectors. The spacing
+       grid is --gap-1..4 (4/8/12/16): a literal that RESTATES a gap value is
+       a lint error; an off-grid literal is legal but is an OPTICAL decision —
+       intent, not drift.
+   24. This block is the contract, and it is ENFORCED: scripts/lint-contract.mjs
+       runs in CI and fails the build on off-contract weights, hex outside the
+       token blocks, stroke-width outside .ic, literal transition durations,
+       and token pairs that fall below their contrast floors. Extend the
+       contract here when the vocabulary changes — and teach the linter the
+       same rule in the same commit, or the rule is prose. Every control in
+       every tier/state/theme is on one page: /styleguide.html, the stare
+       page — check it after any token change.
    ========================================================================== */
 
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
 
+  /* Rule 12: the ONE state-transition speed. Every hover/focus/active dressing
+     reads this pair; keyframe decorations (toasts, spinners) keep their own
+     durations. Mode-invariant, so it lives here rather than per theme. */
+  --dur: 0.12s;
+  --ease: ease;
+
   --bg: #191d24;
+  /* Rule 11: the document reading surface. Same value as --bg here — dark was
+     designed with one surface — but it is a SEPARATE role, and light proves
+     why: chrome and canvas want different values there. */
+  --bg-canvas: #191d24;
+  /* Rule 11: app chrome that frames the document — the sidebar. It must read as
+     a DIFFERENT surface from --bg-canvas; which direction achieves that is a
+     per-theme fact, not a constant. Dark has headroom above the canvas, so
+     chrome goes lighter, exactly as it always has here. */
+  --bg-chrome: #21262f;
+  /* A SECOND chrome tier for a bar stacked under another bar (.sem-toolbar
+     under .sem-head). One step further from the canvas, same per-theme
+     direction as --bg-chrome — dark keeps going up, so this is the value that
+     bar already had. */
+  --bg-chrome-2: #2a303b;
+  /* The ground a floating card sits on — the DEEPEST surface, below even the
+     canvas, so the card lifts off it. Note this steps the opposite way from
+     --bg-chrome-2: that one stacks a bar above chrome, this one sinks a well
+     below it, and only in dark do the two directions visibly diverge. */
+  --bg-well: #15181e;
   --bg-elevated: #21262f;
   --bg-elevated-2: #2a303b;
   --bg-inset: #171b21;
@@ -65,7 +315,6 @@
 
   --brand: #88c0d0;
   --accent: #86c8dc;
-  --accent-hover: #9ad6e8;
   --accent-contrast: #10181e;
   --accent-soft: rgba(134, 200, 220, 0.14);
   --accent-line: rgba(134, 200, 220, 0.5);
@@ -77,25 +326,30 @@
   --accent-fill-edge: #37718a;
   --accent-fill-hover: #427f9a;
 
+  /* Rule 15's three tiers. The -soft pair is the tier-3 FILL, so it only ever
+     appears on a state you must respond to — --warn-soft has no user today
+     because nothing warn-coloured is currently blocking, and it stays declared
+     so the next one does not invent a fill of its own. */
   --danger: #e06c75;
   --danger-soft: rgba(224, 108, 117, 0.14);
   --ok: #a3be8c;
   --warn: #e6b35c;
-  --warn-soft: rgba(230, 179, 92, 0.16);
 
   --c-key: #8fbcdb;
   --c-string: #a3be8c;
   --c-number: #ecc384;
   --c-boolean: #c69ac2;
   --c-null: #79839a;
-  --c-punct: #6b7484;
+  /* #7c869a, not #6b7484: the editor rendered this value all along (code.ts
+     carried its own copy until 2026-08-08); the token adopts what was actually
+     on screen. */
+  --c-punct: #7c869a;
 
   --btn-bg: #262c36;
   --btn-bg-hover: #2f3743;
   --btn-bg-active: #1e232b;
   --btn-border: #3c4451;
   --btn-border-hover: #55617640;
-  --btn-inset: transparent;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
@@ -108,6 +362,21 @@
   color-scheme: light;
 
   --bg: #eef1f6;
+  /* Rule 11: white, not the #eef1f6 chrome tint — a long read wants the least
+     tinted ground, and the code pane has always been white here. */
+  --bg-canvas: #ffffff;
+  /* Rule 11: chrome goes DOWN here, because the canvas is already white and
+     there is no headroom above it. Same #eef1f6 the page has always used —
+     until now the sidebar was --bg-elevated, i.e. white on white, separated
+     from the document by a single hairline and nothing else. */
+  --bg-chrome: #eef1f6;
+  /* His call: a real step, not flat. Light goes DOWN from chrome (no headroom
+     above white), which is why this cannot be one shared offset with dark. */
+  --bg-chrome-2: #e5e9f1;
+  /* App mode put the paste card's ground and the sidebar on the same #eef1f6,
+     so the only thing dividing them was the sidebar's 1px border. The well
+     sinks below chrome and gives the white card something to lift off. */
+  --bg-well: #e7ebf3;
   --bg-elevated: #ffffff;
   --bg-elevated-2: #f1f4f9;
   --bg-inset: #f7f9fc;
@@ -120,13 +389,15 @@
 
   --text: #1e2632;
   --text-dim: #5c6675;
-  --text-faint: #949dac;
+  /* #808896, darkened from #949dac (2.74:1 on white — under even the 3.0
+     placeholder floor). This value holds ≥3.0 on both canvas and chrome; the
+     lint-contract contrast gate now enforces it. */
+  --text-faint: #808896;
 
   --brand: #3f7d90;
   /* Accent = the brand's loupe teal (nudged darker so white button text keeps
      AA contrast), matching the dark theme where accent and brand already agree. */
   --accent: #37718a;
-  --accent-hover: #2d5f75;
   --accent-contrast: #ffffff;
   --accent-soft: rgba(63, 125, 144, 0.12);
   --accent-line: rgba(55, 113, 138, 0.55);
@@ -141,14 +412,17 @@
   --danger-soft: rgba(207, 52, 80, 0.09);
   --ok: #227a4b;
   --warn: #a56a00;
-  --warn-soft: rgba(176, 100, 0, 0.1);
 
   --c-key: #2f6fb0;
   --c-string: #217a49;
-  --c-number: #b06400;
+  /* #ab6100: the old #b06400 measured 4.498:1 on white — a hair under the 4.5
+     text floor the linter holds syntax inks to. */
+  --c-number: #ab6100;
   --c-boolean: #8148b5;
-  --c-null: #97a0af;
-  --c-punct: #97a0af;
+  /* #848d9d, darkened from #97a0af (2.64:1 on white — under the 3.0 faint
+     floor), same treatment --text-faint got. */
+  --c-null: #848d9d;
+  --c-punct: #848d9d;
 
   /* Light-mode elevation runs DOWNWARD: a control with a body sits one step
      darker than its surface (white-on-white buttons were ten 1px outlines). */
@@ -157,7 +431,6 @@
   --btn-bg-active: #dde3ec;
   --btn-border: #d4dae3;
   --btn-border-hover: #b9c2d0;
-  --btn-inset: transparent;
 
   --shadow-sm: 0 1px 2px rgba(23, 40, 70, 0.08);
   --shadow: 0 12px 32px rgba(23, 40, 70, 0.12);
@@ -181,10 +454,32 @@
   --ctl-h: 28px;
   --ctl-h-mini: 20px;
   --icon: 14px;
+  --bar-h: 44px;
   --gap-1: 4px;
   --gap-2: 8px;
   --gap-3: 12px;
   --gap-4: 16px;
+  --r-xs: 4px;
+  --r-pill: 999px;
+
+  /* Rule 24 — the TYPE RAMP: the only font sizes the workbench UI may use.
+     Step values equal the sizes the app already used most, so adopting the
+     ramp moved almost nothing; the absorbed strays (9/9.5→micro, 11→chip,
+     12→body, 13.5→code, 14.5→lede) each shifted ≤1px. Landing/spec display
+     sizes (17-58px) are rule 22's exception territory and stay literal. */
+  --fs-micro: 10px;
+  --fs-label: 10.5px;
+  --fs-chip: 11.5px;
+  --fs-body: 12.5px;
+  --fs-code: 13px;
+  --fs-base: 14px;
+  --fs-lede: 15px;
+  --fs-title: 16px;
+
+  /* The one focus/attention glow recipe, accent and danger flavors (rule 5's
+     box-shadow sibling — the outline ring is defined at .focus-ring). */
+  --ring: 0 0 0 3px var(--accent-soft);
+  --ring-danger: 0 0 0 3px var(--danger-soft);
 }
 
 /* Self-hosted so the public pages issue zero third-party requests — the page
@@ -211,7 +506,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 var(--sans);
+  font: var(--fs-base)/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -221,7 +516,7 @@ html, body {
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 3px solid transparent;
   background-clip: padding-box;
 }
@@ -242,14 +537,21 @@ button {
   border-radius: var(--r-sm);
   min-height: var(--ctl-h);
   padding: 0 var(--gap-3);
-  font: 500 12.5px var(--sans);
+  /* 400, not 500: Linux system fonts (DejaVu) ship no Medium face, so any
+     mid-weight gets synthesized — the smear reads as blur at this size. */
+  font: 400 var(--fs-body) var(--sans);
   cursor: pointer;
   /* Depth comes from border + the surface underneath, like the tree rows.
      Shadows only on things that float: menus, dialogs, toasts. */
   box-shadow: none;
-  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 button:hover { border-color: var(--btn-border-hover); background: var(--btn-bg-hover); }
+/* One gap-filler for every flex bar and dialog action row. It used to be scoped
+   to .code-bar/.tree-bar/.sem-head, which silently made the identical <span> in
+   the baseline and transport dialogs a zero-width no-op — `cancel` sat glued to
+   its neighbour instead of being pushed to the far edge. */
+.spacer { flex: 1; }
 /* Rule 5: the one focus ring, stated once. .focus-ring carries it to widgets
    that are neither a button, a link nor an input. */
 button:focus-visible,
@@ -257,10 +559,50 @@ a:focus-visible,
 .chk:focus-visible,
 .cm-panel.cm-search input[type='checkbox']:focus-visible,
 .focus-ring:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Forced-contrast environments flatten the accent — a dotted style survives
+   any palette (Carbon ships the same fallback). */
+@media screen and (prefers-contrast: more) {
+  button:focus-visible,
+  a:focus-visible,
+  .chk:focus-visible,
+  .cm-panel.cm-search input[type='checkbox']:focus-visible,
+  .focus-ring:focus-visible { outline-style: dotted; }
+}
 /* Press darkens instead of moving — a data tool should not bounce. */
 button:active { background: var(--btn-bg-active); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* Rule 3: the icon set. The sprite is a definitions-only <svg> — it must take
+   no space and paint nothing itself; only its <symbol>s are ever rendered,
+   through <use>. */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+/* One box for every icon, at the --icon grid — the 16-unit viewBox scales into
+   it. Stroke, weight and joins come from the symbol; the colour comes from the
+   button, because currentColor resolves against whatever the control's own tier
+   set. flex-shrink so a squeezed bar takes the LABEL's width, never the icon's,
+   which is how a character set loses its arrows first. */
+.ic {
+  display: block;
+  width: var(--icon);
+  height: var(--icon);
+  flex-shrink: 0;
+  /* The whole sprite's stroke, one knob (the symbols carry no stroke-width of
+     their own). 16/14 viewBox units = EXACTLY 1 device px at --icon (2 on
+     hidpi) — retuned from 1.5 (≈1.31px, all smear) when button labels dropped
+     to weight 400 (rule 22) and the icons read heavier than their own text.
+     Keep this an integer number of device px; fractions render as AA blur,
+     the same disease rule 22 kills in type. */
+  stroke-width: 1.143;
+}
+/* An icon centres on the control's box, not on the text baseline (rule 3), so
+   any button carrying one becomes a flex row. --gap-1 between icon and label:
+   they are one thing, not two controls. */
+button:has(> .ic) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-1);
+}
 /* Rule 3: glyph-only controls — one square hit area, one glyph size. */
 .btn-icon {
   display: inline-flex;
@@ -281,25 +623,68 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-unpack,
 .chip-del,
 .crumb-chip,
+.codec-box-head button,
+#run-exec,
 #ask-query-line button {
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
 }
-.btn-icon.btn-mini { width: var(--ctl-h-mini); height: var(--ctl-h-mini); padding: 0; font-size: 12px; }
+.btn-icon.btn-mini { width: var(--ctl-h-mini); height: var(--ctl-h-mini); padding: 0; font-size: var(--fs-body); }
 
-/* Primary — commits work. His call 2026-08-02: inside the WORKBENCH the tint
-   is the only accent treatment (fill + tint + quiet on one working page read
-   as three button species). The solid fill survives on the landing only
-   (#parse-btn below, .lp-cta), where a marketing page shouting once is right. */
-button.primary {
-  background: var(--accent-soft);
+/* The OUTLINE tier (rule 6) — the workbench's ONLY accent treatment, stated
+   once here and never restated. It covers both jobs a non-quiet button does on
+   a working page: revealing something (`ask`, `compare`, `choose a file…`) and
+   committing work (`apply changes`, `ask run`, `recalculate`). His call
+   2026-08-02 was that fill + tint + quiet read as three button species, so the
+   workbench kept only the tint; 2026-08-03 that tint became this outline —
+   over light's white it composited to a grubby near-neutral, and sharing it
+   with toggled chips made a button and an already-engaged toggle identical.
+   The solid fill survives on the landing only (#parse-btn below, .lp-cta),
+   where a marketing page shouting once is right. Separation from the quiet
+   utilities beside them comes from the accent hairline and ink; nothing in the
+   workbench needs to shout twice. */
+button.primary,
+#ask-btn,
+#compare-btn,
+#baseline-file-btn {
+  background: var(--btn-bg);
   border-color: var(--accent-line);
   color: var(--accent);
-  font-weight: 600;
   box-shadow: none;
 }
-button.primary:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* The QUIET tier — rule 6's text-only utilities, stated once. Tier is a CLASS
+   on the button, never inferred from the bar it stands in: the three document
+   ops (collapse / copy / download) migrate between the toolbar, the split
+   strip and the code bar, and location-scoped rules dressed them differently
+   per host — bordered in one bar, quiet in the next, same button. */
+.btn-quiet {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-dim);
+}
+.btn-quiet:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: transparent;
+}
+/* Press stays in the quiet family. Without these, the base button:active
+   background (the BORDERED tier's pressed color) bled through on transparent
+   controls — a press flashed the wrong tier. Same guard for the other
+   transparent controls below (.tb-chip, .mode-switch button). */
+.btn-quiet:active:not(:disabled),
+.tb-chip:active,
+.mode-switch button:active {
+  background: var(--bg-hover);
+  border-color: transparent;
+}
+.mode-switch button:active { border: none; }
+button.primary:hover,
+#ask-btn:hover,
+#compare-btn:hover,
+#baseline-file-btn:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
 #parse-btn {
   background: var(--accent-fill);
   border-color: var(--accent-fill-edge);
@@ -307,39 +692,101 @@ button.primary:hover { background: color-mix(in srgb, var(--accent) 18%, transpa
 }
 #parse-btn:hover { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
 
-/* Tinted — reveals something. Same colour at a third of the volume. */
-button.accent-soft {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-button.accent-soft:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
-button.ghost {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--text-dim);
-}
-button.ghost:hover { background: var(--bg-hover); color: var(--text); border-color: transparent; }
-
-input[type='text'], input:not([type]), input[type='password'] {
-  background: var(--bg-elevated-2);
+/* Rule 14: the one field recipe, stated once for everything you type into.
+   Checkboxes are rule 7's component and file inputs are always hidden, so both
+   are excluded here rather than being overridden six rules later. The exclusion
+   sits inside :where() so it filters without adding specificity — this is the
+   floor every field starts from, and a single class (.field > input,
+   .codec-card textarea) has to be able to override it. */
+input:where(:not([type='checkbox']):not([type='file'])),
+textarea,
+select {
+  min-height: var(--ctl-h);
+  padding: 0 var(--gap-3);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text);
-  padding: 6px 11px;
-  font: 12.5px var(--mono);
+  font: var(--fs-body) var(--mono);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-input:focus {
+/* The one variation the recipe allows: more than one line of text needs the
+   vertical inset too. */
+textarea { padding: var(--gap-2) var(--gap-3); }
+/* Rule 5's ring, widened per rule 14. Bare `input:focus` never matched a
+   textarea or a <select>, so the codec card's textarea — the largest target in
+   the app — and every picker in the transport dialog and the alignment plan
+   were the only focusable controls without one. */
+input:focus,
+textarea:focus,
+select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
 }
 ::placeholder { color: var(--text-faint); }
+
+/* A field shell: the recipe on a flex box so something can sit INSIDE the
+   field beside the input — a standing label (.field-prefix, rule 14) or the
+   search field's mode chip. The input inside goes bare, and the shell carries
+   the border, the ground and the focus ring for it, so the whole box is the
+   field and a click anywhere in it lands in the text. */
+.field,
+.tb-search {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  /* 160, down from 220: the toolbar must hold one row at 1440 in tree view
+     (it wrapped below ~1505). The placeholder still fits; past this the field
+     is the one control that can give, because it FLEXES back all the width a
+     wide window offers. */
+  min-width: 160px;
+  min-height: var(--ctl-h);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.field:focus-within,
+.tb-search:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+.field { gap: var(--gap-2); padding: 0 var(--gap-3); }
+.field > input,
+.tb-search > input {
+  flex: 1;
+  min-width: 0;
+  /* The SHELL carries the recipe's --ctl-h; if the input kept its own it would
+     add its 28px inside the shell's 28px and push the field to 30. */
+  min-height: 0;
+  /* Stretch to the shell's full height: the whole field is the input, not a
+     text-height strip floating in it. */
+  align-self: stretch;
+  background: transparent;
+  border: none;
+  /* The shell wears the ring on :focus-within; without this the inner input
+     draws a second one three pixels inside the first. */
+  box-shadow: none;
+}
+/* The prefix owns the shell's inset, so the input's text starts after it. */
+.field > input { padding: 0; }
+/* No shell inset of its own — the input carries the contract's 12px so the
+   trailing chip can sit tight against the right edge. */
+.tb-search > input { padding: 0 var(--gap-3); }
+/* Rule 14's standing label, and the ONE small-caps label device in the app. It
+   has two homes and they are the same device: INSIDE the shell on a one-line
+   field (.field-prefix), and ABOVE the box everywhere a shell has no baseline
+   to seat a prefix on (.standing-label — a textarea, a grid column, the pane a
+   strip's controls govern). Markup writes it lowercase (rule 2); the caps are
+   this rule's, so the same string reads right in a sentence and here. */
+.field-prefix,
+.standing-label {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  user-select: none;
+}
 
 /* Rule 7: the one checkbox — ours and CodeMirror's search panel share it, so
    the widget is defined exactly once. Stock browser checkboxes never render. */
@@ -351,12 +798,12 @@ input:focus {
   height: var(--icon);
   margin: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: var(--bg-elevated-2);
   cursor: pointer;
   display: inline-grid;
   place-content: center;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 .chk:hover, .cm-panel.cm-search input[type='checkbox']:hover { border-color: var(--btn-border-hover); }
 .chk::after, .cm-panel.cm-search input[type='checkbox']::after {
@@ -371,10 +818,67 @@ input:focus {
 .chk:checked, .cm-panel.cm-search input[type='checkbox']:checked { background: var(--accent); border-color: var(--accent); }
 .chk:checked::after, .cm-panel.cm-search input[type='checkbox']:checked::after { opacity: 1; }
 
+/* ---------- headings & empty states ---------- */
+
+/* Rule 2, the SURFACE TITLE rank: a page, a dialog and a view are the same
+   rank — "a thing you opened" — and each one used to title itself differently
+   (18/660, 16/bold, 13/bold accent). The section-label rank lives on
+   .codec-card h2, the only band label in the app. */
+.codec-head h1,
+.baseline-head h2,
+.transport-head h2,
+.sem-heading strong {
+  font-size: var(--fs-title);
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Rule 17: the one empty state. Every surface that can be empty had invented
+   its own (two centred and four not, two mono and four sans, 5px to 40px of
+   padding) — the least designed part of the app and the first thing a new user
+   reads. The legacy class names stay as the hooks the renderers already use;
+   the treatment is stated once here. */
+.empty-state,
+.recents-empty,
+.baseline-empty,
+.transport-loading,
+.transport-results-empty,
+.sem-plan-empty,
+.hit.none,
+.code-toobig {
+  display: block;
+  /* auto, because .hit.none arrives carrying a row height it is no longer a
+     row for. */
+  height: auto;
+  padding: 18px 14px;
+  color: var(--text-dim);
+  font: var(--fs-body) var(--sans);
+  line-height: 1.55;
+  text-align: center;
+  cursor: default;
+}
+/* Full pane — a whole view with nothing in it, rather than a gap in a list. */
+.empty-state.is-pane,
+.transport-loading,
+.transport-results-empty,
+.code-toobig { padding: 34px 14px; font-size: var(--fs-code); }
+/* The second line: what to do next. Four of the six used to stop at naming the
+   emptiness, which tells a new user nothing they did not already know. */
+.empty-hint {
+  display: block;
+  margin-top: var(--gap-1);
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+}
+
 /* ---------- sidebar ---------- */
 
 #sidebar {
-  background: var(--bg-elevated);
+  /* Rule 11: chrome, not document. --bg-elevated made this white on white in
+     light — the shell and the thing being read were the same surface, with only
+     the hairline telling them apart. Dark is unaffected: --bg-chrome carries
+     the same #21262f the sidebar already had. */
+  background: var(--bg-chrome);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -393,8 +897,8 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-weight: 650;
-  font-size: 13.5px;
+  font-weight: 700;
+  font-size: var(--fs-code);
   letter-spacing: 0.1px;
 }
 /* The brand is a link to the product page (./#about, new tab); it must keep
@@ -412,65 +916,86 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 .side-label {
   padding: 14px 14px 6px;
-  font: 600 10.5px var(--sans);
+  font: 400 var(--fs-label) var(--sans);
   letter-spacing: 0.9px;
   text-transform: uppercase;
   color: var(--text-faint);
 }
-#recents { overflow-y: auto; flex: 1; padding: 2px 0 8px; }
-.recents-empty { color: var(--text-faint); padding: 12px 14px; font-size: 12.5px; line-height: 1.6; }
+#recents { overflow-y: auto; flex: 1; padding: 2px 0 var(--gap-2); }
 
-/* Flat full-width list rows (3c): no card borders or radius — the selected
-   state is a band + brand rail, and rows bleed edge to edge. The last card
-   chrome in an otherwise flat app read as a different design. */
-.recent {
+/* ONE DOCUMENT ROW, used by the sidebar's Recents and by the baseline picker's
+   list. The two do the same job from the same store with the same three facts
+   and used to share no structure: name over meta here, name + size on one line
+   there, 11px inset against 8+9px, and — the part that mattered — two different
+   hovers. The picker sat at border-color: transparent and gained --accent-line
+   under the cursor, so a border MATERIALISED beneath your pointer: in a list
+   where every row is a button, that reads as "this one is special" rather than
+   "this one is under your pointer". Hover is a band, and nothing else, in both.
+
+   Flat and full-width (3c): no card borders or radius, rows bleed edge to edge.
+   The last card chrome in an otherwise flat app read as a different design. */
+.doc-row {
   position: relative;
-  /* 11px + the 3px rail = 14px text inset, aligned with .side-label. */
-  padding: 8px 14px 8px 11px;
+  /* Aligned with .side-label's 14px, and no rail to pay for. */
+  padding: var(--gap-2) 14px;
   cursor: pointer;
-  /* The open document shows a 3px brand rail; every row reserves that width so
-     selection never nudges the list sideways. */
-  border-left: 3px solid transparent;
 }
-.recent:hover { background: var(--bg-hover); }
-/* Opening no longer moves a row to the top, so the selected state carries the
-   whole signal: brand rail + band, in both themes via --brand. */
-.recent.active {
-  background: color-mix(in srgb, var(--brand) 12%, transparent);
-  border-left-color: var(--brand);
-}
-.r-title {
+.doc-row:hover { background: var(--bg-hover); }
+/* 7b: the open document is a BAND, edge to edge — the 3px --brand rail is gone.
+   It was a sixth left-edge marker and the only one not painted in --accent, and
+   the rail is what forced every row to reserve 3px of border so selection could
+   not nudge the list; with no rail there is nothing to reserve and nothing that
+   can move. In a 250px column with no competing content the band alone is
+   unambiguous. Rule 18's inset 2px selection bar stays out of this list on
+   purpose: dropping a left-edge idiom was the point. */
+.doc-row.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+/* Inactive titles dim so the open document wins on ink as well as on ground. */
+.doc-row-title {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 8px;
+  padding-right: var(--gap-2);
 }
-.r-meta { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+.doc-row.active .doc-row-title { color: var(--text); font-weight: 700; }
+/* Rule 13: sizes stack in a column here. */
+.doc-row-meta {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+  font-variant-numeric: tabular-nums;
+}
 /* Row actions are hover-only chrome: a list of documents should read as titles,
    not as a grid of micro-icons. The star is the exception — a pinned row keeps
    showing why it never gets pruned. */
-.r-actions {
+.doc-row-actions {
   position: absolute;
   right: 7px;
   top: 6px;
   display: none;
   gap: var(--gap-1);
 }
-.recent:hover .r-actions { display: flex; }
-.recent.pinned .r-actions { display: flex; }
-.recent.pinned:not(:hover) .r-actions > :not(.pin) { display: none; }
-.r-actions button {
+.doc-row:hover .doc-row-actions { display: flex; }
+.doc-row.pinned .doc-row-actions { display: flex; }
+.doc-row.pinned:not(:hover) .doc-row-actions > :not(.pin) { display: none; }
+/* Rule 11: a control sitting ON chrome takes the canvas — in the sidebar these
+   were --bg-elevated-2, which is only 3 units off #eef1f6 and stopped reading
+   as controls at all once the sidebar went tinted. Dark never had the problem
+   (that token is 9-12 units off chrome there); --bg-canvas restores the gap in
+   light and keeps dark's, in the opposite direction, exactly as rule 11 says. */
+.doc-row-actions button {
   border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border-color: var(--border-strong);
   box-shadow: none;
 }
-.r-actions .del:hover { border-color: var(--danger); color: var(--danger); }
-.r-actions .dif:hover, .r-actions .pin:hover { color: var(--accent); border-color: var(--accent-line); }
+.doc-row-actions .del:hover { border-color: var(--danger); color: var(--danger); }
+.doc-row-actions .dif:hover,
+.doc-row-actions .pin:hover { color: var(--accent); border-color: var(--accent-line); }
 
-/* One footer strip: a mini theme toggle and the about link, aligned, same type
+/* One footer strip: the theme switch and the about link, aligned, same type
    size — not two unrelated widgets that happen to share a row. */
 .side-foot {
   border-top: 1px solid var(--border);
@@ -479,25 +1004,16 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   align-items: center;
   gap: var(--gap-2);
 }
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-1);
-  min-height: var(--ctl-h-mini);
-  padding: 0 var(--gap-2);
-  border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 11.5px;
-  cursor: pointer;
-  box-shadow: none;
-}
-.theme-toggle:hover { border-color: var(--btn-border-hover); color: var(--text); background: var(--bg-hover); }
-.theme-toggle .ic { font-size: 12px; }
+/* The theme control is #mode-switch's component, reused rather than reinvented:
+   both destinations visible, the current one filled. It used to read `☾ Dark` —
+   an icon and a label that both named the state the app was ALREADY in, on
+   something that gave no sign of being a button or of what it would do. Only
+   the type scale is local: the footer sits at 11.5px, like the about link
+   beside it. */
+#theme-switch button { font-size: var(--fs-chip); padding: 0 var(--gap-2); }
 .about-link {
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
   text-decoration: none;
   padding: 0 var(--gap-1);
 }
@@ -534,7 +1050,17 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #landing.landing--app > .lp-split,
 #landing.landing--app > .lp-footer,
 #landing.landing--app .lp-hero-copy { display: none; }
+/* Centre the card in the pane. Stripped of the marketing surface it was sitting
+   at the top edge with ~450px of empty --bg under it on an 800px viewport —
+   over half the screen, reading as an unfinished page rather than a deliberate
+   one. `margin-block: auto` rather than justify-content: centre, because this
+   is an overflow-y: auto container and centring would clip the top of a card
+   taller than the pane instead of letting it scroll. */
+/* Only app mode gets the well: in full marketing mode the sidebar is hidden and
+   the bands carry their own grounds, so there is nothing for it to separate. */
+#landing.landing--app { display: flex; flex-direction: column; background: var(--bg-well); }
 #landing.landing--app .lp-hero {
+  margin-block: auto;
   grid-template-columns: min(680px, 100%);
   justify-content: center;
   padding: 40px 24px;
@@ -569,21 +1095,27 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   font: 500 13.5px var(--display);
   color: var(--text-dim);
   text-decoration: none;
-  transition: color 0.12s ease;
+  transition: color var(--dur) var(--ease);
 }
 .lp-nav a:hover { color: var(--text); }
-.lp-meta { font: 500 11.5px var(--mono); color: var(--text-faint); white-space: nowrap; }
+.lp-meta { font: 400 var(--fs-chip) var(--mono); color: var(--text-faint); white-space: nowrap; }
+/* Rule 6: the landing may shout ONCE, and `parse` is what it shouts — pasting
+   is the page's whole job. This CTA goes to the same place and was wearing the
+   identical solid fill 350px away in the same viewport, so the hero had two
+   equally loud targets and no primary. Outline instead, and on the canvas
+   rather than --btn-bg: the header sits on --bg, where --btn-bg is three units
+   away and would vanish (rule 11's control-on-chrome corollary). */
 .lp-cta {
-  background: var(--accent-fill);
-  color: var(--accent-fill-ink);
-  border: none;
+  background: var(--bg-canvas);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
   border-radius: var(--r);
   padding: 0 var(--gap-4);
   font: 700 13.5px var(--display);
   white-space: nowrap;
   box-shadow: none;
 }
-.lp-cta:hover { background: var(--accent-fill-hover); color: var(--accent-fill-ink); }
+.lp-cta:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
 
 /* hero */
 .lp-hero {
@@ -598,12 +1130,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-pill {
   display: inline-block;
   margin-bottom: 26px;
-  padding: 5px 12px;
+  padding: 5px var(--gap-3);
   border: 1px solid var(--accent-line);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
-  font: 500 11.5px var(--mono);
+  font: 400 var(--fs-chip) var(--mono);
 }
 .lp-pill-sep { color: var(--text-faint); }
 .lp-hero h1 {
@@ -628,10 +1160,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   padding-left: var(--gap-3);
   border-left: 2px solid var(--accent-line);
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--fs-lede);
   text-wrap: pretty;
 }
-.lp-trust { margin: 26px 0 0; color: var(--text-faint); font: 12.5px var(--mono); }
+.lp-trust { margin: 26px 0 0; color: var(--text-faint); font: var(--fs-body) var(--mono); }
 
 /* hero paste panel — wraps the existing #paste-box / #parse-btn / #sample-btn /
    #open-btn controls; the markup around them changed, the wiring did not. */
@@ -659,12 +1191,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-width: 0;
 }
 .lp-paste-status {
-  font: 11.5px var(--mono);
+  font: var(--fs-chip) var(--mono);
   color: var(--text-faint);
   white-space: nowrap;
   flex-shrink: 0;
 }
-.lp-paste-body { padding: 16px 18px 18px; }
+.lp-paste-body { padding: var(--gap-4) 18px 18px; }
 
 #paste-box {
   width: 100%;
@@ -674,18 +1206,18 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 14px 16px;
-  font: 12.5px/1.6 var(--mono);
+  padding: 14px var(--gap-4);
+  font: var(--fs-body)/1.6 var(--mono);
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-#paste-box:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#paste-box:focus { border-color: var(--accent); box-shadow: var(--ring); }
 /* Sits directly under the box, in both the marketing hero and the in-app paste
    view, so the decode capability is read before anything is clicked. */
 .lp-paste-hint {
   margin: 10px 0 0;
   color: var(--text-dim);
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
   text-wrap: pretty;
 }
 /* Invalid input tints the box itself; the message renders below, so the button
@@ -695,7 +1227,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-paste-actions { display: flex; align-items: center; gap: var(--gap-2); margin-top: var(--gap-3); }
 .lp-paste-actions button { padding: 0 var(--gap-4); border-radius: var(--r-sm); }
 .lp-note {
-  font: 11.5px var(--mono);
+  font: var(--fs-chip) var(--mono);
   color: var(--text-faint);
   max-width: 230px;
   white-space: nowrap;
@@ -713,9 +1245,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   text-wrap: balance;
 }
 .lp-h2-sm { margin-bottom: 14px; font-size: 26px; letter-spacing: -0.8px; }
-.lp-body { margin: 0 0 20px; color: var(--text-dim); font-size: 14.5px; text-wrap: pretty; }
+.lp-body { margin: 0 0 20px; color: var(--text-dim); font-size: var(--fs-lede); text-wrap: pretty; }
 .lp-body-wide { max-width: 64ch; margin-bottom: 0; }
-.lp-body strong { color: var(--text); font-weight: 600; }
+.lp-body strong { color: var(--text); font-weight: 700; }
 
 /* feature grid — the 1px gap over a --border background is the rule itself */
 .lp-grid {
@@ -731,11 +1263,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   background: var(--bg-elevated);
   padding: 26px 24px 28px;
   min-height: 186px;
-  transition: background 0.12s ease;
+  transition: background var(--dur) var(--ease);
 }
 .lp-cell:hover { background: color-mix(in srgb, var(--bg-hover) 45%, var(--bg-elevated)); }
 .lp-tag {
-  font: 500 11px var(--mono);
+  font: 400 var(--fs-chip) var(--mono);
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -745,9 +1277,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-tag-boolean { color: var(--c-boolean); }
 .lp-tag-key { color: var(--c-key); }
 .lp-tag-warn { color: var(--warn); }
-.lp-cell h3 { margin: 10px 0 8px; font: 600 18px var(--display); }
-.lp-cell p { margin: 0; color: var(--text-dim); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
-.lp-cell code { font: 12.5px var(--mono); color: var(--text); }
+.lp-cell h3 { margin: 10px 0 var(--gap-2); font: 600 18px var(--display); }
+.lp-cell p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.6; text-wrap: pretty; }
+.lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
 
 /* query / diff split */
 .lp-split {
@@ -760,21 +1292,21 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-split-cell { background: var(--bg); padding: 48px 40px; }
 .lp-code {
   margin: 0;
-  padding: 16px 18px;
+  padding: var(--gap-4) 18px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  font: 12.5px/1.8 var(--mono);
+  font: var(--fs-body)/1.8 var(--mono);
   overflow-x: auto;
 }
 .lp-str { color: var(--c-string); }
-.lp-code-id { font: 13px var(--mono); color: var(--c-number); }
-.lp-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.lp-code-id { font: var(--fs-code) var(--mono); color: var(--c-number); }
+.lp-chips { display: flex; flex-wrap: wrap; gap: var(--gap-2); }
 .lp-chip {
-  padding: 4px 10px;
+  padding: var(--gap-1) 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  font: 11.5px var(--mono);
+  border-radius: var(--r-pill);
+  font: var(--fs-chip) var(--mono);
 }
 .lp-chip-changed { color: var(--c-number); background: color-mix(in srgb, var(--c-number) 8%, transparent); }
 .lp-chip-added { color: var(--ok); background: color-mix(in srgb, var(--ok) 8%, transparent); }
@@ -790,18 +1322,25 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   align-items: center;
 }
 .lp-agents .lp-code { margin-top: 18px; }
-.lp-facts { display: flex; flex-direction: column; gap: 8px; }
+.lp-facts { display: flex; flex-direction: column; gap: var(--gap-2); }
+/* Wrap the ROW, not the value. Without this the tools list broke mid-sequence
+   inside its own span — `… diff ·` stranded a separator at the line end and
+   dropped a lone `csv` onto line two. Wrapping the row instead sends the whole
+   value to its own full-width line, where it fits, and margin-left keeps it in
+   the value column when it does. */
 .lp-fact {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--gap-2);
   padding: 10px 14px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--r);
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
   color: var(--text-dim);
 }
+.lp-fact > :last-child { margin-left: auto; }
 .lp-fact-ok { color: var(--ok); }
 .lp-fact-accent { color: var(--accent); }
 
@@ -814,12 +1353,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text-faint);
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
 }
 .lp-footer a, .lp-foot-link {
   color: var(--text-dim);
   text-decoration: none;
-  transition: color 0.12s ease;
+  transition: color var(--dur) var(--ease);
 }
 .lp-footer a:hover, .lp-foot-link:hover { color: var(--text); }
 /* the payload-tools entry is a real button (#codec-btn) wearing a link's clothes */
@@ -828,7 +1367,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border: none;
   min-height: 0;
   padding: 0;
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
   box-shadow: none;
   cursor: pointer;
 }
@@ -838,7 +1377,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 @media (max-width: 1100px) {
   .lp-hero { grid-template-columns: 1fr; gap: 34px; padding: 44px 24px 36px; }
   .lp-hero h1 { font-size: 42px; letter-spacing: -1.4px; }
-  .lp-header { gap: 18px; padding: 16px 24px; flex-wrap: wrap; }
+  .lp-header { gap: 18px; padding: var(--gap-4) 24px; flex-wrap: wrap; }
   .lp-band, .lp-split-cell { padding: 40px 24px; }
   .lp-grid { grid-template-columns: 1fr; }
   .lp-split { grid-template-columns: 1fr; }
@@ -852,7 +1391,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .sp-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--gap-3);
   padding: 18px 40px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -860,21 +1399,21 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .sp-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
   font: 700 15px var(--display);
   letter-spacing: -0.2px;
   color: var(--text);
   text-decoration: none;
 }
-.sp-brand img { border-radius: 8px; display: block; }
+.sp-brand img { border-radius: var(--r); display: block; }
 .sp-slash { color: var(--border-strong); }
-.sp-here { font: 500 13px var(--mono); color: var(--text-dim); }
+.sp-here { font: 400 var(--fs-code) var(--mono); color: var(--text-dim); }
 .sp-spacer { flex: 1; }
 .sp-back {
   font: 500 13px var(--display);
   color: var(--text-dim);
   text-decoration: none;
-  transition: color 0.12s ease;
+  transition: color var(--dur) var(--ease);
 }
 .sp-back:hover { color: var(--text); }
 
@@ -886,7 +1425,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   letter-spacing: -1.5px;
   text-wrap: balance;
 }
-.sp-intro p { margin: 16px 0 0; max-width: 62ch; color: var(--text-dim); font-size: 15px; text-wrap: pretty; }
+.sp-intro p { margin: var(--gap-4) 0 0; max-width: 62ch; color: var(--text-dim); font-size: var(--fs-lede); text-wrap: pretty; }
 .sp-row {
   display: grid;
   grid-template-columns: 46px 240px 1fr;
@@ -895,30 +1434,30 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-top: 1px solid var(--border);
   align-items: baseline;
 }
-.sp-num { font: 500 11.5px var(--mono); color: var(--text-faint); }
+.sp-num { font: 400 var(--fs-chip) var(--mono); color: var(--text-faint); }
 .sp-row h2 { margin: 0; font: 600 17px var(--display); letter-spacing: -0.3px; }
-.sp-row p { margin: 0; color: var(--text-dim); font-size: 14px; line-height: 1.65; text-wrap: pretty; }
+.sp-row p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.65; text-wrap: pretty; }
 
 @media (max-width: 760px) {
-  .sp-header { padding: 16px 24px; }
+  .sp-header { padding: var(--gap-4) 24px; }
   .sp-main { padding: 0 24px 40px; }
   .sp-intro h1 { font-size: 30px; letter-spacing: -1px; }
-  .sp-row { grid-template-columns: 40px 1fr; gap: 10px 16px; }
+  .sp-row { grid-template-columns: 40px 1fr; gap: 10px var(--gap-4); }
   .sp-row p { grid-column: 2; }
 }
 
 .error {
   width: 100%;
-  margin-top: 12px;
+  margin-top: var(--gap-3);
   background: var(--danger-soft);
   border: 1px solid var(--danger);
   color: var(--danger);
   border-radius: var(--r);
-  padding: 12px 16px;
+  padding: var(--gap-3) var(--gap-4);
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
 }
-.error pre { margin: 8px 0 0; color: var(--text-dim); overflow-x: auto; }
+.error pre { margin: var(--gap-2) 0 0; color: var(--text-dim); overflow-x: auto; }
 
 /* ---------- codec ---------- */
 
@@ -928,17 +1467,17 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   flex-direction: column;
   min-height: 0;
   padding: 22px 26px;
-  gap: 16px;
+  gap: var(--gap-4);
   overflow-y: auto;
 }
 .codec-head { display: flex; align-items: baseline; gap: 14px; }
-.codec-head h1 { margin: 0; font-size: 18px; font-weight: 660; }
-.codec-sub { color: var(--text-dim); font: 12px var(--mono); flex: 1; }
+.codec-head h1 { margin: 0; }
+.codec-sub { color: var(--text-dim); font: var(--fs-body) var(--mono); flex: 1; }
 .codec-grid {
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: var(--gap-4);
   min-height: 0;
 }
 .codec-card {
@@ -948,65 +1487,113 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 16px;
+  padding: var(--gap-4);
   min-height: 0;
-  box-shadow: var(--shadow-sm);
+  /* No shadow: this card sits in the page flow and shadows are for things that
+     FLOAT (menus, dialogs, toasts). In light it was reading as a real lift, so
+     what separates it now is the --border hairline plus the ground it sits on
+     — a hairline, not nothing. */
+  box-shadow: none;
 }
+/* Rule 2, the SECTION LABEL rank — this is the pattern the rank is named for. */
 .codec-card h2 {
   margin: 0;
-  font-size: 11.5px;
-  font-weight: 650;
+  font-size: var(--fs-chip);
+  font-weight: 400;
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.7px;
 }
+/* A labelled box: the standing label (rule 14) above the textarea, because a
+   textarea's shell has no baseline to seat a .field-prefix on. Both boxes in a
+   card are flex:1, and both cards hold the same four bands, so the 1fr 1fr
+   mirror is back in register — decode used to carry a fourth button and a trace
+   row, which pushed its boxes shorter than encode's. */
+.codec-box {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.codec-box-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  min-height: var(--ctl-h-mini);
+}
+/* Rule 14 supplies ground, border, inset, type and the focus ring; only the
+   box's own facts live here. */
 .codec-card textarea {
   flex: 1;
   min-height: 120px;
   resize: none;
-  background: var(--bg-inset);
-  color: var(--text);
-  border: 1px solid var(--border);
   border-radius: var(--r);
-  padding: 12px;
-  font: 12.5px/1.5 var(--mono);
-  outline: none;
+  line-height: 1.5;
 }
-.codec-card textarea:focus { border-color: var(--accent); }
-.codec-card textarea[readonly] { color: var(--c-string); }
-.codec-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-#codec-trace {
-  padding: 8px 10px;
+/* Rule 14's other half: --bg-inset + --border-strong is the read-only OUTPUT
+   surface, so the result pane stops being a third field style and starts
+   saying "this is what came back". Rule 18 for the ink: --c-string paints JSON
+   STRINGS, and base64 is not one — a syntax token was being used to mean "this
+   is output", which is what the surface itself already says. */
+.codec-card textarea[readonly] {
+  background: var(--bg-inset);
+  border-color: var(--border-strong);
   color: var(--text-dim);
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  font: 11px/1.5 var(--mono);
 }
-#codec-trace.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, var(--border)); }
-#codec-trace.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
+.codec-actions { display: flex; gap: var(--gap-2); flex-wrap: wrap; }
+/* The transformation trace reads as part of the output's label — what came
+   back, and how. It was a band of its own between the buttons and the box. */
+#codec-trace {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+}
+/* Rule 15: a decode that worked is transient and expected — tier 1, ink only.
+   A decode that failed is something you have to act on before anything else in
+   this card is useful — tier 3, the strongest device in the app. They used to
+   be the same device at the same strength, separated by hue alone. */
+#codec-trace.ok { color: var(--ok); }
+#codec-trace.bad {
+  padding: 1px var(--gap-2);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--r-sm);
+}
 
 /* ---------- viewer / toolbar ---------- */
 
 #viewer { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* Rule 4: groups are separated by --gap-4, controls inside a group by --gap-2. */
+/* Rule 11: every control strip bordered against a pane is chrome, so it takes
+   --bg-chrome and joins the sidebar as one continuous frame around the white
+   document. --bg-elevated stays for things that FLOAT (dialogs, .menu,
+   #search-panel) — those are above the frame, not part of it. Dark is unmoved:
+   --bg-chrome carries the same #21262f these strips already had. */
 #toolbar {
   display: flex;
   align-items: center;
   gap: var(--gap-4);
+  /* Rule 11's strip geometry — the one every other bar now matches. */
+  min-height: var(--bar-h);
   padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   flex-wrap: wrap;
 }
 
 /* Semantic compare supplies its own scoped controls. Keep the document identity
-   visible, but remove tree actions that would target the hidden document. */
+   visible, but remove tree actions that would target the hidden document. The
+   tree ops are not listed: .tb-tree is already scoped to the tree pane below,
+   which is the same fact stated once. */
 #viewer.semantic-open #mode-switch,
 #viewer.semantic-open .tb-search,
-#viewer.semantic-open #ask-btn,
-#viewer.semantic-open #collapse-btn {
+#viewer.semantic-open #ask-btn {
   display: none;
 }
 
@@ -1020,7 +1607,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 #back-btn { flex-shrink: 0; }
 #doc-title {
-  font: 600 13px var(--mono);
+  font: 700 var(--fs-code) var(--mono);
   max-width: 240px;
   white-space: nowrap;
   overflow: hidden;
@@ -1030,24 +1617,37 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #doc-title:hover { color: var(--accent); }
 /* Document identity is secondary text: the title carries it, the numbers sit
    behind it rather than competing with the controls. */
-#doc-stats { color: var(--text-faint); font-size: 11px; white-space: nowrap; }
-#reload-btn, #original-btn { min-height: var(--ctl-h-mini); padding: 0 var(--gap-2); font-size: 11.5px; }
+#doc-stats { color: var(--text-faint); font-size: var(--fs-chip); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#reload-btn, #original-btn { min-height: var(--ctl-h-mini); padding: 0 var(--gap-2); font-size: var(--fs-chip); }
 /* .tb-doc is a shrinkable flex row — the label must not break across two lines. */
 #original-btn { white-space: nowrap; }
-/* Rule 6: the toolbar spends its one accent on `ask`. Compare is a neutral
-   control like every other survivor in the bar. */
-#compare-btn { white-space: nowrap; }
+
+/* Rule 10, revised: the tree's document ops, upstairs, behind a hairline —
+   ONE group with a divider before it rather than a whole second floor with a
+   border under it. Visible only where they have a subject: the tree standing
+   alone. In split they are down in the tree half of the shared strip, and in
+   code / diff / table / compare there is no tree on screen to collapse. */
+.tb-tree {
+  display: none;
+  align-items: center;
+  gap: var(--gap-2);
+  padding-left: var(--gap-4);
+  border-left: 1px solid var(--border);
+}
+#viewer[data-pane='tree'] .tb-tree { display: flex; }
 
 /* segmented mode switcher — the shell is one regular control (rule 1); segment
    height DERIVES from --ctl-h (shell = segment + 2px padding + 1px border per
-   side) so the switch always matches the buttons beside it exactly. Weight must
-   be a REAL face (400/600) — fractional weights get synthesized and render
-   blurry on the accent fill. */
+   side) so the switch always matches the buttons beside it exactly. Weight
+   obeys rule 22 (400/700 only) — the system faces ship nothing in between, and
+   anything else synthesizes and renders blurry. */
 .mode-switch {
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  background: var(--bg-elevated-2);
+  /* Rule 11: control on chrome — canvas. The track has to out-contrast the
+     toolbar it sits in or the whole segmented shape disappears. */
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r);
 }
@@ -1059,7 +1659,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: calc(var(--ctl-h) - 6px);
   padding: 0 var(--gap-3);
   border-radius: var(--r-sm);
-  font-weight: 600;
+  font-weight: 400;
 }
 .mode-switch button:hover { color: var(--text); background: var(--bg-hover); }
 /* The active segment is a state, not an action — accent fill is rationed to
@@ -1080,7 +1680,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--text);
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  border-radius: calc(var(--r) + 4px);
+  border-radius: calc(var(--r) + var(--r-xs));
   box-shadow: var(--shadow);
 }
 #baseline-picker::backdrop {
@@ -1102,13 +1702,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .baseline-head > div { min-width: 0; flex: 1; }
 .baseline-head h2 {
   margin: 0;
-  font-size: 16px;
   line-height: 1.3;
 }
 .baseline-head p {
   margin: 5px 0 0;
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.45;
 }
 .baseline-x, .transport-x {
@@ -1117,61 +1716,25 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   box-shadow: none;
   color: var(--text-dim);
 }
+/* The rows are the sidebar's .doc-row component (see the sidebar block); this
+   list only has to say how far in they sit. 4px list inset + the row's own 14px
+   = the 18px of ink inset the heading and the action row are on, and the hover
+   band still bleeds wider than the text column, which is what makes it read as
+   a row rather than a paragraph. */
 .baseline-list {
   min-height: 90px;
   max-height: min(440px, calc(100vh - 220px));
   overflow-y: auto;
-  padding: 8px;
+  padding: var(--gap-1);
 }
-.baseline-option {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 14px;
-  padding: 10px 12px;
-  text-align: left;
-  color: var(--text);
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-.baseline-option:hover,
-.baseline-option:focus-visible {
-  background: var(--bg-hover);
-  border-color: var(--accent-line);
-}
-.baseline-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 600 12.5px var(--mono);
-}
-.baseline-size,
-.baseline-age {
-  color: var(--text-faint);
-  font-size: 11.5px;
-}
-.baseline-age {
-  grid-column: 1;
-}
-.baseline-empty {
-  padding: 22px 14px;
-  color: var(--text-dim);
-  text-align: center;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
+/* 18px matches .baseline-head's inset, so the button's box edge lines up with
+   the heading above it — a bordered control aligns by its edge, not its ink. */
 .baseline-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: var(--gap-2);
+  padding: var(--gap-3) 18px;
   border-top: 1px solid var(--border);
-}
-#baseline-file-btn {
-  color: var(--accent);
-  border-color: var(--accent-line);
 }
 
 /* ---------- transport size inspector ---------- */
@@ -1183,7 +1746,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--text);
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  border-radius: calc(var(--r) + 4px);
+  border-radius: calc(var(--r) + var(--r-xs));
   box-shadow: var(--shadow);
 }
 #transport-dialog::backdrop {
@@ -1203,11 +1766,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-bottom: 1px solid var(--border);
 }
 .transport-head > div { flex: 1; min-width: 0; }
-.transport-head h2 { margin: 0; font-size: 16px; line-height: 1.3; }
+.transport-head h2 { margin: 0; line-height: 1.3; }
 .transport-head p {
   margin: 5px 0 0;
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.45;
 }
 .transport-settings {
@@ -1224,23 +1787,19 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   align-items: center;
   gap: 7px;
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
 }
 .transport-settings label {
   flex-direction: column;
   align-items: stretch;
 }
+/* Rule 14 owns ground, border, inset, type and ring; these two only have to
+   stop growing past their grid column. */
 .transport-settings input,
 .transport-settings select,
 .transport-budget-settings input,
 .transport-budget-settings select {
   min-width: 0;
-  color: var(--text);
-  background: var(--bg-inset);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  padding: 6px 8px;
-  font: 12px var(--mono);
 }
 .transport-settings .transport-template {
   grid-column: 3;
@@ -1248,10 +1807,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .transport-settings code { color: var(--c-string); }
 .transport-budget-settings {
   display: flex;
-  gap: 12px 18px;
+  gap: var(--gap-3) 18px;
   align-items: center;
   flex-wrap: wrap;
-  padding: 12px 20px;
+  padding: var(--gap-3) 20px;
   border-bottom: 1px solid var(--border);
 }
 .transport-budget-heading {
@@ -1259,10 +1818,39 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   flex-direction: column;
   min-width: 185px;
 }
-.transport-budget-heading strong { font-size: 12px; }
-.transport-budget-heading span { color: var(--text-faint); font-size: 10.5px; }
-.transport-budget-settings input[type='number'] { width: 72px; }
-.transport-budget-settings select { width: 92px; }
+.transport-budget-heading strong { font-size: var(--fs-body); }
+.transport-budget-heading span { color: var(--text-faint); font-size: var(--fs-label); }
+/* Rows, not sentences. `Kafka [800] KiB at [envelope]` alternated static text
+   and control inside a wrapping flex line, and there was no width at which it
+   broke well: at ~470px `KiB at` was orphaned on its own line above the select
+   it named. Three columns and ONE header row put the unit on the column instead
+   of between two controls, the two budgets read as a pair, and a third budget
+   is one more row rather than one more sentence. */
+.budget-grid {
+  flex: 1;
+  min-width: 260px;
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) 96px minmax(132px, 1.4fr);
+  gap: 6px var(--gap-3);
+  align-items: center;
+}
+/* Outranks the band's shared `label` rule: a budget's NAME is content, not the
+   dim caption a form label is here. */
+.transport-budget-settings .budget-name { color: var(--text); font-size: var(--fs-body); }
+/* Every control fills its column, so the two budget rows line up exactly and
+   the stage pickers stay identical to each other — a fixed 92px clipped
+   `envelope` once the fields took rule 14's 12px inset. */
+.budget-grid input,
+.budget-grid select { width: 100%; }
+/* One column, and the header row goes with it: three stacked column names above
+   a stack of controls would be the orphaning again, one layer up. Each control
+   keeps its name in the label beside it and its unit in title/aria, so nothing
+   is lost but the ruled columns. */
+@media (max-width: 420px) {
+  .budget-grid { grid-template-columns: 1fr; }
+  .budget-grid > .standing-label { display: none; }
+  .budget-name { margin-top: var(--gap-2); }
+}
 .transport-budget-settings .transport-baseline-toggle {
   margin-left: auto;
   color: var(--accent);
@@ -1272,29 +1860,25 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   accent-color: var(--accent);
 }
 .transport-error {
-  margin: 12px 20px 0;
+  margin: var(--gap-3) 20px 0;
   padding: 9px 11px;
   color: var(--danger);
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: var(--r-sm);
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
 }
 .transport-results {
   min-height: 180px;
   overflow: auto;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 12px;
+  gap: var(--gap-3);
   padding: 14px 20px 18px;
 }
+/* Rule 17 supplies the type and padding; only the grid span is local. */
 .transport-loading,
-.transport-results-empty {
-  grid-column: 1 / -1;
-  padding: 34px 12px;
-  color: var(--text-dim);
-  text-align: center;
-}
+.transport-results-empty { grid-column: 1 / -1; }
 .transport-report {
   min-width: 0;
   overflow: hidden;
@@ -1304,12 +1888,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .transport-report h3 {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px var(--gap-3);
   overflow: hidden;
   color: var(--text);
   background: var(--bg-elevated-2);
   border-bottom: 1px solid var(--border);
-  font: 650 12px var(--mono);
+  font: 700 var(--fs-body) var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1321,14 +1905,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: contents;
 }
 .transport-metric > span {
-  padding: 8px 11px;
+  padding: var(--gap-2) 11px;
   border-bottom: 1px solid var(--border-soft);
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
 }
 .transport-metric .transport-stage { color: var(--text-dim); }
 .transport-metric .transport-value {
   color: var(--text);
-  font: 600 11.5px var(--mono);
+  font: 400 var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
 }
@@ -1336,7 +1921,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: block;
   margin-top: 2px;
   color: var(--text-faint);
-  font: 10px var(--sans);
+  font: var(--fs-micro) var(--sans);
 }
 .transport-verdicts {
   display: grid;
@@ -1347,43 +1932,45 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: grid;
   grid-template-columns: minmax(100px, 1fr) auto;
   gap: 3px 10px;
-  padding: 8px 9px;
+  padding: var(--gap-2) 9px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-elevated-2);
 }
-.transport-verdict strong { font-size: 11.5px; }
+.transport-verdict strong { font-size: var(--fs-chip); }
 .transport-verdict > span {
-  font: 650 11px var(--mono);
+  font: 400 var(--fs-chip) var(--mono);
   text-align: right;
 }
 .transport-verdict small {
   grid-column: 1 / -1;
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: var(--fs-label);
 }
-.transport-verdict.within { border-color: color-mix(in srgb, var(--ok) 36%, var(--border)); }
+/* Rule 15, all three tiers on one control. "It fits, nothing to do" is the
+   least urgent news in the app and used to be drawn as strongly as a failed
+   decode; a mere warning used to carry a full fill and outrank both. */
 .transport-verdict.within > span { color: var(--ok); }
-.transport-verdict.near-limit {
-  border-color: color-mix(in srgb, var(--warn) 50%, var(--border));
-  background: var(--warn-soft);
-}
+.transport-verdict.near-limit { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
 .transport-verdict.near-limit > span { color: var(--warn); }
 .transport-verdict.exceeded {
   border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
   background: var(--danger-soft);
 }
 .transport-verdict.exceeded > span { color: var(--danger); }
+/* 20px, like the five bands above it. It was 12/18 because it was lifted from
+   .baseline-actions, and the baseline picker is an 18px dialog throughout — so
+   the one row the two dialogs share followed the other dialog's grid. */
 .transport-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 18px;
+  gap: var(--gap-2);
+  padding: var(--gap-3) 20px;
   border-top: 1px solid var(--border);
 }
 .transport-actions > span:first-child {
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: var(--fs-label);
 }
 
 @media (max-width: 760px) {
@@ -1392,44 +1979,20 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   #transport-field-wrap { grid-column: 1 / -1; }
   .transport-budget-settings { align-items: flex-start; }
   .transport-budget-settings .transport-baseline-toggle { width: 100%; margin-left: 0; }
-  .transport-results { grid-template-columns: 1fr; padding-inline: 12px; }
+  .transport-results { grid-template-columns: 1fr; padding-inline: var(--gap-3); }
   .transport-actions > span:first-child { display: none; }
 }
 
-/* Search owns filter: one field, with the filter mode as a chip inside it. */
-.tb-search {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-1);
-  flex: 1;
-  min-width: 220px;
-  height: var(--ctl-h);
-  padding: 0 var(--gap-1) 0 0;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
-}
-.tb-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-#search-box {
-  flex: 1;
-  min-width: 0;
-  /* Stretch to the shell's full height: the whole field is the input, not a
-     text-height strip floating in it — clicks anywhere in the box focus it. */
-  align-self: stretch;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  padding: 0 var(--gap-2);
-  font: 12.5px var(--mono);
-  outline: none;
-}
-/* Rule 6: a toggled chip states its mode with the soft accent tint — the filled
-   accent stays reserved for `ask`. */
+/* Search owns filter: one field, with the filter mode as a chip inside it. The
+   shell itself is the shared .field recipe near the top of this file; the only
+   local fact is the trailing gap the chip needs. */
+.tb-search { gap: var(--gap-1); padding-right: var(--gap-1); }
+/* Rule 6: a toggled chip states its mode with the soft accent tint, which is
+   now the tint's ONLY job — every accent button in the workbench is outline. */
 .tb-chip {
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
-  font-size: 11.5px;
+  font-size: var(--fs-chip);
   color: var(--text-dim);
   background: transparent;
   border-color: transparent;
@@ -1443,62 +2006,21 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-color: var(--accent-line);
 }
 
-/* Rule 6: `ask` reveals a panel, so it wears the tint — the solid fill belongs
-   to the button that spends the token (`ask run`, .primary). Otherwise opening
-   the panel puts two identical filled buttons twelve pixels apart. */
-#ask-btn {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-#ask-btn:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-#ask-btn.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); }
+/* `ask` and `compare` wear the outline tier, defined once with button.primary
+   near the top of this file — nothing to restate here. Only their two local
+   facts live below. Open IS a toggle state, so the tint here means exactly what
+   it means everywhere else. */
+#ask-btn.on { background: var(--accent-soft); border-color: var(--accent); }
+#compare-btn { white-space: nowrap; }
 
-/* `compare` also reveals (the baseline picker) — same tint as `ask`. */
-#compare-btn {
-  background: var(--accent-soft);
-  border-color: var(--accent-line);
-  color: var(--accent);
-  font-weight: 600;
-  box-shadow: none;
-}
-#compare-btn:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-
-/* Quiet — everything else in the toolbar is text-only at rest; borders return
-   inside dialogs, the code bar and the diff head, where a button sits alone.
-   (This carries #toolbar's id specificity, so tinted/segmented controls must be
-   excluded explicitly.) */
-#toolbar button:not(.primary):not(.accent-soft):not(.tb-chip):not(#ask-btn):not(#compare-btn):not(.mode-switch *) {
-  background: none;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--text-dim);
-}
-#toolbar button:not(.primary):not(.accent-soft):not(.tb-chip):not(#ask-btn):not(#compare-btn):not(.mode-switch *):hover {
-  background: var(--bg-hover);
-  color: var(--text);
-  border-color: transparent;
-}
-
-/* Utilities inside the code bar and ask row follow the same quiet tier — a
-   bordered box 40px under a quiet toolbar reads as a leftover from the old
-   design. Each bar keeps one standout: its fill (apply changes / ask run) and
-   any toggled state (source .on, which re-tints via its own rule). */
-#code-format, #code-copy, #code-raw, #ask-key,
-.tree-bar button {
-  background: none;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--text-dim);
-}
-#code-format:hover, #code-copy:hover, #code-raw:hover, #ask-key:hover,
-.tree-bar button:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-  border-color: transparent;
-}
+/* Quiet utilities — toolbar, code bar, split strip, ask row, codec label rows,
+   run result bar — all wear .btn-quiet declared on the element (the tier block
+   near button.primary at the top). The location-scoped rules that used to live
+   here (a #toolbar :not() chain plus per-bar ID lists) are gone: they dressed
+   the migrating document ops differently per host. Each bar still keeps its
+   one standout (apply changes / ask run / compress) via .primary, and toggled
+   states (#code-raw.on) re-tint via their own id rules, which outrank the
+   class. */
 
 /* overflow menu — everything real but not per-second */
 .tb-more { position: relative; display: inline-flex; }
@@ -1528,48 +2050,56 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 /* ---------- ask panel ---------- */
 
-#ask-panel {
+/* Rule 11: an inline strip bordered against a pane — chrome, like every other
+   bar, not a floating surface. It was --bg-elevated, so once the toolbar went
+   tinted this panel stayed white directly beneath it: two full-width strips,
+   touching, different colours, for no reason. The run mode's producer strip
+   shares the recipe because it IS this strip, docked over its own pane instead
+   of over all of them. */
+#ask-panel,
+#run-producer {
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-  padding: 11px 14px;
+  background: var(--bg-chrome);
+  /* Rule 11's strip geometry, like every other bar between the toolbar and the
+     panes — this one used to be 11/14 on its own. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--gap-2);
   max-height: 46vh;
   overflow-y: auto;
 }
-.ask-row { display: flex; gap: 8px; }
-#ask-box, #ask-key-input {
-  flex: 1;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text);
-  padding: 7px 12px;
-  font: 13px var(--mono);
-  outline: none;
-}
-#ask-box:focus, #ask-key-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-#ask-status { color: var(--text-dim); font-size: 12px; font-style: italic; }
+/* Rule 1: without align-items the buttons STRETCH to the input's natural
+   height, which made every control in this panel 31px — a third size the
+   contract does not have. The input is pinned to --ctl-h and the row centres,
+   so 28px holds even if the font changes. */
+.ask-row { display: flex; align-items: center; gap: var(--gap-2); }
+/* Rule 14 gives these the ground, border, inset, type and ring; the comment
+   that used to live here — "a field on chrome takes the canvas" — is now the
+   rule itself, and it holds on every surface rather than only this one. */
+#ask-box, #ask-key-input { flex: 1; }
+/* The measure is the question, not the window. flex:1 with no cap gave this
+   field ~131 characters on a wide screen for a natural-language question that
+   is 40 to 80 — so the sentence you are typing trails off across a metre of
+   chrome while more than half the box stays empty. Capped, the row's leftover
+   width goes to the controls instead of to the field, which is why `key` sits
+   out at the edge rather than glued to `run`. */
+#ask-box { max-width: 76ch; }
+#ask-key { margin-left: auto; }
+#ask-status, #run-status { color: var(--text-dim); font-size: var(--fs-body); font-style: italic; }
 #ask-query-line {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
   color: var(--text-dim);
-  font: 11.5px var(--mono);
+  font: var(--fs-chip) var(--mono);
 }
 #ask-query-edit {
   flex: 1;
   min-width: 0;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
   color: var(--c-number);
-  padding: 5px 10px;
-  font: 12px var(--mono);
-  outline: none;
 }
-#ask-query-edit:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 #ask-query-line button { flex-shrink: 0; }
 
 /* live preview: same layout, marked provisional */
@@ -1580,59 +2110,76 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .ask-preview-tag {
   display: inline-block;
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--r);
   padding: 0 6px;
   margin-bottom: 5px;
 }
 
 /* "sent to model" transparency disclosure */
-#ask-disclosure {
+/* Cards sitting ON the ask panel's chrome take the canvas, same reasoning as
+   the fields above. */
+#ask-disclosure,
+#run-console {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   padding: 5px 9px;
 }
-#ask-disclosure > summary {
+#ask-disclosure > summary,
+#run-console > summary {
   cursor: pointer;
   user-select: none;
   color: var(--text-dim);
-  font: 11.5px var(--mono);
+  font: var(--fs-chip) var(--mono);
 }
 #ask-disclosure-body { margin-top: 7px; display: flex; flex-direction: column; gap: 5px; }
 .disc-row { display: flex; gap: 10px; align-items: baseline; }
-.disc-key { flex-shrink: 0; min-width: 158px; color: var(--text-dim); font-size: 11px; }
-.disc-val { color: var(--text); font: 11.5px var(--mono); word-break: break-word; }
-.disc-pre {
+.disc-key { flex-shrink: 0; min-width: 158px; color: var(--text-dim); font-size: var(--fs-chip); }
+.disc-val { color: var(--text); font: var(--fs-chip) var(--mono); word-break: break-word; }
+/* Rule 14: --bg-inset + --border-strong is the read-only OUTPUT surface, and
+   this is the other one — what the model will be sent, verbatim. */
+.disc-pre,
+#run-console-body {
   flex: 1;
   min-width: 0;
   margin: 0;
   max-height: 170px;
   overflow: auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px 8px;
-  font: 11px var(--mono);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  padding: 6px var(--gap-2);
+  font: var(--fs-chip) var(--mono);
   color: var(--text);
   white-space: pre;
 }
 .disc-raw { margin-top: 2px; }
-.disc-raw > summary { cursor: pointer; color: var(--text-dim); font-size: 11px; }
+.disc-raw > summary { cursor: pointer; color: var(--text-dim); font-size: var(--fs-chip); }
 .disc-raw > .disc-pre { margin-top: 5px; }
-.disc-note { color: var(--text-dim); font-style: italic; font-size: 11px; margin-top: 3px; }
-.ask-error { color: var(--danger); font: 12.5px var(--mono); }
+.disc-note { color: var(--text-dim); font-style: italic; font-size: var(--fs-chip); margin-top: 3px; }
+/* Rule 15 tier 3: a rejected key or a refused request is the one thing in this
+   panel you have to act on before anything else in it works. */
+.ask-error,
+#run-error {
+  padding: var(--gap-2) 10px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font: var(--fs-body) var(--mono);
+}
 .ask-value { font: 700 26px var(--mono); color: var(--c-number); }
-.ask-label { color: var(--text-dim); font-size: 12px; }
-.ask-group { display: flex; gap: 14px; font: 12.5px var(--mono); padding: 2px 0; }
+.ask-label { color: var(--text-dim); font-size: var(--fs-body); }
+.ask-group { display: flex; gap: 14px; font: var(--fs-body) var(--mono); padding: 2px 0; }
 .ask-group-key { color: var(--c-key); min-width: 160px; }
 .ask-group-count { color: var(--c-number); }
-.ask-actions { display: flex; gap: 8px; margin: 4px 0; }
-.ask-table { border-collapse: collapse; font: 12px var(--mono); margin: 4px 0; }
+.ask-actions { display: flex; gap: var(--gap-2); margin: var(--gap-1) 0; }
+.ask-table { border-collapse: collapse; font: var(--fs-body) var(--mono); margin: var(--gap-1) 0; }
 .ask-table th, .ask-table td {
   border: 1px solid var(--border);
   padding: 3px 10px;
@@ -1642,43 +2189,264 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ask-table th { color: var(--c-key); font-weight: 600; }
+.ask-table th { color: var(--c-key); font-weight: 700; }
 #ask-result .hit { padding: 3px 0; }
-#ask-saved { display: flex; flex-wrap: wrap; gap: 6px; }
+#ask-saved, #run-saved { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Rule 16, the ACTIONABLE CHIP: clicking it re-runs the query, so it wears the
+   same fully-round canvas shape as .crumb-chip rather than a third radius. */
 .ask-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 3px 6px 3px 12px;
-  font-size: 12px;
+  border-radius: var(--r-pill);
+  padding: 3px 6px 3px var(--gap-3);
+  font-size: var(--fs-body);
   cursor: pointer;
 }
 .ask-chip:hover { border-color: var(--accent); }
+/* The one chip you PRESS rather than re-run. Same shape as a saved chip, but a
+   real <button> so it is reachable without a pointer and gets rule 5's ring for
+   free; all it unwinds is the button base's regular height (rule 1's mini is
+   the size for something sitting in a chip row). */
+button.ask-chip.chip-add {
+  min-height: var(--ctl-h-mini);
+  padding: 3px var(--gap-3);
+  color: var(--text-dim);
+  font-family: var(--sans);
+}
+button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas); }
 .chip-del { border-radius: 10px; border: none; color: var(--text-dim); background: transparent; box-shadow: none; }
 .chip-del:hover { color: var(--danger); }
 
+/* ---------- run mode: producer strip + result pane ---------- */
+
+/* The producer strip itself, its rows, its status line, its failure line and
+   its console shell are all the ask panel's, shared by selector above rather
+   than restated here — they are the same strip. What is left is the script box,
+   the facts only the runner has, and the column the two of them stand in. */
+
+/* The strip is a scrolling column (it shares #ask-panel's max-height), so its
+   bands keep their own height and the STRIP scrolls. Without this the script
+   box is the thing that gives when a long error or console arrives, and the six
+   rows you were typing in collapse to one. */
+#run-producer > * { flex-shrink: 0; }
+
+/* Rule 15 tier 1, INK ONLY: the script sees plain JS numbers, which is expected
+   and permanent rather than something to respond to. It reads --warn because
+   that is what --warn means, and it is a line rather than a toast because it is
+   true for as long as the document is open. */
+#run-lossy {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-1);
+  color: var(--warn);
+  font-size: var(--fs-body);
+}
+
+/* Rule 14's field recipe, on a CodeMirror host instead of a <textarea>: the
+   editor inside goes bare (run-editor.ts sets no ground of its own) and this
+   shell carries the border, the canvas and the ring, exactly as .field does for
+   the inputs it wraps. */
+#run-editor {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* The box is the size of the script in it: two rows of the line-height set
+     below, six at most, and then it scrolls inside. A fixed six-row box spent a
+     hundred pixels of the producer strip on emptiness for the one-line
+     expression most runs are, and gave the long script no more room for it.
+     The 1.6 is IN the font shorthand rather than beside it: .cm-scroller takes
+     `font: inherit` below, and a bare `font:` resets line-height to normal —
+     which is how a box that said six 20px rows was drawing eight 15px ones. */
+  min-height: calc(2 * 20px + 2 * var(--gap-2) + 2px);
+  max-height: calc(6 * 20px + 2 * var(--gap-2) + 2px);
+  overflow: hidden;
+  padding: var(--gap-2) var(--gap-3);
+  background: var(--bg-canvas);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font: var(--fs-body)/1.6 var(--mono);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+/* Rule 5's ring, widened per rule 14 — the same pair every other field gets on
+   :focus. The editable node is CodeMirror's, so the shell reads its focus. */
+#run-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+/* The editor is what GROWS the shell (flex-basis auto, so its content height is
+   the shell's), up to the six-row cap above — past which CodeMirror's own
+   scroller, not the shell, is what scrolls. */
+#run-editor .cm-editor { flex: 1 1 auto; min-height: 0; max-height: 100%; }
+#run-editor .cm-scroller { font: inherit; overflow-y: auto; }
+/* The run button docks in the bottom-right corner of the field (chat-input
+   style) instead of standing on a row of its own: the script and the act of
+   running it are one control. The content keeps a matching right inset so a
+   wrapped line never runs underneath it. */
+#run-exec {
+  position: absolute;
+  right: var(--gap-2);
+  bottom: var(--gap-2);
+  z-index: 1;
+}
+#run-editor .cm-content { padding-right: 52px; }
+
+/* Saved scripts and the run's status on one line, between the field and the
+   result pane. The status is parked at the right edge — it is what the last
+   press of that button had to say, not a chip. */
+.run-chips { display: flex; align-items: flex-start; gap: var(--gap-3); }
+.run-chips #run-saved { flex: 1; min-width: 0; }
+.run-chips #run-status { flex-shrink: 0; padding-top: 3px; }
+
+/* The right column: producer strip on top, result pane under it. It is a PANE,
+   so it takes the pane area's geometry and its own hairline against the source
+   half — the same seam the divider draws in split, minus the drag. */
+#run-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+}
+
+/* Rule 10, revised: a pane bar, because there genuinely are two panes here —
+   the result's ops act on the RESULT, not on the document, so they cannot ride
+   the toolbar. Same geometry as .tree-bar / .code-bar, one baseline across the
+   seam. */
+.run-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-chrome);
+}
+/* Rule 13: the count moves 9 → 99 → 999 between runs and must not ripple. */
+#run-result-label {
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Rule 15 tier 2 — ink AND a hairline: the result on screen is not this
+   document's any more. It never re-runs by itself, so it has to be noticeable
+   without being loud. */
+#run-stale {
+  padding: 2px var(--gap-2);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+}
+/* Quiet tier via .btn-quiet on each button — see the tier block up top. */
+
+/* The result IS a document surface: same canvas, same gutter stripe, same
+   virtualized layer as #tree-viewport (see the note there for why the stripe is
+   painted on the viewport rather than by the rows). */
+#run-viewport {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  min-height: 0;
+  background-color: var(--bg-canvas);
+  background-image: linear-gradient(
+    to right,
+    var(--gutter-bg) 0 51px,
+    var(--border) 51px 52px,
+    transparent 52px
+  );
+}
+#run-spacer { width: 1px; }
+#run-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+/* Rule 17: before the first run the pane is empty, not broken — it says what
+   to do next and takes the canvas, because this is where the document lands. */
+#run-empty {
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-canvas);
+}
+
+/* The source pane's tree/code switch, at .tree-bar / .code-bar scale: the same
+   segmented component as the toolbar's, one size down (rule 1's mini), because
+   it sits inside a strip rather than being one of its ops. */
+.mode-switch-mini button {
+  min-height: var(--ctl-h-mini);
+  padding: 0 var(--gap-2);
+  font-size: var(--fs-chip);
+}
+
+#run-console-body { max-height: 24vh; margin-top: 7px; }
+
+/* ---------- download: naming the file ---------- */
+
+/* Rule 21, and the display pair is the same deliberate one #sem-plan-body
+   carries: the first line hides the form in a browser with no popover support
+   (where ⇩ simply does nothing and the panel never sits open in the bar), the
+   second shows it in one that has it and has to out-specify the first. */
+#dl-name {
+  display: none;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  gap: var(--gap-2);
+  align-items: center;
+  padding: var(--gap-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+#dl-name:popover-open { display: flex; }
+#dl-name-input { width: 30ch; }
+
 /* ---------- search panel ---------- */
 
+/* Rule 11: static in the flow, not floating — an inline strip like #ask-panel,
+   so it is chrome. (I misfiled it as a floating surface on the first pass; its
+   computed position is `static`.) */
 #search-panel {
   max-height: 38vh;
   overflow-y: auto;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
+/* Rule 11: this panel's inset is delivered by its rows — it is a list, not a
+   control bar, so giving the box its own 12px would compound with theirs. */
 .hit {
   display: flex;
-  gap: 12px;
-  padding: 5px 16px;
-  font: 12.5px var(--mono);
+  align-items: center;
+  gap: var(--gap-3);
+  /* Rule 8b's row rhythm: one --row-h across every scrolling list of rows, so
+     switching view does not change how fast the eye travels. */
+  height: var(--row-h);
+  padding: 0 var(--gap-3);
+  font: var(--fs-body) var(--mono);
   cursor: pointer;
   white-space: nowrap;
 }
 .hit:hover { background: var(--bg-hover); }
-.hit.none { color: var(--text-dim); cursor: default; }
-.hit.error { color: var(--danger); cursor: default; }
+/* Rule 15 tier 3: a search that errored is not an empty search — a malformed
+   /regex/ is a thing to fix, not a row to skim past. */
+.hit.error {
+  margin: var(--gap-2) var(--gap-3);
+  height: auto;
+  padding: var(--gap-2) 10px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: var(--r-sm);
+  white-space: normal;
+  cursor: default;
+}
 .hit-path { color: var(--c-key); flex-shrink: 0; }
 .hit-prev { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
 .hit-prev.key { color: var(--c-string); }
@@ -1695,23 +2463,41 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #pane-area > #code-view,
 #pane-area > #diff-view,
 #pane-area > #semantic-view,
-#pane-area > #table-view {
+#pane-area > #table-view,
+#pane-area > #run-pane {
   flex: 1 1 0;
   min-width: 0;
 }
 #pane-area.split > #tree-pane { flex: 0 0 var(--split-w, 50%); }
-#pane-area.split > #code-view { border-left: 1px solid var(--border); }
 
+/* A handle you can grab, not a seam that happens to be draggable. It was a 7px
+   slab painted --border with the code pane adding its own 1px --border on top:
+   8px of border colour reading as one fat dead stripe between the two halves of
+   ONE reading surface. Now 5px of --bg-elevated-2 carrying a two-line grip —
+   the same "this is a control" language as everything else on chrome — and the
+   pane's redundant edge is gone, so the gap is the handle's width and nothing
+   else. The grip is painted as a background image rather than a pseudo-element
+   because the divider is an empty div whose only job is to be dragged. */
 #split-divider {
-  flex: 0 0 7px;
+  flex: 0 0 5px;
   align-self: stretch;
   cursor: col-resize;
-  background: var(--border);
-  transition: background 0.12s ease;
+  background-color: var(--bg-elevated-2);
+  background-image: linear-gradient(
+    to right,
+    var(--border-strong) 0 1px,
+    transparent 1px 2px,
+    var(--border-strong) 2px 3px
+  );
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 3px 22px;
+  transition: background-color var(--dur) var(--ease);
   z-index: 5;
 }
+/* Grabbed: the whole handle answers, and the grip has done its job by then. */
 #split-divider:hover,
-#split-divider.dragging { background: var(--accent); }
+#split-divider.dragging { background-color: var(--accent); background-image: none; }
 
 /* ---------- tree ---------- */
 
@@ -1721,7 +2507,33 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   overflow: auto;
   position: relative;
   min-height: 0;
-  background: var(--bg);
+  /* Rule 11 — this is document content, so it takes the canvas, same as the
+     CodeMirror pane beside it in split view. The two panes are one reading
+     surface interrupted by a divider, not two surfaces.
+
+     The gutter stripe is painted HERE, not by the rows. .rownum is per-row, so
+     the strip died at the last row while CodeMirror's single full-height column
+     ran to the bottom of its pane — the two panes disagreed below the content.
+     Geometry tracks .rownum exactly: border-box 52px wide with its 1px border
+     inside, so gutter 0→51, hairline 51→52; the rows then paint their own
+     matching strip on top and the join is invisible.
+
+     Default (scroll) attachment, deliberately, NOT local: it pins the stripe to
+     the pane box, which is both what we want — full height however short the
+     document is — and free, since a local background would have to repaint on
+     every scroll frame of a virtualized 37MB tree. That is only safe because
+     this viewport never scrolls horizontally (#tree-layer is left:0/right:0, so
+     long rows overflow visibly rather than growing the scroll width — verified
+     at 260px with a 400-char value). If that ever changes, the stripe and the
+     numbers would drift apart on scrollLeft; make .rownum sticky at left:0 then
+     rather than switching this to local. */
+  background-color: var(--bg-canvas);
+  background-image: linear-gradient(
+    to right,
+    var(--gutter-bg) 0 51px,
+    var(--border) 51px 52px,
+    transparent 52px
+  );
 }
 #tree-spacer { width: 1px; }
 #tree-layer {
@@ -1736,8 +2548,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: flex;
   align-items: center;
   height: var(--row-h);
-  padding-right: 16px;
-  font: 13px/1 var(--mono);
+  padding-right: var(--gap-4);
+  font: var(--fs-code)/1 var(--mono);
   white-space: nowrap;
   cursor: default;
 }
@@ -1754,10 +2566,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-right: 12px;
+  padding-right: var(--gap-3);
   margin-right: 6px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-chip);
+  /* Right-aligned digits in a fixed column: without tabular figures the right
+     edge ripples as the count crosses 9 → 99 → 999 while you scroll. */
+  font-variant-numeric: tabular-nums;
   background: var(--gutter-bg);
   border-right: 1px solid var(--border);
   user-select: none;
@@ -1779,12 +2594,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   width: 20px;
   flex-shrink: 0;
   color: transparent;
-  font-size: 9px;
+  font-size: var(--fs-micro);
   text-align: center;
-  transition: transform 0.12s ease;
+  transition: transform var(--dur) var(--ease);
 }
 .caret.open { transform: rotate(90deg); }
-.key { color: var(--c-key); margin-right: 8px; }
+.key { color: var(--c-key); margin-right: var(--gap-2); }
 .key.idx { color: var(--c-null); }
 .val { overflow: hidden; text-overflow: ellipsis; }
 .val.string { color: var(--c-string); }
@@ -1798,30 +2613,23 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .row[data-children='0'] .val.boolean,
 .row[data-children='0'] .val.null { cursor: text; }
 
-.val-edit {
-  font: 13px var(--mono);
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  color: var(--text);
-  padding: 1px 7px;
-  outline: none;
-  min-width: 140px;
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.val-edit.bad { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+/* Rule 14 supplies the field; this one is born focused, so rule 5's ring is
+   what draws its accent border rather than a rest state pretending to be one. */
+.val-edit { min-width: 140px; }
+.val-edit.bad { border-color: var(--danger); box-shadow: var(--ring-danger); }
 
-.hint { color: var(--text-faint); font-style: italic; margin-left: 8px; flex-shrink: 0; font-size: 12px; }
+.hint { color: var(--text-faint); font-style: italic; margin-left: var(--gap-2); flex-shrink: 0; font-size: var(--fs-body); }
+/* Rule 16, the STATIC TAG: a byte weight is a label on a collapsed node, not
+   something you can click, so it carries no border and no affordance. */
 .weight {
-  margin-left: 8px;
+  margin-left: var(--gap-2);
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   color: var(--text-faint);
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
   padding: 0 5px;
-  line-height: 15px;
+  line-height: 17px;
 }
 .unpacked-mark { color: var(--accent); margin-right: 6px; }
 
@@ -1829,47 +2637,74 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .chunk-range {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
 }
 .chunk-count {
   margin-left: 10px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-chip);
   font-style: italic;
 }
 
-/* Auto-repair badge in the toolbar — amber, opens the raw-source view on click. */
+/* Auto-repair badge in the toolbar — opens the raw-source view on click.
+   Rule 15 tier 2: notice it, then proceed. The document opened; it is the
+   bytes that were not what you meant, and nothing here is blocked on you. */
 #repair-badge {
   color: var(--warn);
-  background: var(--warn-soft);
-  border: 1px solid var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
   border-radius: var(--r-sm);
   cursor: pointer;
   white-space: nowrap;
 }
 #repair-badge:hover { filter: brightness(1.08); }
+/* Quiet on purpose (it reports a fact, not a state you must notice) — the old
+   accent-pill declarations here were dead weight: the toolbar's quiet rule
+   outranked them, so the badge always rendered text-only. .btn-quiet now says
+   so honestly. */
 #payload-badge {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
   border-radius: var(--r-sm);
   cursor: pointer;
   white-space: nowrap;
 }
-#payload-badge:hover { border-color: var(--accent); }
+/* Rule 6: unpacking an embedded payload commits work, so this is the outline
+   tier like every other accent button in the workbench — it just happens to sit
+   inline on a row (--ctl-h-mini) rather than in a bar. */
 .btn-unpack {
-  margin-left: 8px;
+  margin-left: var(--gap-2);
   color: var(--accent);
   border-color: var(--accent-line);
-  background: var(--accent-soft);
+  background: var(--btn-bg);
   border-radius: var(--r-sm);
   flex-shrink: 0;
   box-shadow: none;
 }
-.btn-unpack:hover { background: var(--accent-soft); border-color: var(--accent); }
+.btn-unpack:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
 
-.actions { display: none; gap: 4px; margin-left: auto; padding-left: 12px; }
-.row:hover .actions { display: flex; }
+/* Rule 20: the gutter is reserved on EVERY row, so a value's truncation point
+   is a property of the row and never of where the pointer happens to be. 112px
+   is the two-action set (path · copy) at the mini metrics; an array row's third
+   action grows its own gutter past that, which is fine — what must not change
+   is a single row's gutter, and it never does. The actions right-align inside
+   it, so the common rows line up. visibility, not display, because a
+   display:none control cannot be tabbed to — and opacity alone would leave an
+   invisible tab stop sitting in the order. */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-1);
+  margin-left: auto;
+  padding-left: var(--gap-3);
+  min-width: 112px;
+  flex-shrink: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--dur) var(--ease);
+}
+.row:hover .actions,
+.row:focus-within .actions {
+  opacity: 1;
+  visibility: visible;
+}
 .actions button {
   border-radius: var(--r-sm);
   color: var(--text-dim);
@@ -1885,39 +2720,83 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .row.flash { animation: rowflash 1.3s ease-out; }
 
-/* ---------- crumb ---------- */
+/* ---------- status strip: the app's bottom edge ---------- */
 
-#crumb {
+/* Rule 19. ONE status line under every pane, and rule 11's one stated height
+   exception: a STATUS line, not a control bar, so it keeps 30px and the 5px
+   vertical padding that holds 30px around a mini chip. The 12px inset is not
+   an exception — the lead starts on the same x as every strip above it. It has
+   no :empty rule on purpose: the strip is the app's bottom edge whether or not
+   the view has something to say, and a view with nothing to say has a resting
+   line instead (main.ts). */
+#status-bar {
   border-top: 1px solid var(--border);
-  background: var(--bg-elevated);
-  padding: 5px 16px;
-  font: 12px var(--mono);
+  background: var(--bg-chrome);
+  padding: 5px var(--gap-3);
+  font: var(--fs-body) var(--mono);
   color: var(--text-dim);
   min-height: 30px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--gap-2);
   overflow: hidden;
 }
-#crumb:empty { display: none; }
-.crumb-path {
-  color: var(--c-key);
+/* The view's "where am I". `is-path` is the JSON-path case — rule 18's key
+   colour, because that is what it is; a caret position or a diff verdict is
+   prose about the document and stays on the strip's own dim ink. */
+.status-lead {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 40px;
+  font-variant-numeric: tabular-nums;
 }
+.status-lead.is-path { color: var(--c-key); }
+/* Everything the view wants to say ABOUT the lead, at the far edge: one
+   margin-left:auto for the whole group, so no tenant has to grow its own. */
+.status-trail {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  margin-left: auto;
+  min-width: 0;
+}
+/* Lead and note both give way before a chip does (chips are flex-shrink:0 by
+   the .crumb-chip rule); each ellipsizes and keeps its whole text in a title. */
+.status-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Rule 15's mapping. dirty/error/saved are tier 1, ink alone: they follow your
+   own keystrokes and you are already looking at them (--warn for unsaved per
+   rule 18 — a state, not a value). `bulk` is the one tier 2 here: a replace-all
+   rewrote lines you never typed, and the tree beside it is still showing the
+   document before that happened — notice it, then proceed. */
+.status-note.dirty { color: var(--warn); }
+.status-note.error { color: var(--danger); }
+.status-note.saved { color: var(--ok); }
+.status-note.bulk {
+  padding: 1px var(--gap-2);
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
+  border-radius: var(--r-sm);
+  color: var(--warn);
+}
+/* A live count published by a search that is open somewhere on screen. */
+.status-count { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .crumb-chip {
   flex-shrink: 0;
   font-family: var(--mono);
   color: var(--text-dim);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   box-shadow: none;
 }
 .crumb-chip:hover { color: var(--text); border-color: var(--accent-line); }
-.crumb-chip.same { margin-left: auto; color: var(--accent); border-color: var(--accent-line); }
+/* No margin-left:auto any more — .status-trail is what puts it at the edge. */
+.crumb-chip.same { color: var(--accent); border-color: var(--accent-line); }
 .crumb-chip.same:hover { background: var(--accent-soft); }
 /* Same accent treatment as the tree's {…} unpack chip and the decoded badge —
    one color for the whole "this is a payload" concept. */
@@ -1928,8 +2807,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .crumb-chip.payload:hover { background: var(--accent-soft); }
 
 .hit-header {
-  padding: 6px 16px 4px;
-  font: 600 11px var(--sans);
+  padding: 6px var(--gap-3) var(--gap-1);
+  font: 400 var(--fs-chip) var(--sans);
   letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--text-faint);
@@ -1938,42 +2817,83 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* ---------- code view (CodeMirror) ---------- */
 
 #code-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* In SPLIT these two are the halves of one strip, cut at the same column as the
+   panes: identical geometry, identical ground, one baseline across the divider
+   (rule 10, revised). The tree half only exists there — with one tree on screen
+   its three ops are upstairs on the toolbar, and a bar with nothing in it is
+   44px of chrome charging rent. */
 .code-bar,
 .tree-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 14px;
+  /* Rule 11's strip geometry. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
-.code-bar .spacer,
-.tree-bar .spacer { flex: 1; }
-/* At narrow split widths the status text is what gives way — the primary
-   action always keeps its label on one line. The status truncates with an
-   ellipsis rather than wrapping (per-character wrap turns it into a 1ch-wide
-   column that blows up the bar's height); the full text lives in its title. */
+.tree-bar { display: none; }
+/* Two panes, so the strip exists: split shows both halves, run mode shows this
+   one as the SOURCE bar (it also carries the tree/code switch there). */
+#viewer[data-pane='split'] .tree-bar,
+#viewer[data-pane='run'] .tree-bar { display: flex; }
+/* The ops the toolbar hands back in split. Same gap as .tb-tree upstairs, so
+   the group reads the same wherever it is standing. */
+.bar-ops { display: flex; align-items: center; gap: var(--gap-2); }
+/* Run mode: the document ops anchor RIGHT regardless of which source view is
+   showing — the tree/code toggle swaps the pane's own ops on the left, and the
+   document's ops must not teleport across the strip when it does (the code bar
+   already puts them after its spacer). Split keeps the default left position:
+   there the ops sit inside the tree HALF, and pushing them to its right edge
+   would park them at the divider, reading as the code half's. */
+#viewer[data-pane='run'] .tree-bar .bar-ops { order: 2; }
+/* Overflow is a DESIGNED state (rule 11 deviation, named): in run mode the
+   source bar lives at half width, and its packed ops (apply/format/copy/source
+   + the document trio) can exceed it. A strip that cannot hold one row WRAPS —
+   a second row inside its own pane beats buttons painting over the result
+   pane, which is what unwrapped flex overflow did. Single-pane bars keep the
+   one-row geometry; this exception is scoped to run's halved bars only. */
+#viewer[data-pane='run'] .tree-bar,
+#viewer[data-pane='run'] .code-bar {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+/* Each half says which pane it governs — but only where there are two halves to
+   tell apart. One pane needs no label. */
+.pane-label { display: none; }
+#viewer[data-pane='split'] .pane-label { display: block; }
+/* The bar carries ops only now: its status readout moved to #status-bar with
+   every other view's (rule 19), which is also what stopped `apply changes` from
+   sharing a row with a sentence about whether it had been pressed. */
 #code-apply { white-space: nowrap; flex-shrink: 0; }
-#code-status {
-  font: 12px var(--mono);
-  color: var(--text-dim);
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#code-status.dirty { color: var(--c-number); }
-#code-status.error { color: var(--danger); }
-#code-status.saved { color: var(--ok); }
 #code-raw.on {
   background: var(--accent-soft);
   border-color: var(--accent-line);
   color: var(--accent);
-  font-weight: 600;
 }
 #code-host { flex: 1; min-height: 0; overflow: hidden; position: relative; }
 #code-host .cm-editor { height: 100%; }
-#code-host .cm-scroller { font: 13px/1.6 var(--mono); }
+#code-host .cm-scroller { font: var(--fs-code)/1.6 var(--mono); }
+
+/* Follow-the-hit: a structural search match scrolled this line into view. It is
+   the tree's row flash on the other surface — the same accent wash fading out
+   over about the same second — and like it, it marks nothing afterwards.
+   code.ts retires the decoration on a timer, so the fade is the whole visual.
+   The .cm-line prefix is the usual one, to outrank the editor's own generated
+   theme (an active line, say, under the same wash). */
+#code-host .cm-line.cm-flash-line { animation: cmlineflash 1s ease-out; }
+@keyframes cmlineflash {
+  from { background: var(--accent-soft); }
+  to { background: transparent; }
+}
+/* Rule 12 — the flash is the one place where losing the animation loses the
+   ANSWER, so under a reduced-motion preference it keeps the highlight and drops
+   only the pulse: the blanket rule below collapses the fade to nothing, and
+   this holds the wash flat until code.ts's timer takes it away. */
+@media (prefers-reduced-motion: reduce) {
+  #code-host .cm-line.cm-flash-line { background: var(--accent-soft); }
+}
 
 /* Rule 9 — CodeMirror's Ctrl+F panel, themed to this contract instead of
    tolerated: our inputs, our buttons, our checkbox, both themes (every value is
@@ -1986,29 +2906,35 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   align-items: center;
   gap: var(--gap-2);
   padding: var(--gap-2) var(--gap-3);
-  background: var(--bg-elevated);
-  font: 12.5px var(--sans);
+  /* Rule 11: an inline strip bordered against the pane is CHROME, exactly like
+     #ask-panel and #search-panel. It was --bg-elevated, which in light is the
+     same #ffffff as the code pane it sits on — a find bar with no ground. */
+  background: var(--bg-chrome);
+  font: var(--fs-body) var(--sans);
   color: var(--text-dim);
 }
 /* CM separates the find and replace rows with a <br>; a wrapping flex row does
    that job without a line break in the middle of the control group. */
 #code-host .cm-panel.cm-search br { display: none; }
+/* Rule 14: the find field is a field, so it takes the same recipe as ours —
+   including the canvas ground, which was --bg-elevated-2 here. The #code-host
+   prefix is only there to outrank CodeMirror's own generated theme. */
 #code-host .cm-panel.cm-search .cm-textfield {
   min-width: 180px;
-  height: var(--ctl-h);
+  min-height: var(--ctl-h);
   margin: 0;
   padding: 0 var(--gap-3);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text);
-  font: 12.5px var(--mono);
+  font: var(--fs-body) var(--mono);
   outline: none;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 #code-host .cm-panel.cm-search .cm-textfield:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
 }
 /* CM's own labels are already lowercase; the placeholders are not, and they are
    not reachable from CSS as text. */
@@ -2022,11 +2948,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border: 1px solid var(--btn-border);
   border-radius: var(--r-sm);
   color: var(--text);
-  font: 500 12.5px var(--sans);
+  font: 400 var(--fs-body) var(--sans);
   text-transform: lowercase;
   cursor: pointer;
   box-shadow: none;
-  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 #code-host .cm-panel.cm-search .cm-button:hover {
   border-color: var(--btn-border-hover);
@@ -2034,12 +2960,22 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   background-image: none;
 }
 #code-host .cm-panel.cm-search .cm-button:active { background: var(--btn-bg-active); }
+/* `replace all · 3 matches` — the button states its scope BEFORE it is pressed.
+   The number is code.ts's live count, handed over as a data attribute rather
+   than written into CodeMirror's own label: their phrase survives (it is
+   translatable and theirs to change), and the decoration is ours, per rule 9.
+   Above 500 matches the click asks first; below it, this IS the warning. */
+#code-host .cm-panel.cm-search .cm-button[name='replaceAll'][data-count]::after {
+  content: ' · ' attr(data-count);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
 #code-host .cm-panel.cm-search label {
   display: inline-flex;
   align-items: center;
   gap: var(--gap-1);
   color: var(--text-dim);
-  font: 12px var(--sans);
+  font: var(--fs-body) var(--sans);
   text-transform: lowercase;
   cursor: pointer;
 }
@@ -2060,13 +2996,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   cursor: pointer;
 }
 #code-host .cm-panel.cm-search [name='close']:hover { background: var(--bg-hover); color: var(--text); }
-.code-toobig {
-  padding: 40px;
-  text-align: center;
-  color: var(--text-dim);
-  font: 13px var(--mono);
-  line-height: 1.8;
-}
+/* Rule 17 owns this one whole — a pane with nothing readable in it. */
 
 /* ---------- diff ---------- */
 
@@ -2075,45 +3005,51 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 14px;
+  /* Rule 11's strip geometry. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
   flex-wrap: wrap;
 }
-#diff-title { font: 12.5px var(--mono); color: var(--text); }
-#diff-ignore {
-  flex: 1;
-  min-width: 220px;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text);
-  padding: 6px 11px;
-  font: 12px var(--mono);
-  outline: none;
-}
-#diff-ignore:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#diff-title { font: var(--fs-body) var(--mono); color: var(--text); }
 #diff-body { flex: 1; overflow-y: auto; padding-bottom: 24px; background: var(--bg); }
+/* One class, one meaning: the heading over a group of differences. It used to
+   change its own type by state — .same and .trunc dropped the caps and the
+   tracking and jumped 11px → 14px — because neither is a group heading. The
+   verdict is an empty state (rule 17) and the truncation note is a footnote,
+   so both now live outside this class. */
 .diff-group {
-  padding: 13px 16px 5px;
-  font: 650 11px var(--sans);
+  padding: 13px var(--gap-3) 5px;
+  font: 400 var(--fs-chip) var(--sans);
   text-transform: uppercase;
   letter-spacing: 0.8px;
 }
-.diff-group.changed { color: var(--c-number); }
+.diff-group.changed { color: var(--warn); }
 .diff-group.added { color: var(--ok); }
 .diff-group.removed { color: var(--danger); }
-.diff-group.same { color: var(--ok); text-transform: none; font-size: 14px; letter-spacing: 0; }
-.diff-group.trunc { color: var(--text-dim); text-transform: none; letter-spacing: 0; }
+/* The truncation note: the crumb's faint 11px mono, because that is what it is
+   — a footnote about the list, not a heading over part of it. */
+.diff-note {
+  padding: 5px var(--gap-3) 0;
+  color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+}
 .diff-item {
   display: flex;
-  gap: 12px;
-  padding: 3px 16px;
-  font: 12.5px var(--mono);
+  align-items: center;
+  gap: var(--gap-3);
+  /* Rule 8b: the same --row-h every other scrolling list of rows uses. */
+  height: var(--row-h);
+  padding: 0 var(--gap-3);
+  font: var(--fs-body) var(--mono);
   cursor: pointer;
   white-space: nowrap;
 }
-.diff-item:hover { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
+/* Rule 18: hover is a background change and nothing more. The bar here was
+   byte-identical to .row.sel, so the same 2px accent edge meant "your cursor is
+   here" in this pane and "this is the selected node" in the tree. */
+.diff-item:hover { background: var(--bg-hover); }
 .diff-path { color: var(--c-key); flex-shrink: 0; }
 .diff-vals { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
 .diff-item.added .diff-vals { color: var(--ok); }
@@ -2121,39 +3057,40 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 /* ---------- semantic side-by-side compare ---------- */
 
+/* Rule 11: the aligned grid is a document being read, so the pane is CANVAS —
+   which is also what lets .sem-columns drop onto it and stop floating. */
 #semantic-view {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--bg-canvas);
 }
 .sem-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 43px;
-  padding: 7px 14px;
+  /* Rule 11's strip geometry. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
-.sem-head .spacer { flex: 1; }
 .sem-heading {
   display: flex;
   align-items: baseline;
   gap: 10px;
   min-width: 0;
 }
-.sem-heading strong {
-  flex-shrink: 0;
-  color: var(--accent);
-  font-size: 13px;
-}
+/* Rule 2's surface-title rank supplies the type. The accent went with the
+   13px: this was the one surface in the app whose title was accent-coloured,
+   for no stated reason. */
+.sem-heading strong { flex-shrink: 0; }
 #sem-title {
   min-width: 0;
   overflow: hidden;
   color: var(--text-dim);
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2163,15 +3100,18 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 42px;
-  padding: 6px 14px;
+  /* Rule 11's strip geometry; the stated background exception. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated-2);
+  /* Second bar under .sem-head — --bg-chrome-2 keeps them a visible step apart.
+     They were 3 units apart in light once .sem-head went chrome. */
+  background: var(--bg-chrome-2);
 }
 .sem-filters {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-1);
 }
 .sem-filters button {
   display: inline-flex;
@@ -2181,13 +3121,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   background: transparent;
   white-space: nowrap;
 }
+/* Rule 16, the STATIC TAG: the count is a label on the filter, not a second
+   thing to click inside it. */
 .sem-filters button span {
   min-width: 18px;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--r-xs);
   background: var(--bg-inset);
   color: var(--text-dim);
-  font: 10px var(--mono);
+  font: var(--fs-micro) var(--mono);
   text-align: center;
 }
 .sem-filters button.on {
@@ -2198,29 +3140,32 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .sem-order-note {
   margin-left: auto;
   color: var(--text-faint);
-  font: 11px var(--mono);
+  font: var(--fs-chip) var(--mono);
 }
-#sem-plan { position: relative; }
-#sem-plan > summary {
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text-dim);
-  font: 12px var(--sans);
-  cursor: pointer;
-  list-style: none;
+#sem-plan-btn {
   white-space: nowrap;
+  color: var(--text-dim);
 }
-#sem-plan > summary::-webkit-details-marker { display: none; }
-#sem-plan[open] > summary {
+/* Rule 6's TINT: this toggle is currently on. Same treatment the filter chips
+   beside it wear, which is what the <details>[open] summary was already doing. */
+#sem-plan-btn[aria-expanded='true'] {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--text);
 }
+/* Rule 21: a top-layer popover, so .sem-toolbar's overflow-x cannot clip it —
+   main.ts sets left/top under the trigger, because anchor positioning is not
+   portable yet. The display pair is deliberate and must stay together: the
+   first line hides the panel in a browser with no popover support (where the
+   UA's own [popover] display rule does not exist and the panel would otherwise
+   sit open in the bar forever), the second is what shows it in one that has it
+   — and it has to out-specify the first. */
 #sem-plan-body {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  display: none;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
   width: min(720px, 82vw);
   max-height: 52vh;
   overflow: auto;
@@ -2229,49 +3174,42 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   background: var(--bg-elevated);
   box-shadow: var(--shadow);
 }
-.sem-plan-empty {
-  padding: 18px;
-  color: var(--text-dim);
-  font: 12px var(--mono);
-}
+#sem-plan-body:popover-open { display: block; }
 .sem-plan-row {
   display: grid;
   grid-template-columns: minmax(170px, 1fr) 130px minmax(150px, 0.8fr) auto;
   gap: 9px;
   align-items: center;
-  padding: 8px 10px;
+  padding: var(--gap-2) 10px;
   border-bottom: 1px solid var(--border-soft);
 }
 .sem-plan-row:last-child { border-bottom: none; }
 .sem-plan-path {
   overflow: hidden;
   color: var(--c-key);
-  font: 11.5px var(--mono);
+  font: var(--fs-chip) var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Rule 14 owns these; the grid column owns their width. */
 .sem-plan-row select,
-.sem-plan-row input {
-  min-width: 0;
-  padding: 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
-  color: var(--text);
-  font: 11px var(--mono);
-}
+.sem-plan-row input { min-width: 0; }
+/* No margin-top claw-back: the row's fields are on rule 14's recipe now, and a
+   negative margin correcting for a field's height is how that recipe used to be
+   worked around one grid at a time. */
 .sem-plan-meta {
   grid-column: 1 / -1;
-  margin-top: -4px;
   color: var(--text-faint);
-  font: 10.5px var(--mono);
+  font: var(--fs-label) var(--mono);
 }
+/* Rule 18: "the alignment is not certain" is attention, not a value — --warn,
+   which means exactly that, rather than the hue a JSON number is painted in. */
 #sem-warning {
-  padding: 7px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--c-number) 45%, var(--border));
-  background: color-mix(in srgb, var(--c-number) 10%, var(--bg));
-  color: var(--c-number);
-  font: 11.5px var(--mono);
+  padding: 7px var(--gap-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg-canvas));
+  color: var(--warn);
+  font: var(--fs-chip) var(--mono);
 }
 #sem-grid-wrap {
   flex: 1;
@@ -2291,20 +3229,23 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: grid;
   grid-template-columns: minmax(0, 1fr) 128px minmax(0, 1fr);
 }
+/* Rule 11: a column header is the top edge of the DOCUMENT, not something
+   floating over it — canvas plus the strong bottom border, so the data surface
+   starts where the data starts. --bg-elevated made it a third plane. */
 .sem-columns {
   flex-shrink: 0;
   height: 33px;
   border-bottom: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
+  background: var(--bg-canvas);
   color: var(--text-dim);
-  font: 650 10.5px var(--sans);
+  font: 400 var(--fs-label) var(--sans);
   letter-spacing: 0.65px;
   text-transform: uppercase;
 }
 .sem-columns > div {
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 var(--gap-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2333,16 +3274,20 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   left: 0;
   will-change: transform;
 }
+/* Rule 8b: --row-h, like the tree, the diff list and the search hits. This one
+   is virtualized, so ROW_H in compare-view.ts is the same number by contract —
+   change one and you change the other. */
 .compare-row {
-  height: 32px;
+  height: var(--row-h);
   border-bottom: 1px solid var(--border-soft);
-  font: 12px var(--mono);
+  font: var(--fs-body) var(--mono);
   cursor: default;
 }
 .compare-row:hover { background: var(--bg-hover); }
+/* Rule 18: inset 2px is the one selected marker, here and in the tree. */
 .compare-row.selected {
   background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .compare-side {
   display: flex;
@@ -2362,7 +3307,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   width: 14px;
   flex: 0 0 14px;
   color: var(--text-faint);
-  transition: transform 0.1s ease;
+  transition: transform var(--dur) var(--ease);
 }
 .compare-caret.open { transform: rotate(90deg); }
 .compare-key {
@@ -2390,26 +3335,35 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .compare-status {
   min-width: 16px;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
 }
 .compare-match-label {
   overflow: hidden;
   color: var(--text-faint);
-  font-size: 9.5px;
+  font-size: var(--fs-micro);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .compare-warning {
   flex: 0 0 auto;
-  color: var(--c-number);
+  color: var(--warn);
 }
+/* Rule 18: changed is --warn, not the number's own hue. */
 .compare-row.status-changed .compare-gutter,
-.compare-row.status-type .compare-gutter { color: var(--c-number); }
+.compare-row.status-type .compare-gutter { color: var(--warn); }
 .compare-row.status-added .compare-gutter { color: var(--ok); }
 .compare-row.status-removed .compare-gutter { color: var(--danger); }
 .compare-row.status-moved .compare-gutter { color: var(--accent); }
-.compare-row.status-ambiguous .compare-gutter { color: var(--c-number); }
+/* Rule 15 tier 2, and the reason it is not tier 1 like the rest of this gutter:
+   ambiguous is a QUESTION, not a change — the filter bar above counts it as its
+   own population and gives `needs review` its own button, so it cannot be the
+   same drawing as `changed`. The hairline is inset so a 128px fixed cell keeps
+   its box. */
+.compare-row.status-ambiguous .compare-gutter {
+  color: var(--warn);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
+}
 .compare-row.status-added .compare-right {
   background: color-mix(in srgb, var(--ok) 7%, transparent);
 }
@@ -2418,19 +3372,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .compare-row.status-changed .compare-side,
 .compare-row.status-type .compare-side {
-  background: color-mix(in srgb, var(--c-number) 5%, transparent);
+  background: color-mix(in srgb, var(--warn) 5%, transparent);
 }
-#sem-crumb {
-  min-height: 28px;
-  padding: 6px 12px;
-  border-top: 1px solid var(--border);
-  overflow: hidden;
-  color: var(--text-dim);
-  font: 11px var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sem-crumb-detail { color: var(--text-faint); }
+/* Compare's own 28px status strip lived here. It is #status-bar's tenant now
+   (rule 19): one strip, one geometry, one implementation. */
 
 @media (max-width: 900px) {
   .sem-toolbar {
@@ -2446,24 +3391,33 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* ---------- table ---------- */
 
 #table-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* Rule 11: a control strip bordered against a pane is chrome. --bg-elevated
+   made it the identical value to the column header below it, so bar + header
+   read as one undifferentiated slab — and in light, where elevated and canvas
+   are both #ffffff, the bar had no ground at all. */
 .table-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 14px;
+  gap: var(--gap-3);
+  /* Rule 11's strip geometry. */
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--bg-chrome);
 }
-#table-title { font: 12.5px var(--mono); color: var(--c-key); }
-#table-count { color: var(--text-dim); font-size: 12px; }
-.table-bar button { margin-left: auto; }
-#table-outer { flex: 1; overflow-x: auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+#table-title { font: var(--fs-body) var(--mono); color: var(--c-key); }
+#table-count { color: var(--text-dim); font-size: var(--fs-body); }
+/* Rule 11: the table pane is a document being read — canvas, like the tree and
+   the code pane beside it. */
+#table-outer { flex: 1; overflow-x: auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg-canvas); }
+/* Rule 11: sticky column header = the document's top edge, so it takes the
+   canvas and keeps only its strong bottom border. */
 #table-header {
   display: grid;
   width: max-content;
   min-width: 100%;
   border-bottom: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
+  background: var(--bg-canvas);
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -2471,22 +3425,24 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #table-viewport { flex: 1; overflow-y: auto; position: relative; min-height: 0; width: max-content; min-width: 100%; }
 #table-spacer { width: 1px; }
 #table-layer { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
-.trow { display: grid; height: 28px; align-items: center; }
+/* Rule 8b: --row-h. TROW_H in main.ts is the same number by contract — this
+   list is virtualized, so the two cannot drift. */
+.trow { display: grid; height: var(--row-h); align-items: center; }
 .trow:hover { background: var(--bg-hover); }
 .trow:nth-child(even) { background: var(--bg-inset); }
 .trow:nth-child(even):hover { background: var(--bg-hover); }
 .tcell {
   padding: 0 11px;
-  font: 12.5px var(--mono);
+  font: var(--fs-body) var(--mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   border-right: 1px solid var(--border-soft);
 }
 .tcell.th {
-  font-weight: 600;
+  font-weight: 700;
   color: var(--c-key);
-  padding: 8px 11px;
+  padding: var(--gap-2) 11px;
   cursor: pointer;
   user-select: none;
 }
@@ -2502,16 +3458,27 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   transform: translateX(-50%);
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--accent);
+  /* Rule 18: 2px, the one left-edge width. */
+  border-left: 2px solid var(--accent);
   border-radius: var(--r);
   padding: 10px 18px;
-  font: 12.5px var(--mono);
+  font: var(--fs-body) var(--mono);
   box-shadow: var(--shadow);
   z-index: 40;
   max-width: 70vw;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Rule 15 tier 3: the toast had no failure state, so "copied" and "could not
+   read that file" were announced in the same colour. The fill is mixed into
+   --bg-elevated rather than layered as --danger-soft: this floats over the
+   document, and a translucent ground would show it through the message. */
+#toast.bad {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border-strong));
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
 }
 
 .toast-action {
@@ -2536,7 +3503,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  font-weight: 650;
+  font-weight: 700;
   color: var(--accent);
   z-index: 30;
   pointer-events: none;
@@ -2549,7 +3516,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    whether an item should be its own row only by seeing the rows — so it gets
    the space and the rail stays narrow. Contract rules 1/2/4/6 apply unchanged:
    28px controls, lowercase labels, the --gap scale, and exactly one accent
-   fill in this view (download, which commits the work). */
+   control in this view — download, which commits the work, on rule 6's
+   outline; the fill is the landing's alone. */
 
 .convert-bar {
   display: flex;
@@ -2748,4 +3716,24 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   #convert-body { grid-template-columns: 180px 1fr; }
   .convert-col { grid-template-columns: auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, 24px); }
   .convert-inline-field { display: none; }
+}
+
+/* ---------- reduced motion ---------- */
+
+/* Rule 13. Every transition and keyframe in this file is decoration over a
+   state change that has already happened — nothing here animates meaning — so
+   under a reduced-motion preference they all collapse to effectively instant
+   rather than being individually unwound. Kept last so it outranks anything
+   declared above it at equal specificity. `0.01ms` rather than `0`: animations
+   still fire their end events, so any JS waiting on animationend/transitionend
+   keeps working. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -327,7 +327,15 @@ async function prune(): Promise<void> {
   for (const m of unpinned.slice(KEEP_UNPINNED)) await removeDoc(m.id);
 }
 
-// ---------- saved questions (English question + the query it compiled to) ----------
+// ---------- things the user kept: saved questions and saved scripts ----------
+//
+// One object store for both. To the user they are the same thing — something
+// they kept and expect to press again — and they wear the same chip, so they
+// share the store and the recency order; each kind keeps its own cap, so
+// scripts can never evict questions or the reverse. The two record shapes are
+// told apart by `kind`, which is absent on every record written before scripts
+// shared this store: a missing kind reads as a question, so older records stay
+// valid without a DB bump (same schema-less rule as `provenance` above).
 
 export interface SavedQuery {
   id: string;
@@ -338,12 +346,53 @@ export interface SavedQuery {
   uses: number;
 }
 
-const KEEP_QUERIES = 100;
+/** A run-mode script, kept beside the saved questions and told apart by `kind`. */
+export interface SavedScript {
+  id: string;
+  kind: 'script';
+  script: string;
+  createdAt: number;
+  updatedAt: number;
+  uses: number;
+}
+
+type SavedRecord = SavedQuery | SavedScript;
+
+const KEEP_SAVED = 100;
+
+function isScript(rec: SavedRecord): rec is SavedScript {
+  return (rec as SavedScript).kind === 'script';
+}
+
+async function listSaved(): Promise<SavedRecord[]> {
+  const t = (await db()).transaction('queries');
+  const all = await req(t.objectStore('queries').getAll() as IDBRequest<SavedRecord[]>);
+  return all.sort((a, b) => b.updatedAt - a.updatedAt);
+}
 
 export async function listQueries(): Promise<SavedQuery[]> {
-  const t = (await db()).transaction('queries');
-  const all = await req(t.objectStore('queries').getAll() as IDBRequest<SavedQuery[]>);
-  return all.sort((a, b) => b.updatedAt - a.updatedAt);
+  return (await listSaved()).filter((rec): rec is SavedQuery => !isScript(rec));
+}
+
+export async function listScripts(): Promise<SavedScript[]> {
+  return (await listSaved()).filter(isScript);
+}
+
+// The one put + cull, for both kinds. `siblings` predates the put: a new record
+// grows its kind's list by one, so cull from KEEP_SAVED - 1; a replacement
+// replaces in place. Never cull the record just put.
+async function putSaved(
+  rec: SavedRecord,
+  siblings: SavedRecord[],
+  replaced: boolean,
+): Promise<void> {
+  const t = (await db()).transaction('queries', 'readwrite');
+  const store = t.objectStore('queries');
+  store.put(rec);
+  for (const old of siblings.slice(replaced ? KEEP_SAVED : KEEP_SAVED - 1)) {
+    if (old.id !== rec.id) store.delete(old.id);
+  }
+  await done(t);
 }
 
 export async function saveQuery(question: string, query: string): Promise<SavedQuery> {
@@ -353,20 +402,29 @@ export async function saveQuery(question: string, query: string): Promise<SavedQ
   const rec: SavedQuery = dup
     ? { ...dup, query, updatedAt: now, uses: dup.uses + 1 }
     : { id: crypto.randomUUID(), question, query, createdAt: now, updatedAt: now, uses: 1 };
-  const t = (await db()).transaction('queries', 'readwrite');
-  t.objectStore('queries').put(rec);
-  // `all` predates the put: a new record grows the store by one, so cull from
-  // KEEP_QUERIES - 1; a dup replaces in place. Never cull the record just put.
-  for (const old of all.slice(dup ? KEEP_QUERIES : KEEP_QUERIES - 1)) {
-    if (old.id !== rec.id) t.objectStore('queries').delete(old.id);
-  }
-  await done(t);
+  await putSaved(rec, all, !!dup);
   return rec;
 }
 
-export async function touchQuery(id: string): Promise<void> {
+// A script is its own identity — there is no question in front of it — so a
+// repeat save of the same source folds into the chip that is already there.
+// Case matters here, unlike a question: `Data` and `data` are different code.
+export async function saveScript(script: string): Promise<SavedScript> {
+  const all = await listScripts();
+  const now = Date.now();
+  const canonical = script.trim();
+  const dup = all.find((s) => s.script.trim() === canonical);
+  const rec: SavedScript = dup
+    ? { ...dup, script: canonical, updatedAt: now, uses: dup.uses + 1 }
+    : { id: crypto.randomUUID(), kind: 'script', script: canonical, createdAt: now, updatedAt: now, uses: 1 };
+  await putSaved(rec, all, !!dup);
+  return rec;
+}
+
+// Keyed by id, so both kinds share them.
+export async function touchSaved(id: string): Promise<void> {
   const t0 = (await db()).transaction('queries');
-  const rec = await req(t0.objectStore('queries').get(id) as IDBRequest<SavedQuery | undefined>);
+  const rec = await req(t0.objectStore('queries').get(id) as IDBRequest<SavedRecord | undefined>);
   if (!rec) return;
   rec.updatedAt = Date.now();
   rec.uses++;
@@ -375,7 +433,7 @@ export async function touchQuery(id: string): Promise<void> {
   await done(t);
 }
 
-export async function removeQuery(id: string): Promise<void> {
+export async function removeSaved(id: string): Promise<void> {
   const t = (await db()).transaction('queries', 'readwrite');
   t.objectStore('queries').delete(id);
   await done(t);
