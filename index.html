@@ -88,9 +88,6 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 2.6 14.4 13.4H1.6Z" /><path d="M8 6.6v3" /><path d="M8 11.6h.01" />
     </symbol>
-    <symbol id="i-theme" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M14 8.5A6 6 0 1 1 7.5 2 4.7 4.7 0 0 0 14 8.5Z" />
-    </symbol>
     <!-- 2026-08-09, the five that let the toolbar's utilities drop their words
          (rule 10, revised again). The test each had to pass is NOT "would a
          stranger recognise it" — it is "does a drawing of this action already
@@ -139,13 +136,19 @@ SPDX-License-Identifier: MIT -->
       <div class="side-label">Recents</div>
       <div id="recents"></div>
       <div class="side-foot">
-        <!-- Both destinations visible, the current one filled — the same
+        <!-- Every destination visible, the current one filled — the same
              segmented idiom as #mode-switch in the toolbar. `☾ Dark` named the
-             state the app was already in twice over and afforded nothing. -->
+             state the app was already in twice over and afforded nothing.
+             THREE segments since 2026-08-09: two of them could not express
+             `follow the OS`, which is the state a first-time visitor is
+             already in and which nobody could get back to once they had
+             pressed anything. `system` is first because it is the default.
+             The moon left with it — an icon on one of three segments is the
+             asymmetry rule 3 exists to prevent, and three words need the
+             width more than one of them needs a picture. -->
         <div class="mode-switch" id="theme-switch" role="group" aria-label="Theme">
-          <button type="button" data-theme="dark" title="Dark theme">
-            <svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg>dark
-          </button>
+          <button type="button" id="theme-system" data-theme="system" title="Follow the system theme">system</button>
+          <button type="button" data-theme="dark" title="Dark theme">dark</button>
           <button type="button" data-theme="light" title="Light theme">light</button>
         </div>
         <span class="lp-spacer"></span>

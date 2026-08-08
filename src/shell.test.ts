@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest';
 import html from '../index.html?raw';
 import styleguide from '../styleguide.html?raw';
 
+/** Every module's source, for the checks that ask "does anything use this?". */
+const sources = import.meta.glob<string>('./*.ts', { query: '?raw', import: 'default', eager: true });
+
 // The app shell is markup, so its promises are testable the same way the spec's
 // are: read the file. Every case here is a claim the shell makes to somebody —
 // a search engine, a reader who arrived wanting a spreadsheet, or the panel
@@ -185,6 +188,28 @@ describe('the icon sprite', () => {
     const app = symbols(html);
     expect(Object.keys(app).length).toBeGreaterThan(0);
     expect(symbols(styleguide)).toEqual(app);
+  });
+
+  // The sprite ships inline in index.html on every page load, so a symbol
+  // nobody draws is dead weight in the critical path — the same argument the
+  // contract's dead-token check makes about CSS. Two users count: markup, and
+  // main.ts's IconName union (icon() builds a <use> at runtime, so those
+  // references are invisible to a search of the HTML).
+  it('has a user for every symbol, and a symbol for every icon() name', () => {
+    const defined = Object.keys(symbols(html));
+    const drawn = new Set([...html.matchAll(/<use href="#(i-[\w-]+)"/g)].map((m) => m[1]));
+    // Call sites, not the type: there are TWO icon() helpers (main.ts and
+    // convert-view.ts, each with its own union), so trusting one declaration
+    // would report the converter's ↑ ↓ as dead. What a name is PASSED is the
+    // fact; a union is a claim about it.
+    const built = new Set(
+      Object.values(sources).flatMap((src) =>
+        [...src.matchAll(/\bicon\(\s*'([\w-]+)'/g)].map((m) => `i-${m[1]}`),
+      ),
+    );
+
+    expect(defined.filter((id) => !drawn.has(id) && !built.has(id)), 'symbols nothing uses').toEqual([]);
+    expect([...built].filter((id) => !defined.includes(id)), 'icon() names with no symbol').toEqual([]);
   });
 
   // Rule 10, revised 2026-08-09: the app may drop a label for a glyph, and the
