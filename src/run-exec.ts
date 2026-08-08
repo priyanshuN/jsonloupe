@@ -327,13 +327,13 @@ export function executeUserScripts(
   console.warn = record('warn: ');
   console.error = record('error: ');
 
-  // NULL PROTOTYPE, and it is not decoration: the keys here are function names
-  // the user typed, and `{}['__proto__'] = value` runs the prototype SETTER
-  // rather than creating a property — so a function called `__proto__` would
-  // vanish from its own report and take the object's prototype with it. With no
-  // prototype there is no setter to hit, the key lands as an ordinary own
-  // property, and JSON.stringify serializes it like any other.
-  const report: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  // A MAP, not an object, and it is not a style preference: the keys here are
+  // function names the user typed, and `obj['__proto__'] = value` invokes the
+  // prototype SETTER rather than creating a property — so a function called
+  // `__proto__` would vanish from its own report and take the object's
+  // prototype with it. A Map has no such key, and `Object.fromEntries` below
+  // creates data properties directly, so every name survives as itself.
+  const report = new Map<string, unknown>();
   const entries: BatchEntry[] = [];
   try {
     for (const { name, code } of scripts) {
@@ -344,7 +344,7 @@ export function executeUserScripts(
       console.error = record(`${name} error: `);
       const one = runOne(parsed.data, code, trace);
       if (!one.ok) {
-        report[name] = null;
+        report.set(name, null);
         entries.push({ name, ok: false, error: one.error, ms: 0 });
         continue;
       }
@@ -352,18 +352,18 @@ export function executeUserScripts(
       // costs its own key rather than the whole report.
       const text = serialize(one.value);
       if (!text.ok) {
-        report[name] = null;
+        report.set(name, null);
         entries.push({ name, ok: false, error: text.error, ms: one.ms });
         continue;
       }
-      report[name] = JSON.parse(text.text);
+      report.set(name, JSON.parse(text.text));
       entries.push({ name, ok: true, ms: one.ms, ...(one.reads ? { reads: one.reads } : {}) });
     }
   } finally {
     Object.assign(console, saved);
   }
 
-  const text = serialize(report);
+  const text = serialize(Object.fromEntries(report));
   // Every value in here came back out of JSON.parse, so this cannot fail —
   // but a report the pane cannot read is worse than a message saying so.
   if (!text.ok) return { ok: false, error: text.error, logs };
