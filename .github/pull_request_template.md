@@ -19,7 +19,8 @@ latency — say what you drove in the browser, and on what document.
 
 ---
 
-- [ ] `npm test` and `npm run build` pass (the build includes strict `tsc --noEmit`)
+- [ ] `npm run lint:security`, `npm run coverage`, and `npm run build` pass (coverage enforces 80%; build includes strict `tsc --noEmit`)
+- [ ] Every commit includes the DCO `Signed-off-by` trailer (`git commit -s`)
 - [ ] Int64s and precise decimals survive your change end-to-end, if it touches values
 - [ ] Docs updated if behaviour changed — README for anything a user sees,
       SECURITY.md if the fetch inventory, storage, CSV escaping, or the Ask

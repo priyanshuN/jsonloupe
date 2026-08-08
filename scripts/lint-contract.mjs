@@ -24,6 +24,8 @@
 //      restating --ring.
 //   8. dead tokens — every custom property defined in the :root blocks must be
 //      referenced somewhere (style.css, code.ts, main.ts, or an HTML entry).
+//   9. code-status regression — the apply control never shrinks or wraps, and
+//      the status note yields on one ellipsized line instead.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -204,6 +206,26 @@ for (const m of css.matchAll(/0 0 0 3px var\(--(?:accent|danger)-soft\)/g)) {
   errors.push(`style.css:${lineOf(m.index)} glow recipe restates --ring / --ring-danger`);
 }
 
+// ---------- code-status layout regression ----------
+
+function selectorBody(selector) {
+  const start = css.indexOf(`${selector} {`);
+  if (start < 0) return '';
+  const [open, end] = blockRange(start);
+  return css.slice(open + 1, end - 1);
+}
+
+const codeApply = selectorBody('#code-apply');
+if (!/white-space:\s*nowrap/.test(codeApply) || !/flex-shrink:\s*0/.test(codeApply)) {
+  errors.push('style.css: #code-apply must stay on one non-shrinking line (code-status regression)');
+}
+const statusNote = selectorBody('.status-note');
+for (const declaration of [/min-width:\s*0/, /overflow:\s*hidden/, /text-overflow:\s*ellipsis/, /white-space:\s*nowrap/]) {
+  if (!declaration.test(statusNote)) {
+    errors.push(`style.css: .status-note is missing ${declaration.source} (code-status regression)`);
+  }
+}
+
 // ---------- dead tokens ----------
 
 const definedTokens = new Set();
@@ -231,4 +253,4 @@ if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
   process.exit(1);
 }
-console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, type ramp, restatements, dead tokens)');
+console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, type ramp, restatements, dead tokens, status layout)');

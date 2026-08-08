@@ -19,14 +19,25 @@ const nodeWasmPlugin = {
   name: 'node-wasm',
   setup(build) {
     // `import bytes from '….wasm?bytes'` — inline the wasm into the bundle.
+    // Keep the resolved module name independent of the checkout directory.
+    // esbuild prints plugin paths into its auditable, non-minified bundle, so
+    // returning the absolute source path here made otherwise identical npm
+    // packages differ depending on where they were built.
     build.onResolve({ filter: /\.wasm\?bytes$/ }, (args) => ({
-      path: fileURLToPath(new URL(args.path.replace(/\?bytes$/, ''), `file://${args.resolveDir}/`)),
+      path: 'zstd.wasm',
       namespace: 'wasm-bytes',
+      pluginData: {
+        sourcePath: fileURLToPath(new URL(args.path.replace(/\?bytes$/, ''), `file://${args.resolveDir}/`)),
+      },
     }));
-    build.onLoad({ filter: /.*/, namespace: 'wasm-bytes' }, async (args) => ({
-      contents: await readFile(args.path),
-      loader: 'binary',
-    }));
+    build.onLoad({ filter: /.*/, namespace: 'wasm-bytes' }, async (args) => {
+      const sourcePath = args.pluginData?.sourcePath;
+      if (typeof sourcePath !== 'string') throw new Error('zstd wasm source path was not resolved');
+      return {
+        contents: await readFile(sourcePath),
+        loader: 'binary',
+      };
+    });
 
     // `import url from '….wasm?url'` — the browser's fetch target. The Node
     // zstd shim ignores the path it is given, so this resolves to nothing.

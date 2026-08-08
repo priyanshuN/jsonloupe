@@ -534,7 +534,7 @@ export class ConvertView {
       return;
     }
     const format = this.full.output.format;
-    let text = outcomeLine({
+    const text = outcomeLine({
       tables: effective.tables.length,
       rows: this.rowTotal(effective),
       format,

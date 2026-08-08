@@ -140,6 +140,7 @@ describe('a parsed datetime reaches Excel as a date', () => {
     const cells = unzip(buildXlsx([sheet('windows', ['mins'], [[when('540')]])])).get(
       'xl/worksheets/sheet1.xml',
     )!.body;
+    // biome-ignore lint/security/noSecrets: fixed XLSX XML fixture, not a credential
     expect(cells).toContain('<c r="A2"><v>540</v></c>');
   });
 });

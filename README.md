@@ -221,7 +221,9 @@ this routing rule in its project instructions (for example `AGENTS.md` or
 
 Documents never leave your machine. The complete network-call inventory (three
 `fetch` calls, all in the opt-in Ask feature), the shape-only LLM contract, and
-the XSS posture are documented in [SECURITY.md](SECURITY.md).
+the XSS posture are documented in [SECURITY.md](SECURITY.md). The corresponding
+threat model, trust boundaries, and assurance argument are in
+[SECURITY-ASSURANCE.md](SECURITY-ASSURANCE.md).
 
 ## Deploying
 
@@ -240,14 +242,20 @@ visitor adds their own key.
 
 ```sh
 npm test           # vitest — query engine, worker, MCP dispatch, NL translation suites
+npm run lint:security  # FLOSS security analysis + checked TypeScript style
+npm run coverage   # same suite with the enforced 80% statement floor
 npm run build      # tsc --noEmit + vite build + the MCP bundle
+npm run check:repeatable-build  # two clean paths must produce identical bytes
 npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture
 npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
 ```
 
-Design and internals are documented in [SPEC.md](SPEC.md); the converter has its
-own [SPEC-converter.md](SPEC-converter.md), including what it deliberately
-refuses to do.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). Architecture and internals are
+documented in [ARCHITECTURE.md](ARCHITECTURE.md) and [SPEC.md](SPEC.md); the
+converter has its own [SPEC-converter.md](SPEC-converter.md), including what it
+deliberately refuses to do. Project decisions and the next twelve months are in
+[GOVERNANCE.md](GOVERNANCE.md) and [ROADMAP.md](ROADMAP.md). Official publishing
+and consumer verification are documented in [RELEASING.md](RELEASING.md).
 
 ## License
 
