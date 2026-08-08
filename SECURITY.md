@@ -7,6 +7,32 @@ diffed, and queried entirely in your browser (a web worker + IndexedDB). There i
 no backend, no telemetry, no analytics, and no account system. The authors never
 see your data.
 
+## Security review scope
+
+The supported system includes the static browser application, the npm-distributed
+CLI and MCP server, the development-only loopback key endpoint, and the GitHub
+Actions build and publishing path. Documents, model responses, HTTP requests,
+filesystem paths, dependencies, and release inputs are treated as untrusted at
+the boundaries documented in [SECURITY-ASSURANCE.md](SECURITY-ASSURANCE.md).
+
+A report is security-relevant when it can violate one of those boundaries—for
+example by disclosing document values, credentials, or unrelated local files;
+executing document or model content; creating a spreadsheet formula payload;
+reading or overwriting a path without the documented caller intent; bypassing a
+resource cap to cause disproportionate denial of service; silently corrupting a
+security-relevant exact value; or substituting an official npm artifact. Severity
+is assessed from the attacker's required access and interaction, the affected
+confidentiality, integrity, or availability, and the reach of the affected
+browser, CLI, MCP, or release surface.
+
+The following are documented trust assumptions, not security vulnerabilities on
+their own: a compromised operating system, browser, extension, Node.js runtime,
+MCP host, or local user; the exact shape and question a user explicitly approves
+sending through Ask; a download or filesystem path the user or MCP client
+explicitly authorizes; and resource pressure that stays within documented limits
+on an unusually constrained device. A bypass of an authorization or limit, an
+unexpected cross-boundary effect, or misleading disclosure remains in scope.
+
 ## Complete network-call inventory
 
 The codebase contains exactly three `fetch` calls, all in [src/nl.ts](src/nl.ts),
@@ -51,11 +77,19 @@ opened — so a page on a hostile domain that resolves to `127.0.0.1` (DNS
 rebinding) is refused with a `403` and the key is never read. Production builds
 have no such endpoint at all.
 
-## XSS surface
+## HTML and explicit-code surfaces
 
 All DOM rendering uses `createElement`/`textContent` — the codebase contains no
-`innerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, or `new Function`.
-Hostile documents render as inert text.
+`innerHTML`, `insertAdjacentHTML`, `document.write`, or `eval`. Hostile documents
+and model responses render as inert text and never enter a code constructor.
+
+The Run panel is the deliberate exception for code a user explicitly chooses to
+execute. Its two `new Function` calls live in `src/run-exec.ts` and run in a new
+ephemeral worker, not the document worker. Before execution, `src/run-sandbox.ts`
+removes network, IndexedDB, Cache, navigator, and import-script capabilities;
+the page terminates the worker on its first result or timeout. Run parses a plain
+JSON copy, so it is a lossy convenience for deliberate local scripts—not a
+lossless query path and never a destination for Ask/model output.
 
 ## CSV exports
 
@@ -79,11 +113,49 @@ Nothing does, for any project. What each one actually means:
 - **CodeQL** finds *known patterns* of bug. A clean result means those patterns
   were not found, not that none exist.
 
-The claims that matter here — no backend, three auditable `fetch` calls, no
-`eval`, no `innerHTML` — are stated above with the grep commands to check them.
+The claims that matter here—no backend, three auditable `fetch` calls, no HTML
+injection sink, and one explicit isolated code boundary—are stated above with
+the source files to check.
+
+## Supported versions
+
+Security fixes are made on the latest published minor line. A patch release is
+published when users of that line need a fix; older minor versions are not
+maintained in parallel. Upgrade with `npm install jsonloupe@latest`. Any future
+incompatible migration will be called out in [CHANGELOG.md](CHANGELOG.md).
 
 ## Reporting a vulnerability
 
-Open a GitHub issue for non-sensitive reports. For anything exploitable, email
-**security@jsonloupe.dev** — please allow a reasonable window for a fix before
-public disclosure.
+Open a GitHub issue for non-sensitive hardening ideas. For anything plausibly
+exploitable, email **security@jsonloupe.dev**. Include affected versions, impact,
+conditions, and a minimal reproducer when it is safe to do so. Do not put private
+document contents, credentials, or an unpatched exploit in a public issue.
+
+The response process is:
+
+1. Acknowledge the report within 7 days.
+2. Reproduce it, determine affected versions and severity, and send an initial
+   assessment within 14 days.
+3. Coordinate a fix and disclosure with the reporter. Confirmed issues are
+   targeted for correction within 60 days, sooner when exploitation or impact
+   makes that necessary. If that target cannot be met, the reporter receives a
+   status update and revised plan.
+4. Publish a patch and GitHub advisory when users need to take action, then
+   credit every reporter who does not request anonymity.
+
+Reports are handled privately until a fix or agreed disclosure date. This is a
+best-effort open-source response policy, not a promise of a bounty or continuous
+support.
+
+## Verifying releases
+
+Official npm packages carry an npm registry signature and Sigstore/SLSA
+provenance from the GitHub Actions publishing workflow. Instructions for
+checking both are in [RELEASING.md](RELEASING.md). GitHub-generated source
+archives are not the installable npm artifact.
+
+## Assurance case
+
+[SECURITY-ASSURANCE.md](SECURITY-ASSURANCE.md) records the threat model, trust
+boundaries, secure-design argument, common-weakness countermeasures, assumptions,
+and residual risks behind the requirements on this page.

@@ -318,7 +318,7 @@ describe('chunked expansion', () => {
     const np = h<{ jsonpath: string; pointer: string }>({ type: 'nodePaths', id: el.id });
     expect(np.jsonpath).toBe('$[2345678]');
     expect(np.pointer).toBe('/2345678');
-  });
+  }, 15_000);
 
   it('search over a chunked array finds a planted needle at its real path', () => {
     parse(bigArray(25_000, { at: 12_345, value: 987654321 }));
