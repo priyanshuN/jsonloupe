@@ -2695,6 +2695,12 @@ const CODE_MAX = 3_000_000; // above this, the editor pane falls back to the tre
 let codeEditor: CodeEditor | null = null;
 let codeBusy = false;
 let codeDirty = false;
+// The code bar's one accent, and the only control in the app that is really a
+// STATE rather than an action: it means something exactly while the buffer
+// holds text the document has not taken yet. It never said so — it stayed lit
+// and armed while the strip beside it read `in sync with the tree`, and
+// pressing it there was very far from a no-op (see applyCode).
+const codeApplyBtn = $<HTMLButtonElement>('#code-apply');
 
 // Mod-s is what code.ts binds; it is ⌘S on an Apple keyboard and Ctrl+S on
 // every other one, and the strip has to name the one the reader actually has.
@@ -2729,9 +2735,18 @@ function codeOwnsLead(): boolean {
 }
 
 function setCodeStatus(kind: StatusTone, msg: string): void {
+  // `error` counts as dirty on purpose: an unparseable buffer still holds text
+  // the document has not taken, and retrying the apply is the way out of it.
   codeDirty = kind === 'dirty' || kind === 'bulk' || kind === 'error';
   codeStatusText = msg;
   codeStatusKind = kind;
+  // DISABLED, not hidden: the bar must not reflow under the pointer (rule 20's
+  // argument, which is about arriving controls but holds just as well for
+  // departing ones), and a control people go looking for should dim rather than
+  // vanish. Every path that changes the buffer's state comes through here,
+  // including the editor's own mount (loadCodeContent), so this is the one
+  // place the two halves of the fact can be kept in step.
+  codeApplyBtn.disabled = !codeDirty;
   if (codeOnScreen()) setStatusNote(msg, kind);
 }
 
@@ -2861,6 +2876,15 @@ function showTree(): void {
 
 async function applyCode(): Promise<void> {
   if (!codeEditor) return;
+  // Nothing unapplied — and this is NOT belt-and-braces for the disabled
+  // button, because Mod-s reaches here without touching it. Applying a clean
+  // buffer replaced the document with itself, which sounds harmless and is
+  // not: markCurrentContentEdited() below nulls the provenance, so the
+  // `decoded payload` badge and the `original` button — the whole route back
+  // to the blob this document was decoded from — disappeared. It also reset
+  // the tree selection, pushed an undo entry and wrote a snapshot, all for a
+  // document nobody had changed.
+  if (!codeDirty) return;
   const text = codeEditor.getDoc();
   const documentToken = currentDocumentToken;
   const requestToken = openRequestToken;

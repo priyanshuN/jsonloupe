@@ -563,7 +563,14 @@ SPDX-License-Identifier: MIT -->
         <div id="code-view" hidden>
           <div class="code-bar" id="code-bar">
             <span class="standing-label pane-label">code</span>
-            <button id="code-apply" class="primary" title="Re-parse the edited JSON (Ctrl/Cmd+S)">apply changes</button>
+            <!-- One word since 2026-08-09: it was the last two-word label in
+                 the app's chrome, and the second word was carrying a fact the
+                 control now states for itself — disabled means there is
+                 nothing to apply, enabled means there are changes. It keeps a
+                 word rather than taking a glyph (rule 10, revised): a floppy
+                 means save-to-disk, which this is not, and a bare ✓ would be
+                 coining one. -->
+            <button id="code-apply" class="primary" title="Apply the edited JSON to the document (Ctrl/Cmd+S)">apply</button>
             <button id="code-format" class="btn-quiet" title="Re-format / pretty-print">format</button>
             <button id="code-copy" class="btn-icon btn-quiet" title="Copy the editor contents" aria-label="Copy the editor contents"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             <button id="code-raw" class="btn-quiet" title="Show the exact original bytes (key order, whitespace, precision) vs the canonical form">source</button>
