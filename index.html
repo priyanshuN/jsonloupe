@@ -384,6 +384,16 @@
           <div class="convert-bar">
             <span id="convert-title">tables in this document</span>
             <span id="convert-count"></span>
+            <input id="convert-map-name" class="convert-map-name" aria-label="Mapping name" placeholder="mapping name">
+            <select id="convert-saved" aria-label="Saved mappings">
+              <option value="">starter mapping</option>
+            </select>
+            <button id="convert-save" title="Save this mapping in this browser">save</button>
+            <button id="convert-forget" title="Delete the selected saved mapping" disabled>forget</button>
+            <button id="convert-import" title="Import a saved mapping spec">import spec</button>
+            <input id="convert-import-file" type="file" accept=".json,application/json" hidden>
+            <button id="convert-target" title="Use the first row of a CSV as the target columns">target CSV</button>
+            <input id="convert-target-file" type="file" accept=".csv,text/csv,text/plain" hidden>
             <span class="spacer"></span>
             <div class="mode-switch" id="convert-format" role="group" aria-label="Output format">
               <button data-fmt="xlsx" class="on" title="One spreadsheet, one sheet per table, already linked by id">Excel</button>
@@ -399,6 +409,10 @@
               <div id="convert-cols-head">
                 <span id="convert-detail-name"></span>
                 <span id="convert-detail-src"></span>
+                <span class="spacer"></span>
+                <label class="convert-inline-field">missing <input id="convert-missing" aria-label="Default missing value"></label>
+                <label class="convert-inline-field">arrays <input id="convert-array-join" value="; " aria-label="Array join separator"></label>
+                <button id="convert-add-column" title="Add an output column">+ column</button>
               </div>
               <div id="convert-cols" role="list" aria-label="Columns"></div>
               <div id="convert-preview-head">
@@ -406,6 +420,7 @@
                 <span id="convert-preview-note"></span>
               </div>
               <div id="convert-preview"></div>
+              <div id="convert-report" hidden aria-live="polite"></div>
             </div>
           </div>
         </div>

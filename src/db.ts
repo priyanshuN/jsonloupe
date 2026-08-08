@@ -1,6 +1,8 @@
 // Light memory: IndexedDB with meta and text split into separate stores,
 // so listing recents never loads document bodies.
 
+import type { ConvertSpec } from './convert/spec';
+
 export interface DocMeta {
   id: string;
   title: string;
@@ -44,12 +46,13 @@ let dbP: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
   if (!dbP) {
     dbP = new Promise((res, rej) => {
-      const r = indexedDB.open('json-workbench', 2);
+      const r = indexedDB.open('json-workbench', 3);
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('text')) d.createObjectStore('text', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('queries')) d.createObjectStore('queries', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('convertSpecs')) d.createObjectStore('convertSpecs', { keyPath: 'id' });
       };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
@@ -375,5 +378,72 @@ export async function touchQuery(id: string): Promise<void> {
 export async function removeQuery(id: string): Promise<void> {
   const t = (await db()).transaction('queries', 'readwrite');
   t.objectStore('queries').delete(id);
+  await done(t);
+}
+
+// ---------- reusable converter mappings ----------
+
+export interface SavedConvertSpec {
+  id: string;
+  name: string;
+  spec: ConvertSpec;
+  createdAt: number;
+  updatedAt: number;
+  uses: number;
+}
+
+const KEEP_CONVERT_SPECS = 100;
+
+export async function listConvertSpecs(): Promise<SavedConvertSpec[]> {
+  const t = (await db()).transaction('convertSpecs');
+  const all = await req(t.objectStore('convertSpecs').getAll() as IDBRequest<SavedConvertSpec[]>);
+  return all.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function getConvertSpec(id: string): Promise<SavedConvertSpec | undefined> {
+  const t = (await db()).transaction('convertSpecs');
+  return req(t.objectStore('convertSpecs').get(id) as IDBRequest<SavedConvertSpec | undefined>);
+}
+
+/** Save by id when editing, otherwise fold a case-insensitive name match. */
+export async function saveConvertSpec(
+  name: string,
+  spec: ConvertSpec,
+  id?: string,
+): Promise<SavedConvertSpec> {
+  const clean = name.trim();
+  if (!clean) throw new Error('mapping name is required');
+  const all = await listConvertSpecs();
+  const previous = id
+    ? all.find((item) => item.id === id)
+    : all.find((item) => item.name.trim().toLowerCase() === clean.toLowerCase());
+  const now = Date.now();
+  const rec: SavedConvertSpec = previous
+    ? { ...previous, name: clean, spec, updatedAt: now, uses: previous.uses + 1 }
+    : { id: crypto.randomUUID(), name: clean, spec, createdAt: now, updatedAt: now, uses: 1 };
+
+  const t = (await db()).transaction('convertSpecs', 'readwrite');
+  const store = t.objectStore('convertSpecs');
+  store.put(rec);
+  for (const old of all.filter((item) => item.id !== rec.id).slice(KEEP_CONVERT_SPECS - 1)) {
+    store.delete(old.id);
+  }
+  await done(t);
+  return rec;
+}
+
+export async function touchConvertSpec(id: string): Promise<void> {
+  const rec = await getConvertSpec(id);
+  if (!rec) return;
+  rec.updatedAt = Date.now();
+  rec.uses++;
+  const t = (await db()).transaction('convertSpecs', 'readwrite');
+  t.objectStore('convertSpecs').put(rec);
+  await done(t);
+}
+
+export async function removeConvertSpec(id: string): Promise<void> {
+  const t = (await db()).transaction('convertSpecs', 'readwrite');
+  t.objectStore('convertSpecs').delete(id);
   await done(t);
 }

@@ -118,7 +118,7 @@ describe('schema upgrade', () => {
     });
   }
 
-  it('adds the version 2 store without disturbing what version 1 already held', async () => {
+  it('adds later stores without disturbing what version 1 already held', async () => {
     const legacy = await openRaw(1, (opened) => {
       opened.createObjectStore('meta', { keyPath: 'id' });
       opened.createObjectStore('text', { keyPath: 'id' });
@@ -143,6 +143,7 @@ describe('schema upgrade', () => {
     expect((await db.listDocs()).map((meta) => meta.id)).toEqual(['legacy-1']);
     expect(await db.getText('legacy-1')).toBe('{"n":1}');
     expect(await db.listQueries()).toEqual([]);
+    expect(await db.listConvertSpecs()).toEqual([]);
   });
 
   it('rejects every call once the database refuses to open', async () => {
@@ -164,6 +165,7 @@ describe('schema upgrade', () => {
 
     await expect(db.listDocs()).rejects.toThrow('storage is unavailable');
     await expect(db.listQueries()).rejects.toThrow('storage is unavailable');
+    await expect(db.listConvertSpecs()).rejects.toThrow('storage is unavailable');
   });
 });
 
@@ -571,5 +573,43 @@ describe('saved questions', () => {
     expect(all.map((q) => q.id)).toContain(revived.id);
     expect(all[0].id).toBe(revived.id);
     expect(all.length).toBe(100);
+  });
+});
+
+describe('saved converter mappings', () => {
+  const spec = {
+    specVersion: 1 as const,
+    source: { format: 'json' as const },
+    tables: [{ name: 'orders', anchor: '$.orders[]', columns: [{ name: 'id', from: 'id' }] }],
+    output: { format: 'xlsx' as const },
+  };
+
+  it('round-trips a mapping and updates it by id', async () => {
+    const first = await db.saveConvertSpec('Orders export', spec);
+    expect(await db.getConvertSpec(first.id)).toEqual(first);
+
+    tick();
+    const changed = { ...spec, output: { format: 'csv' as const } };
+    const second = await db.saveConvertSpec('Orders export v2', changed, first.id);
+    expect(second.id).toBe(first.id);
+    expect(second.createdAt).toBe(first.createdAt);
+    expect(second.updatedAt).toBe(clock);
+    expect(second.uses).toBe(2);
+    expect((await db.listConvertSpecs())[0].spec.output.format).toBe('csv');
+  });
+
+  it('folds a duplicate name and supports touch and removal', async () => {
+    const first = await db.saveConvertSpec('Orders export', spec);
+    tick();
+    const folded = await db.saveConvertSpec(' orders EXPORT ', spec);
+    expect(folded.id).toBe(first.id);
+    expect(await db.listConvertSpecs()).toHaveLength(1);
+
+    tick();
+    await db.touchConvertSpec(first.id);
+    expect((await db.getConvertSpec(first.id))?.uses).toBe(3);
+
+    await db.removeConvertSpec(first.id);
+    expect(await db.listConvertSpecs()).toEqual([]);
   });
 });

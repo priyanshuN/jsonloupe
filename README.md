@@ -86,6 +86,10 @@ flagged, with the original bytes preserved.
   weight on collapsed containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
+- **JSON → Excel / CSV converter** — repeating arrays and object maps become
+  linked tables, with real-row preview before download. Rename/reorder columns,
+  choose source fields and date/geo handling, import target CSV headers, and
+  save or share the deterministic mapping spec for the next file.
 - **File handles** — drop `.json`/`.jsonl`/`.zst` files; reload re-reads from
   disk and shows what changed since the version you were looking at.
 - **Ask (optional, off by default)** — type an English question and it's
@@ -94,6 +98,23 @@ flagged, with the original bytes preserved.
   Anthropic or OpenRouter key; with no key configured the feature is inert and
   the page makes zero network requests. A disclosure panel shows exactly what
   would be sent. See [SECURITY.md](SECURITY.md).
+
+## Convert repeatable payloads
+
+Open a document and choose **convert**. jsonloupe detects candidate tables but
+does not run the guess blindly: the mapping and real-row preview stay visible
+while you edit them. Mappings can be kept in this browser, exported/imported as
+JSON, or drafted and executed headlessly:
+
+```bash
+jsonloupe inspect payload.json
+jsonloupe draft payload.json -o payload.spec.json
+jsonloupe convert payload.json --spec payload.spec.json -o payload.xlsx
+```
+
+One frozen spec produces the same columns through the browser, CLI, and MCP
+server. Excel limits and unreadable typed values fail or report explicitly;
+int64 identifiers remain text rather than being rounded by spreadsheet cells.
 
 ## Use with AI agents
 
@@ -110,10 +131,10 @@ have to be decoded first, int64 and decimal digits that must survive the whole
 pipeline exactly, identity-keyed semantic diff between two documents, and MCP
 hosts that have no shell to run jq in.
 
-Six tools: `load_doc`, `get_schema`, `run_query`, `sample`, `diff_docs`,
-`export_csv`. The document is opened once and stays in the server; only shapes
-and capped results (10,000 characters, always) travel back. A typical run over a
-37 MB routing payload:
+Nine tools: `load_doc`, `inspect`, `draft_spec`, `convert`, `get_schema`,
+`run_query`, `sample`, `diff_docs`, `export_csv`. The document is opened once
+and stays in the server; only shapes and capped results (10,000 characters,
+always) travel back. A typical run over a 37 MB routing payload:
 
 ```
 load_doc  path=payload.json     → docId: d1 · 39,401,637 bytes · object · keys: generatedAt, tasks
@@ -121,8 +142,13 @@ get_schema d1                   → tasks: array(70000) of { id: number, status:
 run_query d1 "$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)"
                                 → ADDRESS_NOT_FOUND 5834 · CUSTOMER_UNAVAILABLE 5833 · …
 sample    d1 "$.tasks[0]"       → the whole element, id 9007199254740993 intact
-export_csv d1 "…| pluck(@.id, @.failureReason)" out=failed.csv
+export_csv d1 "…| pluck(@.id, @.failureReason)" outPath=failed.csv
                                 → outPath, rows, bytes — the rows never enter the transcript
+inspect    d1                  → candidate tables, fields, types, deterministic suggestions
+draft_spec d1 outPath=tasks.spec.json
+                                → reviewable mapping on disk
+convert    d1 specPath=tasks.spec.json outPath=tasks.xlsx
+                                → workbook path + row/skipped/warning counts, never its rows
 ```
 
 That whole session costs the agent about 12 KB of context. The server makes no

@@ -19,6 +19,8 @@ import {
   xlsxSink,
   zipTextFiles,
   type ConvertSpec,
+  type ConvertReport,
+  type DraftHints,
   type Inspection,
   type PreviewResult,
   type SpecError,
@@ -38,9 +40,9 @@ export function resetConvertCache(): void {
   cache = null;
 }
 
-export function convertInspect(doc: unknown): { inspection: Inspection; spec: ConvertSpec } {
+export function convertInspect(doc: unknown, hints?: DraftHints): { inspection: Inspection; spec: ConvertSpec } {
   const inspection = inspectionFor(doc);
-  return { inspection, spec: draftSpec(inspection) };
+  return { inspection, spec: draftSpec(inspection, hints) };
 }
 
 export async function convertPreview(
@@ -56,7 +58,10 @@ export async function convertPreview(
 export async function convertRun(
   doc: unknown,
   spec: ConvertSpec,
-): Promise<{ errors: SpecError[] } | { format: 'xlsx' | 'csv'; bytes: Uint8Array; rows: number }> {
+): Promise<
+  { errors: SpecError[] }
+  | { format: 'xlsx' | 'csv'; bytes: Uint8Array; rows: number; report: ConvertReport }
+> {
   const check = validateSpec(spec, inspectionFor(doc));
   if (!check.ok) return { errors: check.errors };
 
@@ -65,11 +70,11 @@ export async function convertRun(
     // per table, and the tables only mean something as a set.
     const sink = csvTextSink();
     const report = await convert({ doc }, spec, sink, { validated: true });
-    return { format: 'csv', bytes: zipTextFiles(sink.files), rows: total(report.tables) };
+    return { format: 'csv', bytes: zipTextFiles(sink.files), rows: total(report.tables), report };
   }
   const sink = xlsxSink();
   const report = await convert({ doc }, spec, sink, { validated: true });
-  return { format: 'xlsx', bytes: sink.bytes(), rows: total(report.tables) };
+  return { format: 'xlsx', bytes: sink.bytes(), rows: total(report.tables), report };
 }
 
 function total(tables: { rows: number }[]): number {

@@ -127,6 +127,16 @@ function columnsFor(t: DetectedTable, targets: string[] | undefined, baseDate: s
   for (const f of t.fields) {
     if (!isScalarField(f)) continue;
     const name = matchTarget(f.path, targets) ?? f.path;
+    if (f.suggest && !('ambiguous' in f.suggest) && f.suggest.type === 'geo') {
+      // One packed coordinate is two output values. The engine deliberately
+      // keeps one-column-one-output, so drafting must expand the source here;
+      // leaving this to a later caller produced a latitude-only mapping.
+      cols.push(
+        { name: `${name}_latitude`, from: f.path, type: 'geo', part: 'lat', form: f.suggest.form },
+        { name: `${name}_longitude`, from: f.path, type: 'geo', part: 'lng', form: f.suggest.form },
+      );
+      continue;
+    }
     cols.push(applySuggestion({ name, from: f.path }, f, baseDate));
   }
   return cols;
@@ -143,11 +153,7 @@ function keyIsRedundant(t: DetectedTable): boolean {
 function applySuggestion(c: ColumnSpec, f: DetectedField, baseDate: string): ColumnSpec {
   const s = f.suggest;
   if (!s || 'ambiguous' in s) return c;
-  if (s.type === 'geo') {
-    // A packed coordinate is two columns off one source, so the draft cannot
-    // represent it as this single column — the caller splits it (§5.2).
-    return { ...c, type: 'geo', part: 'lat', form: s.form };
-  }
+  if (s.type === 'geo') return c; // expanded by columnsFor above
   const out: ColumnSpec = { ...c, type: 'datetime', parse: s.parse, out: s.out };
   if (s.needsBaseDate) out.baseDate = baseDate;
   return out;

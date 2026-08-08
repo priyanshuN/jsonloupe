@@ -2040,7 +2040,9 @@ export async function handleAsync(
     const root = nodes.get(rootId);
     if (!root) return { error: 'no document open' };
     const doc = effValue(root);
-    if (msg.type === 'convertInspect') return convertInspect(doc);
+    if (msg.type === 'convertInspect') {
+      return convertInspect(doc, (msg as { hints?: import('./convert').DraftHints }).hints);
+    }
     const spec = (msg as unknown as { spec: ConvertSpec }).spec;
     if (msg.type === 'convertPreview') {
       return convertPreview(doc, spec, ((msg as { rows?: number }).rows ?? 20));

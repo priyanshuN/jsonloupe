@@ -111,6 +111,8 @@ const dir = await mkdtemp(join(tmpdir(), 'jsonloupe-smoke-'));
 const fixture = join(dir, 'routing-payload.json');
 const small = join(dir, 'other.json');
 const csvOut = join(dir, 'failed.csv');
+const specOut = join(dir, 'tasks.spec.json');
+const xlsxOut = join(dir, 'tasks.xlsx');
 
 try {
   process.stdout.write('generating fixture… ');
@@ -136,10 +138,10 @@ try {
   const names = (list.result?.tools ?? []).map((t) => t.name);
   check(
     'tools/list is the frozen contract',
-    ['load_doc', 'get_schema', 'run_query', 'sample', 'diff_docs', 'export_csv'].every((n) => names.includes(n)),
+    ['load_doc', 'inspect', 'draft_spec', 'convert', 'get_schema', 'run_query', 'sample', 'diff_docs', 'export_csv']
+      .every((n) => names.includes(n)),
     names.join(','),
   );
-  check('reserved names are not squatted', !names.some((n) => ['inspect', 'convert', 'draft_spec'].includes(n)));
 
   const call = (name, args) => rpc.request('tools/call', { name, arguments: args });
 
@@ -164,6 +166,15 @@ try {
   // Isolation: a second document must not disturb the first.
   const second = text(await call('load_doc', { path: small }));
   check('second load_doc gets its own docId', /docId: d2/.test(second), second);
+
+  const inspected = text(await call('inspect', { docId: 'd2' }));
+  check('inspect finds converter tables without returning values', /tasks: 1 rows at \$\.tasks\[\]/.test(inspected) && !inspected.includes('DELIVERED'), inspected);
+  const drafted = text(await call('draft_spec', { docId: 'd2', outPath: specOut }));
+  check('draft_spec writes the reviewable mapping', drafted.includes(specOut), drafted);
+  const converted = text(await call('convert', { docId: 'd2', specPath: specOut, outPath: xlsxOut }));
+  check('convert writes deterministic output and returns counts only', /rows: 1/.test(converted) && !converted.includes('DELIVERED'), converted);
+  check('the converted workbook is real', (await stat(xlsxOut)).size > 1_000);
+
   const stillThere = text(await call('run_query', { docId: 'd1', query: '$.tasks[*] | count' }));
   check('d1 is untouched by d2', stillThere.includes(`count: ${TASKS}`), stillThere);
 

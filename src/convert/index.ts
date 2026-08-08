@@ -21,7 +21,21 @@ export {
   type Warning,
   type Frame,
 } from './engine';
-export { memorySink, csvTextSink, xlsxSink, buildXlsx, zipTextFiles, crc32, colRef, sheetName, type CapturedTable } from './sinks';
+export {
+  memorySink,
+  csvTextSink,
+  xlsxSink,
+  buildXlsx,
+  zipTextFiles,
+  crc32,
+  colRef,
+  sheetName,
+  OutputLimitError,
+  EXCEL_MAX_ROWS,
+  EXCEL_MAX_COLUMNS,
+  EXCEL_MAX_CELL_CHARS,
+  type CapturedTable,
+} from './sinks';
 export {
   parseAnchor,
   parseFrom,

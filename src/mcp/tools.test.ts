@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DocPool, MAX_DOCS, type DocHost, type DocRequest } from './pool';
-import { runDocOp, type Engine } from './doc-ops';
+import { runDocOp, type AsyncEngine, type Engine } from './doc-ops';
 import { RESPONSE_CAP } from './render';
 import { TOOLS, ToolRouter } from './tools';
 
@@ -19,12 +19,13 @@ function memoryHost(): DocHost {
   // concurrently could otherwise be handed the same engine instance.
   const engine = (engineOrder = engineOrder.then(async () => {
     vi.resetModules();
-    const { handle } = await import('../worker');
-    return handle as Engine;
-  })) as Promise<Engine>;
+    const { handle, handleAsync } = await import('../worker');
+    return { sync: handle as Engine, async: handleAsync as AsyncEngine };
+  })) as Promise<{ sync: Engine; async: AsyncEngine }>;
   return {
     async send(request: DocRequest): Promise<unknown> {
-      return runDocOp(await engine, request);
+      const engines = await engine;
+      return runDocOp(engines.sync, request, engines.async);
     },
     async close(): Promise<void> {},
   };
@@ -58,9 +59,12 @@ function wideDoc(n: number): string {
 // ---------- the tool contract ----------
 
 describe('tool definitions', () => {
-  it('are exactly the six frozen names', () => {
+  it('publish the viewer and converter workflow names', () => {
     expect(TOOLS.map((t) => t.name)).toEqual([
       'load_doc',
+      'inspect',
+      'draft_spec',
+      'convert',
       'get_schema',
       'run_query',
       'sample',
@@ -69,17 +73,67 @@ describe('tool definitions', () => {
     ]);
   });
 
-  it('leave inspect / convert / draft_spec unclaimed for the converter host', () => {
-    const names = TOOLS.map((t) => t.name);
-    for (const reserved of ['inspect', 'convert', 'draft_spec']) expect(names).not.toContain(reserved);
-  });
-
   it('carry the query grammar and worked examples where the caller needs them', () => {
     const description = TOOLS.find((t) => t.name === 'run_query')!.description;
     expect(description).toContain('Pipes (append one)');
     expect(description).toContain('| group(@.failureReason)');
     expect(description).toContain('| sum');
     expect(description).toContain("[?(!@.routeId)] | count");
+  });
+});
+
+// ---------- deterministic converter workflow ----------
+
+describe('converter workflow', () => {
+  it('inspects shape without returning source values', async () => {
+    await load(DOC);
+    const r = await call('inspect', { docId: 'd1' });
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain('tasks: 2 rows at $.tasks[]');
+    expect(r.text).toContain('id: 2/2 · number · unique');
+    expect(r.text).not.toContain(INT64);
+    expect(r.text).not.toContain('FAILED');
+  });
+
+  it('drafts a reviewable spec and refuses accidental replacement', async () => {
+    await load(DOC);
+    const outPath = join(dir, 'draft-spec.json');
+    const drafted = await call('draft_spec', { docId: 'd1', outPath, format: 'xlsx' });
+    expect(drafted).toMatchObject({ isError: false });
+    expect(drafted.text).toContain(`wrote spec: ${outPath}`);
+    const spec = JSON.parse(await readFile(outPath, 'utf8')) as Record<string, unknown>;
+    expect(spec).toMatchObject({ specVersion: 1, source: { format: 'json' }, output: { format: 'xlsx' } });
+
+    const refused = await call('draft_spec', { docId: 'd1', outPath });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('output already exists');
+  });
+
+  it('executes an inline spec, reports counts, and requires overwrite intent', async () => {
+    await load(DOC);
+    const outPath = join(dir, 'converted.xlsx');
+    const spec = {
+      specVersion: 1,
+      source: { format: 'json' },
+      tables: [{
+        name: 'tasks',
+        anchor: '$.tasks[]',
+        columns: [
+          { name: 'id', from: 'id' },
+          { name: 'status', from: 'status' },
+        ],
+      }],
+      output: { format: 'xlsx' },
+    };
+    const converted = await call('convert', { docId: 'd1', spec, outPath });
+    expect(converted.isError).toBe(false);
+    expect(converted.text).toContain('rows: 2');
+    expect(converted.text).toContain('table tasks: 2 rows, 0 skipped');
+    expect(converted.text).toContain('warnings: 0');
+    expect(Buffer.from(await readFile(outPath)).subarray(0, 2).toString()).toBe('PK');
+
+    expect((await call('convert', { docId: 'd1', spec, outPath })).isError).toBe(true);
+    expect((await call('convert', { docId: 'd1', spec, outPath, overwrite: true })).isError).toBe(false);
   });
 });
 
@@ -215,5 +269,13 @@ describe('failures stay inside the tool call', () => {
     await load(DOC);
     expect((await call('run_query', { docId: 'd1' })).text).toBe('error: run_query needs a query');
     expect((await call('sample', { path: '$' })).text).toContain('needs a docId');
+    expect((await call('convert', { docId: 'd1', outPath: join(dir, 'none.xlsx') })).text)
+      .toBe('error: convert needs exactly one of spec or specPath');
+    expect((await call('convert', {
+      docId: 'd1',
+      outPath: join(dir, 'both.xlsx'),
+      spec: {},
+      specPath: join(dir, 'spec.json'),
+    })).text).toBe('error: convert needs exactly one of spec or specPath');
   });
 });

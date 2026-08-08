@@ -479,6 +479,21 @@ describe('detection', () => {
     const ins = inspect({ doc });
     expect(validateSpec(draftSpec(ins), ins)).toEqual({ ok: true });
   });
+
+  it('drafts both latitude and longitude from one packed coordinate field', () => {
+    const spec = draftSpec(inspect({
+      doc: {
+        rows: [
+          { location: 'Lat: 28.5 Lng: 77.3' },
+          { location: 'Lat: 28.6 Lng: 77.4' },
+        ],
+      },
+    }));
+    expect(spec.tables[0].columns).toEqual([
+      { name: 'location_latitude', from: 'location', type: 'geo', part: 'lat', form: 'labelled' },
+      { name: 'location_longitude', from: 'location', type: 'geo', part: 'lng', form: 'labelled' },
+    ]);
+  });
 });
 
 // ------------------------------------------------------------------- lossless
@@ -548,6 +563,15 @@ describe('xlsx output', () => {
     const sink = xlsxSink();
     await convert({ doc: { rows: [{ x: 1 }] } }, table({ output: { format: 'xlsx' }, tables: [{ name: 'rows', anchor: '$.rows[]', columns: [{ name: 'x', from: 'x' }] }] }), sink);
     expect(sink.bytes().length).toBeGreaterThan(500);
+  });
+
+  it('refuses a cell Excel would truncate instead of producing a damaged workbook', async () => {
+    const sink = xlsxSink();
+    await expect(convert(
+      { doc: { rows: [{ value: 'x'.repeat(32_768) }] } },
+      table({ output: { format: 'xlsx' }, tables: [{ name: 'rows', anchor: '$.rows[]', columns: [{ name: 'value', from: 'value' }] }] }),
+      sink,
+    )).rejects.toThrow(/Excel cells allow 32,767/);
   });
 });
 

@@ -1,7 +1,7 @@
 # jsonloupe Converter — Specification
 
-**Status:** v1 · design frozen 2026-08-02 · engine, sinks and CLI landed 2026-08-03
-(§12 steps 1–2, 5) · **Branch:** `converter`
+**Status:** v1 implemented · design frozen 2026-08-02 · engine, sinks and CLI landed
+2026-08-03 · full mapping UI, persistence and MCP landed 2026-08-08 · **Branch:** `converter`
 
 Companion to [SPEC.md](SPEC.md). That document specifies the *viewer*; this one specifies the
 **converter addon** — a visual schema-mapper that turns nested JSON into flat tables a non-developer
@@ -665,10 +665,10 @@ exemption that protects exact int64 digits.
 
 | # | Deliverable | Gate | Status |
 |---|---|---|---|
-| 1 | `src/convert/` — types, validator, path engine, row iterator, typed parse layer. No DOM. | vitest suite reproducing all 8 corpus converters (§6), including their stated gaps as skipped cases | **done** — 60 passing, 5 gaps skipped |
+| 1 | `src/convert/` — types, validator, path engine, row iterator, typed parse layer. No DOM. | vitest suite reproducing all 8 corpus converters (§6), including their stated gaps as skipped cases | **done** — all executable v1 cases pass; 5 named v2 gaps remain skipped |
 | 2 | Sinks — memory, CSV, xlsx writer | the §7 example round-trips to a real file Excel opens | **done** — `unzip -t` clean, LibreOffice reads every cell |
-| 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is | **built**, awaiting a design pass |
-| 4 | MCP — `inspect`, `convert`, `draft_spec` (names already reserved in `PLAN-mcp-server.md`) | agent drafts a spec, human approves it in the UI, engine runs it | |
+| 3 | UI — "N tables found" → per-table mapping → live preview → download | a non-developer converts a nested file without being told what an anchor is | **done** — editable source/target mapping, target CSV, saved/imported specs, report; Chrome journey verified |
+| 4 | MCP — `inspect`, `convert`, `draft_spec` | agent drafts a spec, human approves it in the UI, engine runs it | **done** — built stdio smoke covers inspect → draft file → XLSX without row values entering responses |
 | 5 | CLI — `jsonloupe convert file.json --spec spec.json` | a frozen spec re-runs headless with no UI and no model | **done** — `inspect` / `draft` / `convert`, driven on a real routing payload |
 
 The UI keeps the division of labour the viewer already runs on: the worker owns the parsed document

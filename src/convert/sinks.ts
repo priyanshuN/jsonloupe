@@ -11,6 +11,20 @@
 import { csvSerialize } from '../csv';
 import type { TableSink, TableWriter } from './engine';
 
+/** Hard format limits. Refusing is safer than producing a workbook Excel repairs. */
+export const EXCEL_MAX_ROWS = 1_048_576;
+export const EXCEL_MAX_COLUMNS = 16_384;
+export const EXCEL_MAX_CELL_CHARS = 32_767;
+const ZIP32_MAX_ENTRIES = 65_535;
+const ZIP32_MAX_SIZE = 0xffff_ffff;
+
+export class OutputLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OutputLimitError';
+  }
+}
+
 export interface CapturedTable {
   name: string;
   columns: string[];
@@ -72,7 +86,30 @@ export function xlsxSink(): XlsxSink {
   const captured = memorySink();
   let out: Uint8Array | null = null;
   return {
-    openTable: (t) => captured.openTable(t),
+    openTable(t) {
+      if (t.columns.length > EXCEL_MAX_COLUMNS) {
+        throw new OutputLimitError(
+          `${t.name}: ${t.columns.length.toLocaleString()} columns exceed Excel's ${EXCEL_MAX_COLUMNS.toLocaleString()}-column limit`,
+        );
+      }
+      for (const name of t.columns) assertExcelCell(t.name, 'header', name);
+      const writer = captured.openTable(t) as TableWriter;
+      let rows = 0;
+      return {
+        writeRow(cells) {
+          rows++;
+          // Row one is the header, so one fewer data row is available.
+          if (rows >= EXCEL_MAX_ROWS) {
+            throw new OutputLimitError(
+              `${t.name}: more than ${(EXCEL_MAX_ROWS - 1).toLocaleString()} data rows cannot fit in one Excel sheet`,
+            );
+          }
+          cells.forEach((value, index) => assertExcelCell(t.name, `${t.columns[index] ?? `column ${index + 1}`} row ${rows}`, value));
+          return writer.writeRow(cells);
+        },
+        close: () => writer.close(),
+      };
+    },
     finish() {
       out = buildXlsx(captured.tables);
     },
@@ -81,6 +118,14 @@ export function xlsxSink(): XlsxSink {
       return out;
     },
   };
+}
+
+function assertExcelCell(table: string, where: string, value: string): void {
+  if (value.length > EXCEL_MAX_CELL_CHARS) {
+    throw new OutputLimitError(
+      `${table}: ${where} contains ${value.length.toLocaleString()} characters; Excel cells allow ${EXCEL_MAX_CELL_CHARS.toLocaleString()}`,
+    );
+  }
 }
 
 // ---------- xlsx ----------
@@ -234,8 +279,19 @@ function zipStore(entries: Entry[]): Uint8Array {
   const enc = new TextEncoder();
   const named = entries.map((e) => ({ ...e, name: enc.encode(e.path), crc: crc32(e.bytes) }));
 
+  if (named.length > ZIP32_MAX_ENTRIES) {
+    throw new OutputLimitError(`ZIP output has ${named.length.toLocaleString()} entries; ZIP64 is not supported`);
+  }
+  for (const entry of named) {
+    if (entry.name.length > 0xffff) throw new OutputLimitError(`ZIP entry name is too long: ${entry.path}`);
+    if (entry.bytes.length > ZIP32_MAX_SIZE) throw new OutputLimitError(`ZIP entry exceeds 4 GiB: ${entry.path}`);
+  }
+
   const localSize = named.reduce((n, e) => n + 30 + e.name.length + e.bytes.length, 0);
   const centralSize = named.reduce((n, e) => n + 46 + e.name.length, 0);
+  if (localSize > ZIP32_MAX_SIZE || centralSize > ZIP32_MAX_SIZE || localSize + centralSize + 22 > ZIP32_MAX_SIZE) {
+    throw new OutputLimitError('ZIP output exceeds the 4 GiB ZIP32 limit; split the conversion into fewer tables');
+  }
   const buf = new Uint8Array(localSize + centralSize + 22);
   const view = new DataView(buf.buffer);
   let off = 0;

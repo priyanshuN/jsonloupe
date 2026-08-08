@@ -4,6 +4,17 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **Nested JSON becomes a reusable spreadsheet workflow.** The browser detects
+  repeatable arrays/maps as linked tables, previews real rows, and now exposes
+  the full mapping: target/source columns, ordering, constants, date/time and
+  coordinate parsing, missing-value policy, and parent links. Mappings persist
+  locally, import/export as JSON, and can take a target CSV header as their
+  desired shape. Downloads finish with row, skipped-row, and warning counts.
+- **The same converter now runs through MCP.** `inspect → draft_spec →
+  convert` lets an agent draft the small reviewable spec while the deterministic
+  engine handles every source row outside model context. Output files are not
+  replaced without explicit intent, packed coordinates draft both latitude and
+  longitude, and XLSX/ZIP hard limits fail before a corrupt workbook is emitted.
 - **Operations live on the pane they act on.** The tree pane gained its own bar
   (`collapse · copy · download`), the same idiom the code view always had — so
   every while-reading operation is one click, and the `⋯` menu shrank to true

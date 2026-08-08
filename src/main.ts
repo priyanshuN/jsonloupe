@@ -13,7 +13,7 @@ import type {
 } from './protocol';
 import { SemanticCompareView, type CompareRow } from './compare-view';
 import { ConvertView } from './convert-view';
-import type { ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
+import type { ConvertReport, ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
 import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
@@ -1300,16 +1300,31 @@ const converter = new ConvertView(
     previewNote: $('#convert-preview-note'),
     preview: $('#convert-preview'),
     format: $('#convert-format'),
+    mappingName: $<HTMLInputElement>('#convert-map-name'),
+    saved: $<HTMLSelectElement>('#convert-saved'),
+    save: $<HTMLButtonElement>('#convert-save'),
+    forget: $<HTMLButtonElement>('#convert-forget'),
+    missing: $<HTMLInputElement>('#convert-missing'),
+    arrayJoin: $<HTMLInputElement>('#convert-array-join'),
+    addColumn: $<HTMLButtonElement>('#convert-add-column'),
+    report: $('#convert-report'),
   },
   {
     inspect: () => call<{ inspection: Inspection; spec: ConvertSpec }>({ type: 'convertInspect' }),
     preview: (spec, rows) =>
       call<PreviewResult | { errors: SpecError[] }>({ type: 'convertPreview', spec, rows }),
     run: (spec) =>
-      call<{ errors: SpecError[] } | { format: 'xlsx' | 'csv'; bytes: Uint8Array; rows: number }>({
+      call<
+        { errors: SpecError[] }
+        | { format: 'xlsx' | 'csv'; bytes: Uint8Array; rows: number; report: ConvertReport }
+      >({
         type: 'convertRun',
         spec,
       }),
+    listMappings: () => store.listConvertSpecs(),
+    saveMapping: (name, spec, id) => store.saveConvertSpec(name, spec, id),
+    removeMapping: (id) => store.removeConvertSpec(id),
+    touchMapping: (id) => store.touchConvertSpec(id),
     download: downloadBlob,
     toast: showToast,
     docName: () => sanitizeFilePart((currentTitle || 'data').replace(/\.[^.]*$/, ''), 60) || 'data',
@@ -1322,6 +1337,30 @@ convertBtn.addEventListener('click', () => {
 });
 $('#convert-close').addEventListener('click', () => showPane('tree'));
 $('#convert-spec').addEventListener('click', () => converter.downloadSpec());
+$('#convert-import').addEventListener('click', () => $<HTMLInputElement>('#convert-import-file').click());
+$<HTMLInputElement>('#convert-import-file').addEventListener('change', async (event) => {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    converter.importSpecText(await file.text(), file.name);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error));
+  }
+});
+$('#convert-target').addEventListener('click', () => $<HTMLInputElement>('#convert-target-file').click());
+$<HTMLInputElement>('#convert-target-file').addEventListener('change', async (event) => {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    converter.importTargetHeadersText(await file.text(), file.name);
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error));
+  }
+});
 $('#convert-dl').addEventListener('click', () => {
   void converter.downloadResult().catch((err: Error) => showToast(err.message));
 });

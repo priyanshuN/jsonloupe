@@ -2559,9 +2559,27 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 #convert-title { font: 12.5px var(--mono); color: var(--c-key); }
 #convert-count { color: var(--text-dim); font-size: 12px; }
+.convert-map-name,
+#convert-saved,
+.convert-inline-field input,
+.convert-source,
+.convert-mode,
+.convert-col-options input,
+.convert-col-options select,
+.convert-link-name {
+  height: var(--ctl-h-mini);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font: 11.5px var(--mono);
+}
+.convert-map-name { width: 150px; padding: 0 var(--gap-2); }
+#convert-saved { max-width: 170px; }
 
 #convert-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 #convert-body { flex: 1; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; min-height: 0; }
@@ -2625,10 +2643,34 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 #convert-preview-note { color: var(--text-faint); font-size: 11.5px; margin-left: auto; }
 #convert-preview-note.bad { color: var(--c-string); }
 
-#convert-cols { overflow-y: auto; padding: var(--gap-2) 14px; max-height: 38%; }
-.convert-col { display: flex; align-items: center; gap: var(--gap-2); padding: 2px 0; }
+#convert-cols { overflow-y: auto; padding: var(--gap-2) 14px; max-height: 48%; }
+.convert-col {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 0.8fr) 90px minmax(130px, 1fr) repeat(3, 24px);
+  align-items: center;
+  gap: var(--gap-2);
+  padding: 3px 0;
+}
 .convert-col.off { opacity: 0.45; }
-.convert-src { color: var(--text-faint); font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.convert-source { min-width: 0; width: 100%; padding: 0 var(--gap-2); }
+.convert-mode { min-width: 0; width: 100%; }
+.convert-col-action { width: 24px; min-width: 24px; padding: 0; }
+.convert-col-options {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  color: var(--text-faint);
+  font-size: 11px;
+  padding-bottom: 3px;
+}
+.convert-col-options label { display: inline-flex; align-items: center; gap: var(--gap-1); }
+.convert-col-options input { width: 150px; padding: 0 var(--gap-1); }
+.convert-col-options select { max-width: 180px; }
+.convert-skip input { width: auto; }
+.convert-inline-field { display: inline-flex; align-items: center; gap: var(--gap-1); color: var(--text-faint); font-size: 11px; }
+.convert-inline-field input { width: 72px; padding: 0 var(--gap-1); }
+.convert-link-name { width: 130px; padding: 0 var(--gap-1); }
 .convert-type {
   font: 11.5px var(--mono);
   color: var(--accent);
@@ -2665,6 +2707,21 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 
 #convert-preview { flex: 1; overflow: auto; min-height: 0; background: var(--bg); }
+#convert-report {
+  flex-shrink: 0;
+  max-height: 150px;
+  overflow: auto;
+  padding: var(--gap-2) 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+#convert-report strong { color: var(--text); margin-right: var(--gap-3); }
+.convert-report-tables { display: inline-flex; flex-wrap: wrap; gap: var(--gap-3); }
+#convert-report ul { margin: var(--gap-1) 0 0 18px; padding: 0; }
+#convert-report .bad { color: var(--warn); }
+#convert-report .ok { color: var(--ok); margin-left: var(--gap-3); }
 .convert-grid { border-collapse: collapse; font: 12px var(--mono); white-space: nowrap; }
 .convert-grid th,
 .convert-grid td {
@@ -2686,3 +2743,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .convert-grid td.empty { color: var(--text-faint); }
 .convert-grid tbody tr:hover td { background: var(--bg-hover); }
+
+@media (max-width: 900px) {
+  #convert-body { grid-template-columns: 180px 1fr; }
+  .convert-col { grid-template-columns: auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, 24px); }
+  .convert-inline-field { display: none; }
+}
