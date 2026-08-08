@@ -159,6 +159,30 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toMatch(/async function openText[\s\S]*?resetAskPanel\(\)/);
   });
 
+  // `apply changes` was armed and accented while the strip beside it read
+  // "in sync with the tree", and pressing it there replaced the document with
+  // itself: markCurrentContentEdited() nulls the provenance, so the `decoded
+  // payload` badge and the `original` button — the route back to the blob the
+  // document was decoded from — vanished, the tree selection reset, and an
+  // undo entry and a snapshot were written for a document nobody had changed.
+  it('refuses to apply a clean buffer, and says so by going dark', () => {
+    // Comments stripped before the ordering assertions below: the guard's own
+    // comment NAMES the calls it is guarding, so indexOf found the prose
+    // mention first and the test failed against correct code.
+    const code = (src: string) => src.replace(/^\s*\/\/.*$/gm, '');
+    const apply = code(mainSource.match(/async function applyCode\(\)[\s\S]*?\n\}/)?.[0] ?? '');
+    expect(apply).toContain('if (!codeDirty) return;');
+    // Order is the contract, not mere presence: the guard has to come before
+    // anything destructive, and Mod-s reaches this function without ever
+    // passing the button, so the button's disabled state cannot stand in.
+    expect(apply.indexOf('if (!codeDirty) return;')).toBeLessThan(apply.indexOf('markCurrentContentEdited()'));
+    expect(apply.indexOf('if (!codeDirty) return;')).toBeLessThan(apply.indexOf('tree.resetSelection()'));
+
+    // The visible half, driven from the one place the buffer's state changes.
+    const status = mainSource.match(/function setCodeStatus\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(status).toContain('codeApplyBtn.disabled = !codeDirty');
+  });
+
   it('prevents Ask Enter submission and keeps dev-only key-file advice out of production', () => {
     const askEnter = mainSource.match(/askBox\.addEventListener\('keydown'[\s\S]*?\n\}\);/)?.[0] ?? '';
     expect(askEnter).toContain("e.key === 'Enter'");

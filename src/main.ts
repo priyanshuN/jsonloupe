@@ -45,7 +45,7 @@ import {
   type TransportMeasure,
 } from './transport';
 import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayload } from './nl';
-import { applyTheme, currentTheme, onThemeChange } from './theme';
+import { currentChoice, currentTheme, onThemeChange, setThemeChoice, type ThemeChoice } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
 import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
@@ -414,7 +414,12 @@ const PASTE_ECHO_MAX = 2_000_000;
 // index.html is the only place the paths live, so a button built here gets the
 // same box, the same 1.5 stroke and the same currentColor ink as one written in
 // markup — which is the whole point of dropping the six characters.
-type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'search' | 'filter' | 'warn' | 'theme';
+// The names icon() may be called with — NOT an inventory of the sprite: most
+// symbols are only ever referenced from markup. shell.test.ts holds both ends
+// (every name here has a symbol, every symbol has a user), which is how
+// `theme` was caught still sitting in this union after the moon left the theme
+// switch and nothing drew it any more.
+type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'search' | 'filter' | 'warn';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function icon(name: IconName): SVGSVGElement {
@@ -2690,6 +2695,12 @@ const CODE_MAX = 3_000_000; // above this, the editor pane falls back to the tre
 let codeEditor: CodeEditor | null = null;
 let codeBusy = false;
 let codeDirty = false;
+// The code bar's one accent, and the only control in the app that is really a
+// STATE rather than an action: it means something exactly while the buffer
+// holds text the document has not taken yet. It never said so — it stayed lit
+// and armed while the strip beside it read `in sync with the tree`, and
+// pressing it there was very far from a no-op (see applyCode).
+const codeApplyBtn = $<HTMLButtonElement>('#code-apply');
 
 // Mod-s is what code.ts binds; it is ⌘S on an Apple keyboard and Ctrl+S on
 // every other one, and the strip has to name the one the reader actually has.
@@ -2724,9 +2735,18 @@ function codeOwnsLead(): boolean {
 }
 
 function setCodeStatus(kind: StatusTone, msg: string): void {
+  // `error` counts as dirty on purpose: an unparseable buffer still holds text
+  // the document has not taken, and retrying the apply is the way out of it.
   codeDirty = kind === 'dirty' || kind === 'bulk' || kind === 'error';
   codeStatusText = msg;
   codeStatusKind = kind;
+  // DISABLED, not hidden: the bar must not reflow under the pointer (rule 20's
+  // argument, which is about arriving controls but holds just as well for
+  // departing ones), and a control people go looking for should dim rather than
+  // vanish. Every path that changes the buffer's state comes through here,
+  // including the editor's own mount (loadCodeContent), so this is the one
+  // place the two halves of the fact can be kept in step.
+  codeApplyBtn.disabled = !codeDirty;
   if (codeOnScreen()) setStatusNote(msg, kind);
 }
 
@@ -2856,6 +2876,15 @@ function showTree(): void {
 
 async function applyCode(): Promise<void> {
   if (!codeEditor) return;
+  // Nothing unapplied — and this is NOT belt-and-braces for the disabled
+  // button, because Mod-s reaches here without touching it. Applying a clean
+  // buffer replaced the document with itself, which sounds harmless and is
+  // not: markCurrentContentEdited() below nulls the provenance, so the
+  // `decoded payload` badge and the `original` button — the whole route back
+  // to the blob this document was decoded from — disappeared. It also reset
+  // the tree selection, pushed an undo entry and wrote a snapshot, all for a
+  // document nobody had changed.
+  if (!codeDirty) return;
   const text = codeEditor.getDoc();
   const documentToken = currentDocumentToken;
   const requestToken = openRequestToken;
@@ -5204,21 +5233,27 @@ window.addEventListener('keydown', async (e) => {
 // spelled the state it was already in (`☾ Dark`) and said nothing about what
 // clicking it would do.
 const themeSwitch = $('#theme-switch');
+const systemSeg = $<HTMLButtonElement>('#theme-system');
 
+// The lit segment is what you CHOSE, not what is on screen: with `system` lit
+// the app may well be showing dark, and lighting `dark` too would claim a pin
+// nobody set — and leave no way to see that the OS is still in charge. Which
+// theme system currently resolves to is on the segment's tooltip instead.
 function paintThemeSwitch(): void {
-  const t = currentTheme();
+  const chosen = currentChoice();
   for (const b of themeSwitch.querySelectorAll<HTMLButtonElement>('button')) {
-    const on = b.dataset.theme === t;
+    const on = b.dataset.theme === chosen;
     b.classList.toggle('on', on);
     b.setAttribute('aria-pressed', String(on));
   }
+  systemSeg.title = `Follow the system theme — currently ${currentTheme()}`;
 }
 
 themeSwitch.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-theme]');
   const choice = btn?.dataset.theme;
-  if (choice !== 'dark' && choice !== 'light') return;
-  applyTheme(choice);
+  if (choice !== 'dark' && choice !== 'light' && choice !== 'system') return;
+  setThemeChoice(choice satisfies ThemeChoice);
 });
 onThemeChange((t) => {
   paintThemeSwitch();
