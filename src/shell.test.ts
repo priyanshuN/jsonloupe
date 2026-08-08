@@ -204,12 +204,33 @@ describe('the icon sprite', () => {
 // AND to a screen reader. Neither is optional, and neither is checkable by
 // looking at the bar — they only exist in the markup.
 describe('glyph-only controls (rule 10, revised)', () => {
+  /**
+   * The text a reader would see in a markup fragment — everything NOT inside a
+   * tag. A scan rather than a `.replace(/<[^>]*>/g, '')`, for the same reason
+   * withoutComments above is one: strip-tags-by-regex is the shape of a
+   * sanitizer, it is never a correct one, and writing it here invites the next
+   * person to reach for it somewhere it matters. (CodeQL agrees, and said so.)
+   */
+  function textOutsideTags(fragment: string): string {
+    let out = '';
+    let i = 0;
+    for (;;) {
+      const open = fragment.indexOf('<', i);
+      if (open < 0) return (out + fragment.slice(i)).trim();
+      out += fragment.slice(i, open);
+      const close = fragment.indexOf('>', open);
+      // Unterminated tag: nothing after it is text a reader would see.
+      if (close < 0) return out.trim();
+      i = close + 1;
+    }
+  }
+
   /** Buttons whose entire visible content is one <svg class="ic">. */
   const glyphOnly = [...withoutComments(html).matchAll(/<button\b[\s\S]*?<\/button>/g)]
     .map((m) => m[0])
     .filter((b) => {
       const inner = b.slice(b.indexOf('>') + 1, b.lastIndexOf('</button>'));
-      return inner.includes('<svg') && inner.replace(/<[^>]*>/g, '').trim() === '';
+      return inner.includes('<svg') && textOutsideTags(inner) === '';
     });
 
   it('finds the glyph-only buttons at all', () => {
