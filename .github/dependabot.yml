@@ -16,8 +16,20 @@ updates:
       # user's machine, so they only need to pass CI, not individual review.
       dev-tooling:
         dependency-type: development
+    # Keep the Node declarations on the same major as the pinned development
+    # runtime. Upgrade both together when the project moves to Node 26.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    # init and analyze exchange versioned state, so partial CodeQL updates fail.
+    # upload-sarif uses the same release and is kept in the atomic update too.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
