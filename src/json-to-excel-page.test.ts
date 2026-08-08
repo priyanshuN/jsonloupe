@@ -9,11 +9,30 @@ import viteConfig from '../vite.config.ts?raw';
 // because the page's whole job is a ten-second promise to someone who searched
 // for it, and every one of them is silently breakable by an innocuous edit.
 
+/**
+ * Cut every open…close block out of `source`, matching the delimiters however
+ * they are cased. A scan rather than a regex: a pattern written to strip
+ * `<script>` and not `<SCRIPT>` is the classic half-done tag filter, and a
+ * helper shaped like a sanitizer invites being used as one. This is extraction
+ * over a file in this repo, and nothing here is rendered.
+ */
+function cutBlocks(source: string, open: string, close: string): string {
+  const haystack = source.toLowerCase();
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const start = haystack.indexOf(open, i);
+    if (start < 0) return out + source.slice(i);
+    out += source.slice(i, start) + ' ';
+    const end = haystack.indexOf(close, start + open.length);
+    if (end < 0) return out;
+    i = end + close.length;
+  }
+}
+
 // Visible copy only: comments and the inline script explain WHY to the next
 // developer and are held to a different standard than what the reader sees.
-const visible = page
-  .replace(/<!--[\s\S]*?-->/g, ' ')
-  .replace(/<script[\s\S]*?<\/script>/g, ' ')
+const visible = cutBlocks(cutBlocks(page, '<!--', '-->'), '<script', '</script>')
   .replace(/<[^>]+>/g, ' ')
   .replace(/\s+/g, ' ');
 

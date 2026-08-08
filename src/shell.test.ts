@@ -31,7 +31,25 @@ function element(source: string, id: string): string {
   }
 }
 
-const withoutComments = (source: string): string => source.replace(/<!--[\s\S]*?-->/g, '');
+/**
+ * Extraction over a file in this repo, not sanitization of anything untrusted —
+ * but written as a scan rather than a replace, because one pass over markup can
+ * hand back a string that still contains `<!--`, and a helper shaped like a
+ * sanitizer invites being used as one.
+ */
+const withoutComments = (source: string): string => {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = source.indexOf('<!--', i);
+    if (open < 0) return out + source.slice(i);
+    out += source.slice(i, open);
+    const close = source.indexOf('-->', open + 4);
+    // Unterminated: everything from here on is inside the comment.
+    if (close < 0) return out;
+    i = close + 3;
+  }
+};
 
 /**
  * Everything a reader actually sees: text between tags, plus the three
