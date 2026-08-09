@@ -70,6 +70,8 @@ export interface ConvertCallbacks {
 
 const PREVIEW_ROWS = 12;
 const DEBOUNCE_MS = 120;
+// How long a preview may take before the wait is worth a line of its own.
+const WAIT_NOTE_MS = 250;
 // The strip's resting line for this pane: what to do when nothing is chosen yet.
 const RESTING_LEAD = 'Pick a table, adjust its columns, then download.';
 // Detection reads at most this many rows of a table before it stops counting
@@ -409,6 +411,14 @@ export class ConvertView {
   private errorHosts = new Map<ColumnSpec, HTMLElement>();
   private tableMetas = new Map<string, HTMLElement>();
   private problemsHost: HTMLElement | null = null;
+  // Writing the file is the one operation here that is neither debounced nor
+  // cancellable, so it is the one that has to say it is running.
+  private converting = false;
+  private downloadRest = { label: '', title: '' };
+  private waitTimer = 0;
+  // Told apart from "detection has not answered yet", because the two states
+  // read identically on an empty pane and only one of them ever ends.
+  private detectionFailed = false;
 
   constructor(
     private els: {
@@ -454,6 +464,12 @@ export class ConvertView {
       this.full.output.arrayJoin = this.els.arrayJoin.value;
       void this.refreshPreview();
     });
+    // The resting label and tooltip come off the markup rather than being said
+    // again here — this button's wording is the page's to decide.
+    this.downloadRest = {
+      label: this.els.download.lastChild?.textContent ?? '',
+      title: this.els.download.title,
+    };
     this.els.addColumn.addEventListener('click', () => this.addColumn());
     this.els.saved.addEventListener('change', () => void this.loadSelectedMapping());
     this.els.save.addEventListener('click', () => void this.saveMapping());
@@ -496,6 +512,7 @@ export class ConvertView {
     const mine = ++this.epoch;
     // A converter opened on a new document must never flash the previous
     // document's preview while inspection is in flight.
+    this.detectionFailed = false;
     this.full = null;
     this.inspection = null;
     this.lastPreview = null;
@@ -516,7 +533,18 @@ export class ConvertView {
     this.els.report.hidden = true;
     this.cbs.setLead(RESTING_LEAD);
     this.syncActions();
-    const { inspection, spec } = await this.cbs.inspect();
+    let detected: { inspection: Inspection; spec: ConvertSpec };
+    try {
+      detected = await this.cbs.inspect();
+    } catch (error) {
+      if (mine !== this.epoch) return;
+      // A failed detection used to leave `Looking through this document…` on
+      // screen forever, with the reason spent on a toast that then left. The
+      // pane says what happened and keeps the one thing worth offering.
+      this.failInspection(error);
+      return;
+    }
+    const { inspection, spec } = detected;
     if (mine !== this.epoch) return;
     this.inspection = inspection;
     this.drafted = cloneSpec(spec);
@@ -537,6 +565,24 @@ export class ConvertView {
     this.renderDetail();
     await this.refreshSavedMappings();
     void this.refreshPreview();
+  }
+
+  /** Detection did not answer. Say why, and leave the way to ask again. */
+  private failInspection(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.detectionFailed = true;
+    const state = this.cbs.emptyState(
+      'Detection failed',
+      `${message}. Nothing about the document has changed — try again.`,
+      { pane: true },
+    );
+    const retry = el('button', undefined, 'try again') as HTMLButtonElement;
+    retry.type = 'button';
+    retry.addEventListener('click', () => void this.open());
+    state.append(retry);
+    this.els.tables.replaceChildren(state);
+    this.showPreviewNote(`detection failed: ${message}`, 'error');
+    this.syncActions();
   }
 
   /**
@@ -580,6 +626,38 @@ export class ConvertView {
     this.els.arrayJoin.value = this.full?.output.arrayJoin ?? '; ';
   }
 
+  /**
+   * Writing the file can take as long as the document is big, and nothing about
+   * a pressed button said so: the press looked like it had missed, and a second
+   * one started a second conversion of the same document.
+   */
+  private setConverting(converting: boolean): void {
+    this.converting = converting;
+    const label = this.els.download.lastChild;
+    if (label && label.nodeType === 3) {
+      label.textContent = converting ? 'converting…' : this.downloadRest.label;
+    }
+    this.els.download.title = converting ? 'Converting this document…' : this.downloadRest.title;
+    this.els.download.setAttribute('aria-busy', String(converting));
+    this.syncActions();
+  }
+
+  /**
+   * A wait only worth naming once it is one. Under the threshold the round trip
+   * finishes before anyone could read the line, and a note that appears and
+   * vanishes on every keystroke is noise in the place the answers go.
+   */
+  private waitingFor(text: string): void {
+    window.clearTimeout(this.waitTimer);
+    this.els.preview.setAttribute('aria-busy', 'true');
+    this.waitTimer = window.setTimeout(() => this.showPreviewNote(text), WAIT_NOTE_MS);
+  }
+
+  private doneWaiting(): void {
+    window.clearTimeout(this.waitTimer);
+    this.els.preview.setAttribute('aria-busy', 'false');
+  }
+
   /** An action with nothing to act on is disabled, not left live to fail on click. */
   private syncActions(): void {
     this.els.addColumn.disabled = !this.full?.tables[this.selected];
@@ -589,7 +667,7 @@ export class ConvertView {
     // refusal is spent on the disabled button rather than on a toast after the
     // click. The mapping itself stays downloadable — a broken one is exactly
     // what someone wants to hand over when they are asking why it is broken.
-    this.els.download.disabled = !convertible || this.errors.length > 0;
+    this.els.download.disabled = this.converting || !convertible || this.errors.length > 0;
     this.renderOutcome();
   }
 
@@ -602,7 +680,9 @@ export class ConvertView {
   private renderOutcome(): void {
     const host = this.els.count;
     if (!this.full) {
-      host.textContent = 'Looking through this document…';
+      host.textContent = this.detectionFailed
+        ? 'This document could not be looked through.'
+        : 'Looking through this document…';
       return;
     }
     const effective = this.effective();
@@ -1396,6 +1476,7 @@ export class ConvertView {
   private async doPreview(mine: number): Promise<void> {
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
+      this.doneWaiting();
       this.errors = [];
       this.lastPreview = null;
       this.paintErrors();
@@ -1409,6 +1490,7 @@ export class ConvertView {
       return;
     }
     let res: PreviewResult | { errors: SpecError[] };
+    this.waitingFor('reading the rows…');
     try {
       res = await this.cbs.preview(spec, PREVIEW_ROWS);
     } catch (error) {
@@ -1416,6 +1498,7 @@ export class ConvertView {
       // so a failed round-trip would otherwise leave the previous mapping's rows
       // on screen as if they were the current ones.
       if (mine !== this.epoch) return;
+      this.doneWaiting();
       const message = error instanceof Error ? error.message : String(error);
       this.els.preview.textContent = '';
       this.lastPreview = null;
@@ -1424,6 +1507,7 @@ export class ConvertView {
       return;
     }
     if (mine !== this.epoch) return; // a later edit already won
+    this.doneWaiting();
 
     if ('errors' in res) {
       this.els.preview.textContent = '';
@@ -1537,6 +1621,9 @@ export class ConvertView {
   }
 
   async downloadResult(): Promise<void> {
+    // Two presses are two conversions of the same document — the second one
+    // wins the download and the first is spent for nothing.
+    if (this.converting) return;
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
       // Two different emptinesses: nothing was found, or everything found was
@@ -1546,7 +1633,22 @@ export class ConvertView {
         : 'nothing to convert — no tables were detected in this document', 'bad');
       return;
     }
-    const res = await this.cbs.run(spec);
+    let res: Awaited<ReturnType<ConvertCallbacks['run']>>;
+    this.setConverting(true);
+    this.showPreviewNote('writing the file…');
+    try {
+      res = await this.cbs.run(spec);
+    } catch (error) {
+      // The mapping is untouched and the document is untouched, so the only
+      // thing lost is the wait: say that, rather than a bare failure that reads
+      // as work needing to be redone.
+      const message = error instanceof Error ? error.message : String(error);
+      this.showPreviewNote(`conversion failed: ${message} — press download to try again`, 'error');
+      this.cbs.toast(`conversion failed: ${message}`, 'bad');
+      return;
+    } finally {
+      this.setConverting(false);
+    }
     if ('errors' in res) {
       // The same treatment the preview's errors get: all of them, each on the
       // column it names, rather than the first one in a toast that then leaves.
@@ -1568,6 +1670,9 @@ export class ConvertView {
       this.cbs.download(`${stem}_tables.zip`, res.bytes, 'application/zip');
     }
     this.renderReport(res.report);
+    // The strip goes back to describing the mapping; `writing the file…` is
+    // over the moment the file exists.
+    this.renderPreviewNote();
     const tables = spec.tables.length;
     this.cbs.toast(
       `${res.rows.toLocaleString()} row${res.rows === 1 ? '' : 's'}`

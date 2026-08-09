@@ -557,6 +557,64 @@ describe('converter view workflow', () => {
     expect(note).toContain('7 in other tables');
   });
 
+  it('says the conversion is running, refuses a second one, and survives its failure', async () => {
+    const h = makeHarness();
+    h.els.download.append('download');
+    h.els.download.title = 'Convert and download';
+    const view = new ConvertView(h.els, h.callbacks);
+    await view.open();
+    await settlePreview();
+
+    let release = (): void => {};
+    vi.mocked(h.callbacks.run).mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { format: 'xlsx', bytes: new Uint8Array([1]), rows: 2, report: { tables: [], warnings: [] } };
+    });
+
+    const running = view.downloadResult();
+    expect(h.els.download.disabled).toBe(true);
+    expect(h.els.download.getAttribute('aria-busy')).toBe('true');
+    expect(h.els.download.lastChild?.textContent).toBe('converting…');
+    expect(h.els.previewNote.textContent).toContain('writing the file');
+
+    // A second press while the first is still writing would convert the same
+    // document twice and hand back whichever finished last.
+    await view.downloadResult();
+    expect(vi.mocked(h.callbacks.run)).toHaveBeenCalledTimes(1);
+
+    release();
+    await running;
+    expect(h.els.download.disabled).toBe(false);
+    expect(h.els.download.getAttribute('aria-busy')).toBe('false');
+    expect(h.els.download.lastChild?.textContent).toBe('download');
+    expect(h.els.previewNote.textContent).not.toContain('writing the file');
+
+    vi.mocked(h.callbacks.run).mockRejectedValue(new Error('worker died'));
+    await view.downloadResult();
+    // Nothing was lost but the wait, and the button that says so is live again.
+    expect(h.els.previewNote.textContent).toContain('conversion failed: worker died');
+    expect(h.els.previewNote.textContent).toContain('try again');
+    expect(h.els.download.disabled).toBe(false);
+    expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('conversion failed'), 'bad');
+  });
+
+  it('offers a way back when detection itself fails', async () => {
+    const h = makeHarness();
+    vi.mocked(h.callbacks.inspect).mockRejectedValueOnce(new Error('worker unavailable'));
+    await h.view.open();
+
+    expect(h.els.count.textContent).toContain('could not be looked through');
+    expect(h.els.previewNote.textContent).toContain('detection failed: worker unavailable');
+    const retry = h.els.tables.querySelector('button');
+    expect(retry?.textContent).toBe('try again');
+
+    retry!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    await settlePreview();
+    expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(2);
+    expect(h.els.tables.querySelectorAll('.convert-table')).toHaveLength(2);
+  });
+
   it('renders the no-table state and explains that there is nothing to convert', async () => {
     const h = makeHarness();
     const emptyInspection = inspect({ doc: { name: 'not a collection' } });
