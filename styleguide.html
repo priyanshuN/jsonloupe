@@ -161,6 +161,36 @@ SPDX-License-Identifier: MIT -->
       </div>
     </section>
 
+    <!-- A surface with no content is two different facts, and they get two
+         different treatments: nothing to show (rule 17's one sentence) and not
+         here yet (a placeholder in the shape of what is coming). Both live here
+         because both are otherwise only visible for a moment, or on a document
+         you have to go and build. -->
+    <section>
+      <h2>nothing yet — rule 17 &amp; the code placeholder</h2>
+      <div class="sg-row" style="align-items:stretch;gap:var(--gap-3)">
+        <div style="flex:1;min-width:220px;background:var(--bg-canvas);border:1px solid var(--border);border-radius:var(--r)">
+          <div class="empty-state is-pane">Nothing to show yet<span class="empty-hint">Paste a document to begin.</span></div>
+        </div>
+        <div style="flex:1;min-width:220px;position:relative;height:180px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+          <div class="code-skeleton" aria-hidden="true">
+            <div class="cs-gutter"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="cs-lines">
+              <span style="width:8%"></span>
+              <span style="margin-left:16px;width:46%"></span>
+              <span style="margin-left:16px;width:62%"></span>
+              <span style="margin-left:16px;width:30%"></span>
+              <span style="margin-left:32px;width:54%"></span>
+              <span style="margin-left:32px;width:38%"></span>
+              <span style="margin-left:32px;width:66%"></span>
+              <span style="margin-left:16px;width:22%"></span>
+            </div>
+          </div>
+        </div>
+        <span class="sg-note">left: nothing to show. right: not here yet — drawn only where the shape is known in advance, held back 120ms so a fast open never flashes it, then kept 320ms so it never flickers. A wait nobody can predict the shape of gets the sentence, not bars.</span>
+      </div>
+    </section>
+
     <section>
       <h2>surface ladder — rule 11</h2>
       <div class="sg-swatches" id="sg-surfaces"></div>

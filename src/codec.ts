@@ -55,6 +55,13 @@ export type PayloadFormat =
   | 'raw-zstd'
   | 'base64-zstd'
   | 'base64url-zstd'
+  // Base64 with no Zstd frame inside — JSON, merely encoded. The encode side
+  // has been able to produce this since `base64` joined EncodeFormat; the
+  // decoder was never told, so the payload tools could not read their own
+  // output. Deliberately absent from PayloadTextSniff below — see the note
+  // there for why the automatic paths must not learn this one.
+  | 'base64-json'
+  | 'base64url-json'
   | 'postgres-bytea-zstd';
 
 export type PayloadTextWrapper =
@@ -132,6 +139,14 @@ export interface DecodeJsonPayloadOptions {
 
 export interface PayloadTextSniff {
   recognized: boolean;
+  /**
+   * Magic-gated formats only. `base64-json` is deliberately NOT here: plain
+   * base64 carries no signature, so recognizing it means trial-decoding every
+   * candidate string and asking whether the bytes happen to be JSON. This type
+   * feeds the paths that decide FOR the user — paste, open a file, offering
+   * `decode payload` on a nested string — and those may only act on certainty.
+   * decodeJsonPayload, which answers an explicit press, does read it.
+   */
   format: Extract<
     PayloadFormat,
     'unknown' | 'json-text' | 'base64-zstd' | 'base64url-zstd' | 'postgres-bytea-zstd'
@@ -810,6 +825,36 @@ export async function decodeJsonPayload(
     return failure(metadata, 'not-zstd', 'base64 prefix resembles Zstd but frame magic is incomplete', 'base64');
   }
 
+  // Base64 that is not a Zstd frame, but IS JSON once decoded. This is the
+  // third thing the encode side can produce (EncodeFormat's `base64`), and
+  // until now the pane refused its own output: compress on that setting, press
+  // decode, and the answer was `unsupported-format`.
+  //
+  // Unlike every branch above it, this one has no magic bytes to gate on — any
+  // long enough alphanumeric run is valid base64 — so the gate is the decoded
+  // CONTENT: it must be valid UTF-8 and read as JSON. That is a strong filter
+  // (a base64 word decodes to bytes that are not JSON and falls through), but
+  // it is a filter, not a signature, which is exactly why this stays out of
+  // sniffPayloadText: an explicit press of `decode` may spend the work and take
+  // the risk, while the automatic paths (paste, open a file, offer `decode
+  // payload` on a nested string) must keep guessing only from magic.
+  if ('bytes' in decoded) {
+    const text = decodeUtf8(decoded.bytes);
+    // isJsonish, not just isValidJsonText: base64 wrapping malformed JSON
+    // deserves "invalid JSON inside", which successFromJson reports, rather
+    // than being disowned as an unknown format.
+    if (text !== null && isJsonish(text)) {
+      metadata.format = decoded.variant === 'url-safe' ? 'base64url-json' : 'base64-json';
+      metadata.layers.push({
+        kind: 'base64',
+        inputByteLength: byteLength(value),
+        outputByteLength: decoded.bytes.byteLength,
+        detail: decoded.variant,
+      });
+      return successFromJson(text, decoded.bytes, metadata);
+    }
+  }
+
   if (isJsonish(value)) {
     metadata.format = 'json-text';
     return failure(metadata, 'invalid-json', 'text resembles JSON but has invalid syntax', 'json');
@@ -877,6 +922,11 @@ export function encodeFormatFor(decoded: PayloadFormat): EncodeFormat | null {
     case 'base64url-zstd':
     case 'raw-zstd':
       return 'base64-zstd';
+    // Came in as plain base64, goes back as plain base64 — re-encoding it with
+    // a Zstd frame would hand back something the sender cannot read.
+    case 'base64-json':
+    case 'base64url-json':
+      return 'base64';
     default:
       return null;
   }

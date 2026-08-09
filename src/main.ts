@@ -2034,6 +2034,10 @@ async function openText(
   tree.resetSelection();
   // showPane repaints the strip; with nothing selected that is the resting line.
   showPane('tree');
+  // A document on screen is the first moment the editor is reachable at all —
+  // fetch its chunk now, while the user is reading a tree, rather than inside
+  // the click that wants it.
+  warmCodeEditor();
   // A document is open, so this visitor is now a user: any later return to the
   // landing ("+ new", "◂ back") gets the compact paste view, not the pitch, and
   // the next visit boots straight into the app (pre-paint gate in index.html).
@@ -2811,6 +2815,11 @@ const CODE_MAX = 3_000_000; // above this, the editor pane falls back to the tre
 let codeEditor: CodeEditor | null = null;
 let codeBusy = false;
 let codeDirty = false;
+// What the buffer currently holds, so opening the pane on a document it is
+// already showing is a pane toggle rather than a full re-serialize. -1 = no
+// editor, or one whose content can no longer be vouched for.
+let codeLoadedRevision = -1;
+let codeLoadedSourceMode = false;
 // The code bar's one accent, and the only control in the app that is really a
 // STATE rather than an action: it means something exactly while the buffer
 // holds text the document has not taken yet. It never said so — it stayed lit
@@ -2867,10 +2876,14 @@ function setCodeStatus(kind: StatusTone, msg: string): void {
 }
 
 function showCodeTooBig(): void {
+  cancelCodeSkeleton();
   if (codeEditor) {
     codeEditor.destroy();
     codeEditor = null;
   }
+  // No editor, so nothing vouches for a buffer any more: the next mount builds
+  // a fresh one and must load into it.
+  codeLoadedRevision = -1;
   codeHost.replaceChildren(
     emptyState(
       'This document is too large to edit as text',
@@ -2885,13 +2898,129 @@ function showCodeTooBig(): void {
   if (codeOwnsLead()) setStatusLead('');
 }
 
+// ---------- the wait itself ----------
+//
+// Rule 17 gives every EMPTY surface one treatment; this is the other half of
+// that question — a surface that is not empty, just not here yet. The code pane
+// is the app's slowest open (a chunk to fetch the first time, then the document
+// to serialize), and until this it spent that time as a blank rectangle, which
+// reads as broken rather than as coming.
+//
+// Two numbers, both about perception rather than the work:
+//   - DELAY: below it nobody perceives a wait, so drawing anything would be a
+//     flash of loading state — worse than the wait it announces. Above it the
+//     pane must be saying something.
+//   - MIN: once shown it stays put long enough to be read as a state rather
+//     than a flicker, even if the content lands 10ms later.
+// The skeleton is only worth drawing because this pane's shape is KNOWN — a
+// gutter and ragged lines. A shape you cannot predict gets rule 17's sentence
+// instead; a spinner would say only "wait", which the user can already see.
+const CODE_SKELETON_DELAY = 120;
+const CODE_SKELETON_MIN = 320;
+// Deterministic, not random: a skeleton that reshuffles on every open is motion
+// carrying no meaning, and this repo's outputs do not roll dice. Indents and
+// widths trace a plausible object so the placeholder reads as JSON.
+const CODE_SKELETON_SHAPE: [indent: number, width: number][] = [
+  [0, 8], [1, 46], [1, 62], [1, 30], [2, 54], [2, 38], [2, 66], [1, 22],
+  [1, 58], [2, 44], [2, 70], [2, 34], [1, 26], [1, 50], [2, 60], [2, 40],
+];
+let codeSkeletonTimer: ReturnType<typeof setTimeout> | undefined;
+let codeSkeletonShownAt = 0;
+
+function buildCodeSkeleton(): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'code-skeleton';
+  // Decorative: the fact that something is loading is carried by aria-busy on
+  // the host and by the status strip, both of which are read out. A screen
+  // reader has no use for sixteen grey bars.
+  el.setAttribute('aria-hidden', 'true');
+  const gutter = document.createElement('div');
+  gutter.className = 'cs-gutter';
+  const lines = document.createElement('div');
+  lines.className = 'cs-lines';
+  // Fill the pane it is standing in for, so the swap does not change how much
+  // of the viewport is covered.
+  // Read from the ramp rather than restated here — the type scale has stepped
+  // once already, and a placeholder that stops matching the pane it covers is
+  // worse than none.
+  const fs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fs-code')) || 14;
+  const lineH = fs * 1.6;
+  const rows = Math.max(6, Math.min(60, Math.ceil(codeHost.clientHeight / lineH)));
+  for (let i = 0; i < rows; i++) {
+    const [indent, width] = CODE_SKELETON_SHAPE[i % CODE_SKELETON_SHAPE.length];
+    gutter.appendChild(document.createElement('span'));
+    const line = document.createElement('span');
+    line.style.marginLeft = `${indent * 16}px`;
+    line.style.width = `${width}%`;
+    lines.appendChild(line);
+  }
+  el.append(gutter, lines);
+  return el;
+}
+
+function showCodeSkeleton(): void {
+  clearTimeout(codeSkeletonTimer);
+  codeHost.setAttribute('aria-busy', 'true');
+  codeSkeletonTimer = setTimeout(() => {
+    if (codeHost.querySelector('.code-skeleton')) return;
+    codeSkeletonShownAt = performance.now();
+    codeHost.appendChild(buildCodeSkeleton());
+  }, CODE_SKELETON_DELAY);
+}
+
+function hideCodeSkeleton(): void {
+  clearTimeout(codeSkeletonTimer);
+  codeHost.removeAttribute('aria-busy');
+  const el = codeHost.querySelector('.code-skeleton');
+  if (!el) return;
+  const left = CODE_SKELETON_MIN - (performance.now() - codeSkeletonShownAt);
+  if (left <= 0) el.remove();
+  else setTimeout(() => el.remove(), left);
+}
+
+// The wait ended in something other than the editor (too large, a failed
+// chunk): that message is the answer, so the placeholder goes at once — the
+// minimum display time is there to stop a flicker, not to delay bad news.
+function cancelCodeSkeleton(): void {
+  clearTimeout(codeSkeletonTimer);
+  codeHost.removeAttribute('aria-busy');
+  codeHost.querySelector('.code-skeleton')?.remove();
+}
+
+// The editor's chunk is ~130 KB gzipped across ten modules and nothing asks for
+// it until the pane is clicked, which put the whole download inside the click.
+// Fetching it once the document is on screen keeps the landing's cold start
+// (why code.ts is lazy at all) and spends the idle time right after a parse,
+// when the user is reading a tree and the network is doing nothing.
+let codeChunkWarmed = false;
+function warmCodeEditor(): void {
+  if (codeChunkWarmed) return;
+  codeChunkWarmed = true;
+  // preload(), not just the module: importing the wrapper alone fetches a few
+  // KB and leaves the seven CodeMirror packages — the part you actually wait
+  // for — behind a second hop inside create().
+  const warm = (): void => {
+    void import('./code')
+      .then((m) => m.preload())
+      .catch(() => { codeChunkWarmed = false; });
+  };
+  if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 2000 });
+  else setTimeout(warm, 500);
+}
+
 async function ensureEditor(): Promise<void> {
   if (codeEditor) return;
-  codeHost.replaceChildren();
+  // Everything except the placeholder standing in for what is being built —
+  // clearing that too would put the blank rectangle back for exactly the span
+  // it exists to cover.
+  for (const child of [...codeHost.children]) {
+    if (!child.classList.contains('code-skeleton')) child.remove();
+  }
   let mod: typeof import('./code');
   try {
     mod = await import('./code');
   } catch {
+    cancelCodeSkeleton();
     // A deploy replaced the hashed chunks this tab's bundle points at (Pages
     // keeps no old assets). vite:preloadError reloads once; this is the
     // fallback when that already ran or the failure is something else.
@@ -2942,15 +3071,30 @@ async function ensureEditor(): Promise<void> {
 let codeSourceMode = false;
 async function loadCodeContent(): Promise<void> {
   if (!codeEditor) return;
+  // The buffer already holds this document in this mode. Re-serializing it
+  // would cost a full worker walk of every node to arrive at the same text —
+  // and, worse, would overwrite an edit the user had not applied yet, which is
+  // what a trip to the tree and back used to do without saying a word.
+  // Anything that CHANGES the document bumps the revision, so a real change
+  // still reloads here (an inline tree edit, an Apply, an undo).
+  if (codeLoadedRevision === currentDocumentRevision && codeLoadedSourceMode === codeSourceMode) return;
   if (codeSourceMode) {
     codeLineMap = new Map();
     codeEditor.setDoc(currentText);
+    codeLoadedRevision = currentDocumentRevision;
+    codeLoadedSourceMode = true;
     setCodeStatus('', 'raw source — exact original bytes');
     return;
   }
+  const wanted = currentDocumentRevision;
   const r = await call<{ text: string; lines: [string, number][] }>({ type: 'stringifyLines' });
+  // The document moved while the worker was walking the old one (an inline edit
+  // lands mid-serialize): that text is about a document nobody is looking at.
+  if (wanted !== currentDocumentRevision) return;
   codeLineMap = new Map(r.lines);
   codeEditor.setDoc(r.text);
+  codeLoadedRevision = wanted;
+  codeLoadedSourceMode = false;
   setCodeStatus('', 'in sync with the tree');
 }
 
@@ -2965,11 +3109,13 @@ async function mountCodeEditor(): Promise<boolean> {
     return false;
   }
   codeBusy = true;
+  showCodeSkeleton();
   try {
     await ensureEditor();
     await loadCodeContent();
     return true;
   } finally {
+    hideCodeSkeleton();
     codeBusy = false;
   }
 }

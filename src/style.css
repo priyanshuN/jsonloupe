@@ -3182,6 +3182,69 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 #code-host .cm-editor { height: 100%; }
 #code-host .cm-scroller { font: var(--fs-code)/1.6 var(--mono); }
 
+/* The pane while it is still becoming itself. Rule 17 states the one treatment
+   for a surface with nothing IN it; this is the neighbouring case — a surface
+   whose content is on its way — and it is drawn here and nowhere else because
+   this pane is the only one whose shape is known before its content arrives (a
+   gutter and ragged lines) and the only one that can keep you waiting long
+   enough to notice (a chunk to fetch, then a document to serialize). Where the
+   shape is not predictable, rule 17's sentence is still the answer.
+   main.ts owns WHEN it appears — late enough that a fast open never flashes it,
+   long enough once shown that it reads as a state and not a flicker.
+   Absolutely positioned over the host so the editor mounts underneath it and
+   the swap is one repaint, with no reflow of the pane around it. */
+.code-skeleton {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-canvas);
+  /* Rule 12: a keyframe decoration keeps its own timing, and the blanket
+     reduced-motion block at the foot of this file collapses it. The pulse is
+     the one thing the bars cannot say by themselves — that this is working,
+     not stuck. */
+  animation: cskel 1.4s var(--ease) infinite;
+}
+.code-skeleton .cs-gutter,
+.code-skeleton .cs-lines {
+  display: flex;
+  flex-direction: column;
+  /* .cm-content's own 6px, so the first bar sits where the first line will. */
+  padding-top: 6px;
+}
+.code-skeleton .cs-gutter {
+  /* CodeMirror's line-number column: 32px of digits inside 12/10 of padding. */
+  flex: 0 0 54px;
+  align-items: center;
+  border-right: 1px solid var(--border);
+  background: var(--gutter-bg);
+}
+.code-skeleton .cs-lines {
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--gap-3);
+}
+/* One bar per line of the pane it stands in for, at the ramp's code size and
+   the editor's 1.6, so the placeholder covers as much of the viewport as the
+   text will and the swap moves nothing. */
+.code-skeleton span {
+  /* Never compressed to fit: a column that does not divide evenly into the
+     pane must overflow (it is clipped) rather than quietly restate the line
+     height as something the editor will not use. */
+  flex: 0 0 auto;
+  height: 7px;
+  margin: calc((var(--fs-code) * 1.6 - 7px) / 2) 0;
+  border-radius: var(--r-xs);
+  /* Mixed INTO the canvas, not toward transparent: the opaque-wash rule the
+     editor's search fills already follow. Faint enough to read as absence. */
+  background: color-mix(in srgb, var(--text-faint) 28%, var(--bg-canvas));
+}
+.code-skeleton .cs-gutter span { width: 14px; }
+@keyframes cskel {
+  50% { opacity: 0.5; }
+}
+
 /* Follow-the-hit: a structural search match scrolled this line into view. It is
    the tree's row flash on the other surface — the same accent wash fading out
    over about the same second — and like it, it marks nothing afterwards.
