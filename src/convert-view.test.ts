@@ -13,7 +13,9 @@ import {
   joinList,
   outcomeLine,
   presenceText,
+  warningSummary,
 } from './convert-view';
+import type { Warning } from './convert/index';
 
 describe('converter mapping helpers', () => {
   it('reads a CSV target header including quoted commas and escaped quotes', () => {
@@ -123,6 +125,43 @@ describe('the ceilings a spreadsheet will refuse at', () => {
     expect(ceilingBreaches({ ...fits, total: 2_000_000 })[0])
       .toBe(`too many rows for one sheet — ${(2_000_000).toLocaleString()}`
         + ` of ${(1_048_576).toLocaleString()}`);
+  });
+});
+
+describe('what the preflight line says needs review', () => {
+  const at = (code: Warning['code'], count: number): Warning => ({ table: 'orders', code, count });
+
+  it('names the kinds, biggest first, rather than counting anonymous values', () => {
+    expect(warningSummary([at('BAD_GEO', 2), at('BAD_DATETIME', 9)])).toEqual([
+      '9 × date/time could not be read',
+      '2 × coordinate could not be read',
+    ]);
+  });
+
+  it('adds up repeats of one kind across the columns it happened in', () => {
+    expect(warningSummary([
+      { table: 'orders', column: 'from', code: 'BAD_DATETIME', count: 3 },
+      { table: 'orders', column: 'to', code: 'BAD_DATETIME', count: 4 },
+    ])).toEqual(['7 × date/time could not be read']);
+  });
+
+  // This line shares a strip with the row count and the spreadsheet ceilings,
+  // so a document with every kind of problem must not push them off it.
+  it('counts the kinds past the second instead of listing them', () => {
+    expect(warningSummary([
+      at('BAD_DATETIME', 10),
+      at('BAD_GEO', 5),
+      at('DUP_PARENT_KEY', 2),
+      at('CELL_TOO_LONG', 1),
+    ])).toEqual([
+      '10 × date/time could not be read',
+      '5 × coordinate could not be read',
+      '3 more to review',
+    ]);
+  });
+
+  it('says nothing when there is nothing to review', () => {
+    expect(warningSummary([])).toEqual([]);
   });
 });
 

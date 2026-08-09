@@ -20,7 +20,7 @@ import type {
   QueryResultView,
   SampleResult,
 } from './doc-ops';
-import type { ConvertSpec, DraftHints, Inspection } from '../convert';
+import type { ConvertSpec, DraftHints, Inspection, Kind, Suggestion } from '../convert';
 import type { ProfileResult } from '../profile';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from '../query-grammar';
 import { cap, RESPONSE_CAP, renderCsv, renderDiff, renderError, renderLoad, renderProfile, renderQuery, renderSample } from './render';
@@ -349,6 +349,30 @@ type Args = Record<string, unknown>;
 /** What a tool produced before the text/structured response caps. */
 type Rendered = { ok: true; text: string; data: Record<string, unknown> } | OpError;
 
+/** Agent-facing inspection DTO. Detector specimens are internal drafting data. */
+interface PublicInspection {
+  source: Inspection['source'];
+  tables: PublicDetectedTable[];
+  truncated: boolean;
+}
+
+interface PublicDetectedTable {
+  anchor: string;
+  name: string;
+  rows: number;
+  isMap: boolean;
+  parentAnchor: string | null;
+  fields: PublicDetectedField[];
+}
+
+interface PublicDetectedField {
+  path: string;
+  present: number;
+  kinds: Kind[];
+  unique: boolean;
+  suggest?: Suggestion;
+}
+
 function success(text: string, data: object): Rendered {
   return { ok: true, text, data: data as Record<string, unknown> };
 }
@@ -374,10 +398,10 @@ export class ToolRouter {
       case 'inspect':
         return this.onDoc(args, async (doc) => {
           const result = await doc.host.send({ op: 'convertInspect' }) as ConversionInspectionResult | OpError;
-          // The inspection is shape only, so it can travel structured as well as
-          // rendered; the drafted spec belongs to draft_spec, not here.
+          // Drafting needs detector specimens, but neither response channel does.
+          // Rebuild the public DTO before the generic structured-content cap sees it.
           return result.ok
-            ? success(renderInspection(result.inspection), { ok: true, inspection: result.inspection })
+            ? success(renderInspection(result.inspection), { ok: true, inspection: publicInspection(result.inspection) })
             : result;
         });
       case 'draft_spec':
@@ -671,7 +695,40 @@ function strings(value: unknown, max: number): { ok: true; values: string[] } | 
   return { ok: true, values: value as string[] };
 }
 
-/** Shape-only converter inspection. Samples deliberately stay in the document host. */
+/** Explicitly allowlist public metadata so new internal detector data stays private. */
+function publicInspection(inspection: Inspection): PublicInspection {
+  return {
+    source: inspection.source,
+    tables: inspection.tables.map((table) => ({
+      anchor: table.anchor,
+      name: table.name,
+      rows: table.rows,
+      isMap: table.isMap,
+      parentAnchor: table.parentAnchor,
+      fields: table.fields.map((field) => ({
+        path: field.path,
+        present: field.present,
+        kinds: [...field.kinds],
+        unique: field.unique,
+        ...(field.suggest ? { suggest: publicSuggestion(field.suggest) } : {}),
+      })),
+    })),
+    truncated: inspection.truncated,
+  };
+}
+
+function publicSuggestion(suggestion: Suggestion): Suggestion {
+  if ('ambiguous' in suggestion) return { ambiguous: suggestion.ambiguous };
+  if (suggestion.type === 'geo') return { type: 'geo', form: suggestion.form };
+  return {
+    type: 'datetime',
+    parse: suggestion.parse,
+    out: suggestion.out,
+    needsBaseDate: suggestion.needsBaseDate,
+  };
+}
+
+/** Shape-only converter inspection rendered from the full internal detector result. */
 function renderInspection(inspection: Inspection): string {
   const lines = [
     `source: ${inspection.source}`,

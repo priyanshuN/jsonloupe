@@ -55,8 +55,8 @@ only export paths the client explicitly requests.
 
 Only your question and the document's **shape** — field names, types, and array
 lengths — are sent. Values are never transmitted. The UI's "sent to model"
-disclosure shows the exact payload before anything is sent. The model returns a
-query string in a constrained grammar (a JSONPath subset); it is parsed and
+disclosure records the exact payload sent after you press Ask. The model returns
+a query string in a constrained grammar (a JSONPath subset); it is parsed and
 executed by jsonloupe's own query engine in the worker — there is no `eval` and
 no code execution path from model output.
 

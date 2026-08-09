@@ -110,7 +110,11 @@ export function buildSentPayload(apiKey: string, schema: string, question: strin
   };
 }
 
-async function viaOpenRouter(apiKey: string, sent: SentPayload): Promise<string> {
+async function viaOpenRouter(
+  apiKey: string,
+  sent: SentPayload,
+  signal?: AbortSignal,
+): Promise<string> {
   const resp = await fetch(sent.endpoint, {
     method: 'POST',
     headers: {
@@ -120,6 +124,7 @@ async function viaOpenRouter(apiKey: string, sent: SentPayload): Promise<string>
       'X-Title': 'jsonloupe',
     },
     body: JSON.stringify(sent.body),
+    signal,
   });
   if (!resp.ok) {
     const body = (await resp.text()).slice(0, 200);
@@ -130,7 +135,11 @@ async function viaOpenRouter(apiKey: string, sent: SentPayload): Promise<string>
   return extractQuery((data.choices?.[0]?.message?.content ?? '').trim());
 }
 
-async function viaAnthropic(apiKey: string, sent: SentPayload): Promise<string> {
+async function viaAnthropic(
+  apiKey: string,
+  sent: SentPayload,
+  signal?: AbortSignal,
+): Promise<string> {
   const resp = await fetch(sent.endpoint, {
     method: 'POST',
     headers: {
@@ -140,6 +149,7 @@ async function viaAnthropic(apiKey: string, sent: SentPayload): Promise<string> 
       'content-type': 'application/json',
     },
     body: JSON.stringify(sent.body),
+    signal,
   });
   if (!resp.ok) {
     const body = (await resp.text()).slice(0, 200);
@@ -151,7 +161,11 @@ async function viaAnthropic(apiKey: string, sent: SentPayload): Promise<string> 
 }
 
 /** Send the prebuilt payload (the same object the disclosure renders). */
-export async function translateToQuery(apiKey: string, sent: SentPayload): Promise<string> {
-  if (sent.provider === 'anthropic') return viaAnthropic(apiKey, sent);
-  return viaOpenRouter(apiKey, sent);
+export async function translateToQuery(
+  apiKey: string,
+  sent: SentPayload,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (sent.provider === 'anthropic') return viaAnthropic(apiKey, sent, signal);
+  return viaOpenRouter(apiKey, sent, signal);
 }

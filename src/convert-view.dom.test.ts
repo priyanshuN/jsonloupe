@@ -51,6 +51,8 @@ interface Harness {
   setNote: ReturnType<typeof vi.fn>;
   setPreview(value: 'ok' | 'errors' | 'throw'): void;
   setRun(value: 'xlsx' | 'csv' | 'errors' | 'throw'): void;
+  /** What the shell does when the open document's content changes. */
+  editDocument(): void;
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] {
@@ -115,6 +117,9 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
 
   let previewMode: 'ok' | 'errors' | 'throw' = 'ok';
   let runMode: 'xlsx' | 'csv' | 'errors' | 'throw' = 'xlsx';
+  // The shell's document revision: same number means the same document, so a
+  // second open() is a revisit rather than a new detection.
+  let revision = 1;
   const downloads = vi.fn();
   const toasts = vi.fn();
   const setLead = vi.fn();
@@ -181,6 +186,7 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
     setNote,
     docTitle: () => 'Orders August',
     docStem: () => 'orders-august',
+    docRevision: () => revision,
   };
 
   return {
@@ -195,6 +201,7 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
     setNote,
     setPreview(value) { previewMode = value; },
     setRun(value) { runMode = value; },
+    editDocument() { revision++; },
   };
 }
 
@@ -211,12 +218,93 @@ function input(element: HTMLElement): void {
   element.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function keydown(element: HTMLElement, key: string): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  element.dispatchEvent(event);
+  return event;
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.replaceChildren();
 });
 
 describe('converter view workflow', () => {
+  it('exposes table selection and moves it with either rail axis', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    expect(h.els.tables.getAttribute('role')).toBe('grid');
+    expect(h.els.tables.getAttribute('aria-label')).toBe('Detected tables');
+    expect(h.els.tables.getAttribute('aria-rowcount')).toBe('2');
+    const rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.getAttribute('role') === 'row')).toBe(true);
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(rows[0].tabIndex).toBe(0);
+    expect(rows[1].getAttribute('aria-selected')).toBe('false');
+    expect(rows[1].tabIndex).toBe(-1);
+
+    const expectSelected = (index: number, name: string): void => {
+      expect(rows[index].getAttribute('aria-selected')).toBe('true');
+      expect(rows[index].tabIndex).toBe(0);
+      expect(rows[1 - index].getAttribute('aria-selected')).toBe('false');
+      expect(rows[1 - index].tabIndex).toBe(-1);
+      expect(document.activeElement).toBe(rows[index]);
+      expect(h.els.detailName.textContent).toBe(name);
+    };
+
+    rows[0].focus();
+    expect(keydown(rows[0], 'ArrowRight').defaultPrevented).toBe(true);
+    expectSelected(1, 'items');
+    keydown(rows[1], 'ArrowLeft');
+    expectSelected(0, 'orders');
+    keydown(rows[0], 'ArrowDown');
+    expectSelected(1, 'items');
+    keydown(rows[1], 'ArrowUp');
+    expectSelected(0, 'orders');
+
+    rows[1].focus();
+    expect(keydown(rows[1], 'Enter').defaultPrevented).toBe(true);
+    expectSelected(1, 'items');
+    rows[0].focus();
+    expect(keydown(rows[0], ' ').defaultPrevented).toBe(true);
+    expectSelected(0, 'orders');
+  });
+
+  it('keeps row clicks selectable without stealing checkbox or name interactions', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    let rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
+    rows[1].click();
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+
+    const include = rows[0].querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    include.click();
+    expect(include.checked).toBe(false);
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+
+    const name = rows[0].querySelector<HTMLInputElement>('.convert-name')!;
+    name.click();
+    keydown(name, 'ArrowDown');
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+    name.value = 'shipments';
+    change(name);
+
+    rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+    rows[0].querySelector<HTMLElement>('.convert-where')!.click();
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('shipments');
+  });
+
   it('opens a real mapping and keeps table, column, format, and preview edits connected', async () => {
     const h = makeHarness();
     await h.view.open();
@@ -386,6 +474,145 @@ describe('converter view workflow', () => {
     await settlePreview();
     expect(h.els.mappingName.value).toBe('shared');
     expect(h.els.saved.value).toBe('');
+  });
+
+  it('keeps an edited mapping across a revisit and re-detects when the document changes', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+    const rename = h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!;
+    rename.value = 'order id';
+    change(rename);
+    await settlePreview();
+    expect(h.view.isDirty()).toBe(true);
+
+    // Stepping out to the tree and back is a revisit: same document, same work.
+    await h.view.open();
+    await settlePreview();
+    expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(1);
+    expect(h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value).toBe('order id');
+
+    // An edit to the document itself is a different document to detect against,
+    // and losing the mapping to it is said rather than left to be noticed.
+    h.editDocument();
+    await h.view.open();
+    await settlePreview();
+    expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(2);
+    expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('detected again'));
+    expect(h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value).not.toBe('order id');
+    expect(h.view.isDirty()).toBe(false);
+  });
+
+  it('restores the drafted mapping when the starter entry is picked again', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+    const drafted = h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value;
+
+    const rename = h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!;
+    rename.value = 'renamed';
+    change(rename);
+    await settlePreview();
+    expect(h.view.isDirty()).toBe(true);
+
+    h.els.saved.value = '';
+    change(h.els.saved);
+    await settlePreview();
+
+    expect(h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value).toBe(drafted);
+    expect(h.els.mappingName.value).toBe('Orders August mapping');
+    expect(h.els.forget.disabled).toBe(true);
+    expect(h.view.isDirty()).toBe(false);
+    // The loss is stated: this entry replaces work, and the list gives no undo.
+    expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('edits to it are gone'));
+  });
+
+  it('names what needs review before the download, including the tables not on screen', async () => {
+    const h = makeHarness();
+    vi.mocked(h.callbacks.preview).mockResolvedValue({
+      tables: [{
+        name: 'orders',
+        columns: ['id', 'dispatchDate'],
+        rows: [['101', '2026-08-08']],
+        total: 40,
+        skipped: 2,
+        widest: { column: 'id', chars: 3 },
+      }],
+      warnings: [
+        { table: 'orders', column: 'dispatchDate', code: 'BAD_DATETIME', count: 4 },
+        { table: 'items', column: 'sku', code: 'CELL_TOO_LONG', count: 7 },
+      ],
+    });
+    await h.view.open();
+    await settlePreview();
+
+    const note = h.els.previewNote.textContent ?? '';
+    expect(note).toContain('40 rows');
+    expect(note).toContain('2 rows skipped');
+    // The kind, not a count of anonymous values: a date that could not be read
+    // is a column to fix; a cell too long is Excel's problem with a good one.
+    expect(note).toContain('4 × date/time could not be read');
+    expect(note).not.toMatch(/values? need review/);
+    // The other table is going into the same file, whether or not it is open.
+    expect(note).toContain('7 in other tables');
+  });
+
+  it('says the conversion is running, refuses a second one, and survives its failure', async () => {
+    const h = makeHarness();
+    h.els.download.append('download');
+    h.els.download.title = 'Convert and download';
+    const view = new ConvertView(h.els, h.callbacks);
+    await view.open();
+    await settlePreview();
+
+    let release = (): void => {};
+    vi.mocked(h.callbacks.run).mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { format: 'xlsx', bytes: new Uint8Array([1]), rows: 2, report: { tables: [], warnings: [] } };
+    });
+
+    const running = view.downloadResult();
+    expect(h.els.download.disabled).toBe(true);
+    expect(h.els.download.getAttribute('aria-busy')).toBe('true');
+    expect(h.els.download.lastChild?.textContent).toBe('converting…');
+    expect(h.els.previewNote.textContent).toContain('writing the file');
+
+    // A second press while the first is still writing would convert the same
+    // document twice and hand back whichever finished last.
+    await view.downloadResult();
+    expect(vi.mocked(h.callbacks.run)).toHaveBeenCalledTimes(1);
+
+    release();
+    await running;
+    expect(h.els.download.disabled).toBe(false);
+    expect(h.els.download.getAttribute('aria-busy')).toBe('false');
+    expect(h.els.download.lastChild?.textContent).toBe('download');
+    expect(h.els.previewNote.textContent).not.toContain('writing the file');
+
+    vi.mocked(h.callbacks.run).mockRejectedValue(new Error('worker died'));
+    await view.downloadResult();
+    // Nothing was lost but the wait, and the button that says so is live again.
+    expect(h.els.previewNote.textContent).toContain('conversion failed: worker died');
+    expect(h.els.previewNote.textContent).toContain('try again');
+    expect(h.els.download.disabled).toBe(false);
+    expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('conversion failed'), 'bad');
+  });
+
+  it('offers a way back when detection itself fails', async () => {
+    const h = makeHarness();
+    vi.mocked(h.callbacks.inspect).mockRejectedValueOnce(new Error('worker unavailable'));
+    await h.view.open();
+
+    expect(h.els.count.textContent).toContain('could not be looked through');
+    expect(h.els.previewNote.textContent).toContain('detection failed: worker unavailable');
+    const retry = h.els.tables.querySelector('button');
+    expect(retry?.textContent).toBe('try again');
+
+    retry!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    await settlePreview();
+    expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(2);
+    expect(h.els.tables.querySelectorAll('.convert-table')).toHaveLength(2);
   });
 
   it('renders the no-table state and explains that there is nothing to convert', async () => {

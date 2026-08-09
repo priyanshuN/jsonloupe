@@ -574,7 +574,14 @@ html.returning #landing { display: none; }
   display: grid;
   grid-template-columns: 250px 1fr;
   height: 100vh;
+  height: 100dvh;
 }
+
+/* Compact-shell controls are real markup so their relationships and focus
+   behavior do not depend on generated content. They stay completely out of
+   desktop layout; the <=900px shell block turns them on. */
+#mobile-shell-bar,
+#sidebar-close { display: none; }
 
 /* ---------- buttons & inputs ---------- */
 
@@ -1006,6 +1013,24 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   cursor: pointer;
 }
 .doc-row:hover { background: var(--bg-hover); }
+.doc-row-open {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.doc-row-open:hover,
+.doc-row-open:active {
+  border-color: transparent;
+  background: transparent;
+}
 /* 7b: the open document is a BAND, edge to edge — the 3px --brand rail is gone.
    It was a sixth left-edge marker and the only one not painted in --accent, and
    the rail is what forced every row to reserve 3px of border so selection could
@@ -1042,9 +1067,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: none;
   gap: var(--gap-1);
 }
-.doc-row:hover .doc-row-actions { display: flex; }
+.doc-row:hover .doc-row-actions,
+.doc-row:focus-within .doc-row-actions { display: flex; }
 .doc-row.pinned .doc-row-actions { display: flex; }
-.doc-row.pinned:not(:hover) .doc-row-actions > :not(.pin) { display: none; }
+.doc-row.pinned:not(:hover):not(:focus-within) .doc-row-actions > :not(.pin) { display: none; }
 /* Rule 11: a control sitting ON chrome takes the canvas — in the sidebar these
    were --bg-elevated-2, which is only 3 units off #eef1f6 and stopped reading
    as controls at all once the sidebar went tinted. Dark never had the problem
@@ -1438,15 +1464,27 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 
 /* Desktop-first: below ~1100px the hero stacks so a phone visitor can still
-   read the copy and paste. No further mobile work is in scope. */
+   read the copy and paste. Everything below the hero now has to hold up on a
+   phone as well — the workbench does, and this is the page the phone visitor
+   actually arrives on. */
 @media (max-width: 1100px) {
   .lp-hero { grid-template-columns: 1fr; gap: 34px; padding: 44px 24px 36px; }
   .lp-hero h1 { font-size: 42px; letter-spacing: -1.4px; }
   .lp-header { gap: 18px; padding: var(--gap-4) 24px; flex-wrap: wrap; }
+  .lp-nav { flex-wrap: wrap; }
   .lp-band, .lp-split-cell { padding: 40px 24px; }
   .lp-grid { grid-template-columns: 1fr; }
   .lp-split { grid-template-columns: 1fr; }
   .lp-privacy, .lp-agents { grid-template-columns: 1fr; gap: 28px; }
+  /* A grid child's automatic minimum size is its min-content width, and the
+     MCP install line is one long unbreakable command: it widened the whole
+     band past a 390px viewport and clipped the paragraph beside it. The band's
+     children shrink to the column; the command scrolls inside its own box,
+     which it was already built to do. */
+  .lp-privacy > *,
+  .lp-agents > *,
+  .lp-split > *,
+  .lp-grid > * { min-width: 0; }
   .lp-footer { padding: 20px 24px; flex-wrap: wrap; }
 }
 
@@ -2296,6 +2334,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .chip-del:hover { color: var(--danger); }
 
 /* ---------- run mode: producer strip + result pane ---------- */
+
+/* The phone-only source/workspace switch is a shell control, not a third Run
+   state. Desktop continues to show both panes and never pays for this row. */
+#run-mobile-switch { display: none; }
 
 /* The producer strip itself, its rows, its status line, its failure line and
    its console shell are all the ask panel's, shared by selector above rather
@@ -4152,7 +4194,398 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 @media (max-width: 900px) {
   #convert-body { grid-template-columns: 180px 1fr; }
   .convert-col { grid-template-columns: auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, var(--ctl-h-mini)); }
-  .convert-inline-field { display: none; }
+}
+
+/* ---------- responsive workbench shell ---------- */
+
+/* 900px is the shell boundary: below it the 250px navigation column becomes
+   an overlay, returning the full viewport width to every document surface.
+   The public landing keeps its existing :has-based full-bleed contract; its
+   shell row remains absent until the visitor is inside the app. */
+@media (max-width: 900px) {
+  html,
+  body { overflow: hidden; }
+
+  #app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    max-width: 100vw;
+  }
+
+  #mobile-shell-bar {
+    grid-column: 1;
+    grid-row: 1;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: var(--gap-2);
+    min-width: 0;
+    min-height: calc(var(--bar-h) + env(safe-area-inset-top));
+    padding: max(var(--gap-2), env(safe-area-inset-top)) max(var(--gap-3), env(safe-area-inset-right)) var(--gap-2) max(var(--gap-3), env(safe-area-inset-left));
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-chrome);
+  }
+  .mobile-shell-brand {
+    color: var(--text);
+    font: 700 var(--fs-code) var(--sans);
+  }
+  #app:has(#landing:not([hidden]):not(.landing--app)) #mobile-shell-bar { display: none; }
+
+  #content {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  #sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(320px, calc(100vw - 48px));
+    height: 100vh;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    border-right-color: var(--border-strong);
+    box-shadow: var(--shadow);
+    visibility: hidden;
+    transform: translateX(-100%);
+    transition: transform var(--dur) var(--ease), visibility var(--dur) var(--ease);
+  }
+  #sidebar.drawer-open {
+    visibility: visible;
+    transform: translateX(0);
+  }
+  #sidebar-close { display: inline-flex; }
+  #sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--bg) 58%, transparent);
+    backdrop-filter: blur(2px);
+    cursor: default;
+  }
+
+  #viewer,
+  #pane-area,
+  #pane-area > * { min-width: 0; }
+
+  /* Mapping management is a disclosure strip, so at drawer widths it wraps
+     in document order instead of becoming a horizontally clipped form. */
+  #convert-mappings:not([hidden]) {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-2);
+    min-height: var(--bar-h);
+    padding: var(--gap-2) var(--gap-3);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-chrome-2);
+  }
+  #convert-mappings > .spacer { flex-basis: 100%; }
+  #convert-saved,
+  .convert-map-name {
+    flex: 1 1 160px;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+  }
+  .convert-mappings-note { flex-basis: 100%; }
+  .convert-inline-field { display: flex; }
+
+  /* The bottom edge clears phone home indicators without changing the status
+     strip's desktop geometry. */
+  #status-bar {
+    min-height: calc(32px + env(safe-area-inset-bottom));
+    padding-bottom: max(5px, env(safe-area-inset-bottom));
+  }
+}
+
+/* 760px is the content boundary: controls reflow, and layouts that depend on
+   two useful columns become one full-width surface (or a vertical pair). */
+@media (max-width: 760px) {
+  #toolbar {
+    align-items: center;
+    gap: var(--gap-2) var(--gap-3);
+    overflow: visible;
+  }
+  #toolbar > * { max-width: 100%; }
+  .tb-doc {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  #doc-title {
+    flex: 1 1 140px;
+    max-width: none;
+  }
+  #mode-switch { flex: 1 1 210px; }
+  #mode-switch button {
+    flex: 1;
+    padding-inline: var(--gap-2);
+  }
+  .tb-search {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+  #ask-btn { flex-shrink: 0; }
+  .tb-tools {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding-top: var(--gap-2);
+    padding-left: 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  #ask-panel {
+    max-width: 100%;
+    max-height: 58vh;
+    max-height: 58dvh;
+  }
+  .ask-row,
+  #ask-query-line,
+  .ask-actions {
+    flex-wrap: wrap;
+  }
+  #ask-box,
+  #ask-key-input {
+    min-width: 0;
+    max-width: none;
+  }
+  #ask-box { flex: 1 1 220px; }
+  #ask-key { margin-left: 0; }
+  #ask-key-row > #ask-key-input { flex-basis: 100%; }
+  #ask-query-edit { flex-basis: 220px; }
+  #ask-result {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .ask-table {
+    width: max-content;
+    min-width: 100%;
+  }
+  .ask-group { flex-wrap: wrap; }
+  .ask-group-key { min-width: 0; }
+  .disc-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--gap-1);
+  }
+  .disc-key { min-width: 0; }
+
+  /* The 900px treatment lets compare's filter bar scroll sideways, which on a
+     phone parks `reordered`, `needs review` and `collapse` off the right edge
+     with nothing to say they are there. Below 760 the bar wraps instead, and
+     the filter group takes a row of its own so its chips can wrap inside it —
+     it is `flex: 0 0 auto` above, so it sizes to max-content and never would. */
+  .sem-toolbar {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .sem-filters {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  /* Split stays a comparison of the same two surfaces, but the seam becomes a
+     vertical scroll boundary. The persisted desktop --split-w is intentionally
+     ignored here, not removed, so returning to desktop restores it. */
+  #pane-area.split {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  #pane-area.split > #tree-pane,
+  #pane-area.split > #code-view {
+    flex: 1 0 220px;
+    min-height: 220px;
+  }
+  #pane-area.split > #split-divider { display: none; }
+
+  /* Run has three existing choices already: source tree/code and workspace
+     functions/result. This switch only allocates the phone width between those
+     two groups; it never reparents or duplicates their controls. */
+  #viewer[data-pane='run'] #run-mobile-switch {
+    display: flex;
+    flex-shrink: 0;
+    align-self: stretch;
+    gap: var(--gap-2);
+    min-height: var(--bar-h);
+    padding: var(--gap-2) var(--gap-3);
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--bg-chrome-2);
+  }
+  #run-mobile-switch button { flex: 1; }
+  #pane-area.run > #tree-pane,
+  #pane-area.run > #code-view,
+  #pane-area.run > #run-pane { flex: 1 1 100%; }
+  #viewer[data-pane='run'][data-mobile-run='workspace'] #tree-pane,
+  #viewer[data-pane='run'][data-mobile-run='workspace'] #code-view,
+  #viewer[data-pane='run'][data-mobile-run='source'] #run-pane { display: none !important; }
+  #run-pane { border-left: 0; }
+  .run-head,
+  .run-bar { flex-wrap: wrap; }
+  .run-name-input,
+  .run-lib-search {
+    flex: 1 1 150px;
+    max-width: none;
+    min-width: 0;
+  }
+  .run-bar > .spacer { flex-basis: 100%; }
+  #run-producer {
+    max-height: 52vh;
+    max-height: 52dvh;
+  }
+
+  /* The detected-table rail becomes a horizontal selector. The selected table
+     remains a full grid row to ConvertView, so its roving tabindex and arrow
+     navigation continue to work on either axis. */
+  .convert-bar {
+    align-items: center;
+    gap: var(--gap-2);
+  }
+  .convert-bar > .sem-heading,
+  .convert-bar > .convert-outcome { flex: 1 1 100%; }
+  .convert-bar > .spacer { display: none; }
+  .convert-inline-field {
+    flex: 1 1 140px;
+    width: auto;
+    max-width: calc(50% - var(--gap-1));
+  }
+  #convert-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  #convert-tables {
+    flex-direction: row;
+    max-width: 100%;
+    max-height: 118px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    scroll-snap-type: x proximity;
+  }
+  .convert-table {
+    flex: 0 0 min(78vw, 280px);
+    min-width: 0;
+    border-right: 1px solid var(--border);
+    scroll-snap-align: start;
+  }
+  .convert-table.on { box-shadow: inset 0 -2px 0 var(--accent); }
+  #convert-cols-head,
+  #convert-preview-head { flex-wrap: wrap; }
+  #convert-detail-src { flex: 1 1 100%; }
+  #convert-preview-note {
+    flex: 1 1 auto;
+    margin-left: 0;
+  }
+  /* Three regions cannot each hold a share of a phone viewport: the preview's
+     min-height squeezed this editor to a 16px scroll strip, so the mapping
+     controls were present but unreachable. Below 760 the detail column is ONE
+     scroll surface in document order — columns at their natural height, then
+     the preview. */
+  #convert-cols {
+    max-width: 100%;
+    max-height: none;
+    padding-inline: var(--gap-3);
+    overflow-y: visible;
+  }
+  .convert-col {
+    grid-template-columns: auto minmax(0, 1fr) repeat(3, var(--ctl-h-mini));
+    grid-template-rows: auto auto auto auto;
+    padding-block: var(--gap-2);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .convert-col > .chk {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .convert-colname {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .convert-col > button:nth-of-type(1) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .convert-col > button:nth-of-type(2) {
+    grid-column: 4;
+    grid-row: 1;
+  }
+  .convert-col > button:nth-of-type(3) {
+    grid-column: 5;
+    grid-row: 1;
+  }
+  .convert-mode {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .convert-source {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .convert-col > datalist { display: none; }
+  .convert-col-options {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+  .convert-col-options label { flex-wrap: wrap; }
+  .convert-col-options input:where(:not([type='checkbox'])) {
+    flex: 1 1 150px;
+    max-width: 100%;
+  }
+  #convert-detail { overflow-y: auto; }
+  #convert-preview {
+    flex: 0 0 auto;
+    min-height: 180px;
+    max-width: 100%;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 420px) {
+  /* Search keeps its 760 basis: at 100% it pushed `ask` onto a row of its own,
+     spending a whole toolbar row on one 46px button. */
+  #mode-switch { flex-basis: 100%; }
+  .convert-inline-field {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  #convert-mappings > .standing-label { flex-basis: 100%; }
+  #convert-saved,
+  .convert-map-name { flex-basis: 100%; }
+  .run-head > .spacer { flex-basis: 100%; }
+  #toast {
+    width: calc(100vw - 2 * var(--gap-3));
+    max-width: none;
+  }
+}
+
+/* Hover-only recent actions do not exist on a touch screen. Draw the full
+   action cluster at rest and give every control a deliberate touch target. */
+@media (pointer: coarse) {
+  .doc-row { padding-right: calc(3 * var(--bar-h) + 2 * var(--gap-1) + var(--gap-2)); }
+  .doc-row-actions {
+    top: 50%;
+    display: flex;
+    transform: translateY(-50%);
+  }
+  .doc-row.pinned:not(:hover):not(:focus-within) .doc-row-actions > :not(.pin) { display: inline-flex; }
+  .doc-row-actions button {
+    min-width: var(--bar-h);
+    min-height: var(--bar-h);
+  }
 }
 
 /* ---------- reduced motion ---------- */

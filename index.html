@@ -124,7 +124,17 @@ SPDX-License-Identifier: MIT -->
     </symbol>
   </svg>
   <div id="app">
-    <aside id="sidebar">
+    <!-- On compact screens this is the one persistent shell row. The sidebar
+         becomes a modal drawer beneath it; keeping the trigger outside that
+         drawer gives Escape and light-dismiss somewhere stable to return
+         focus to. Desktop CSS removes this row entirely. -->
+    <div id="mobile-shell-bar">
+      <button id="sidebar-open" type="button" aria-controls="sidebar" aria-expanded="false"
+        title="Open documents">documents</button>
+      <span class="spacer"></span>
+      <span class="mobile-shell-brand">json<span class="brand-loupe">loupe</span></span>
+    </div>
+    <aside id="sidebar" aria-label="Documents">
       <div class="side-head">
         <a class="brand" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec"><img class="brand-mark" src="/favicon.svg" alt="" width="27" height="27" /><span>json<span class="brand-loupe">loupe</span></span></a>
         <!-- The drawn plus, not the character: `+` carries its own optical
@@ -132,6 +142,8 @@ SPDX-License-Identifier: MIT -->
              exists. Keeps its word — this is the sidebar's one CTA, and it has
              the room. -->
         <button id="new-btn" title="New document"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>new</button>
+        <button id="sidebar-close" class="btn-icon btn-quiet" type="button"
+          title="Close documents" aria-label="Close documents">×</button>
       </div>
       <div class="side-label">Recents</div>
       <div id="recents"></div>
@@ -155,6 +167,7 @@ SPDX-License-Identifier: MIT -->
         <a class="about-link" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec">about</a>
       </div>
     </aside>
+    <button id="sidebar-scrim" type="button" tabindex="-1" aria-label="Close documents" hidden></button>
     <main id="content">
       <section id="landing">
         <header class="lp-header">
@@ -272,8 +285,7 @@ SPDX-License-Identifier: MIT -->
                  spreadsheet-shaped reader mistakes for the converter. -->
             <p class="lp-body">Filter, pluck, group and count across the whole document — evaluated in the worker, never on the main thread. Any array opens as a sortable table, and the table or the result downloads as exact-digit CSV.</p>
             <pre class="lp-code">$.tasks[?(@.status == <span class="lp-str">'FAILED'</span>)]
-  | group(@.failureReason)
-  | count()</pre>
+  | group(@.failureReason)</pre>
           </section>
           <section class="lp-split-cell">
             <h2 class="lp-h2 lp-h2-sm">Diff that understands identity</h2>
@@ -303,7 +315,7 @@ SPDX-License-Identifier: MIT -->
         <section class="lp-band lp-privacy" id="privacy">
           <div>
             <h2 class="lp-h2 lp-h2-sm">Your documents never leave your machine</h2>
-            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>Ask</strong> — the optional English-to-query feature — stays off until you add your own API key, and even then it sends only the document's shape: field names and types, never values, shown to you in full before anything is sent.</p>
+            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>Ask</strong> — the optional English-to-query feature — stays off until you add your own API key, and even then it sends only the document's shape: field names and types, never values. After you press Ask, “sent to model” records the exact request.</p>
           </div>
           <div class="lp-facts">
             <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">3 · all opt-in Ask</span></div>
@@ -499,7 +511,15 @@ SPDX-License-Identifier: MIT -->
             </div>
           </div>
         </div>
-        <div id="ask-panel" hidden>
+        <!-- At phone widths Run uses one full-width surface at a time. This is
+             deliberately independent of the source's tree/code switch and the
+             workspace's functions/result switch: it only chooses which pane
+             receives the available width. -->
+        <div class="mode-switch" id="run-mobile-switch" role="group" aria-label="Run pane">
+          <button type="button" data-mobile-run="source" aria-pressed="false">source</button>
+          <button type="button" data-mobile-run="workspace" class="on" aria-pressed="true">workspace</button>
+        </div>
+        <div id="ask-panel" aria-busy="false" hidden>
           <div class="ask-row">
             <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
             <button id="ask-run" class="btn-icon primary" title="Ask this question"
@@ -527,7 +547,7 @@ SPDX-License-Identifier: MIT -->
             <summary>sent to model</summary>
             <div id="ask-disclosure-body"></div>
           </details>
-          <div id="ask-status" hidden></div>
+          <div id="ask-status" aria-live="polite" hidden></div>
           <div id="ask-result" hidden></div>
           <div id="ask-saved"></div>
         </div>

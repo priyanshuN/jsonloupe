@@ -228,6 +228,45 @@ for (const declaration of [/min-width:\s*0/, /overflow:\s*hidden/, /text-overflo
   }
 }
 
+// ---------- compact-shell layout regressions ----------
+
+/** Every `@media (max-width: <width>px)` body, joined — there is more than one. */
+function compactBodies(width) {
+  let out = '';
+  for (const m of css.matchAll(new RegExp(`@media \\(max-width: ${width}px\\)`, 'g'))) {
+    const [open, end] = blockRange(m.index);
+    out += css.slice(open + 1, end - 1) + '\n';
+  }
+  return out;
+}
+
+/** The body of `selector` inside `source`, which is one or more media bodies. */
+function ruleIn(source, selector) {
+  const at = source.indexOf(`${selector} {`);
+  if (at < 0) return '';
+  return source.slice(at, source.indexOf('}', at));
+}
+
+// Measured in a 390px viewport: three stacked regions each claiming a share of
+// it rendered the converter's column editor 16px tall out of 483px of content,
+// so the mapping controls were present and unreachable.
+const compact760 = compactBodies(760);
+for (const [selector, declaration] of [
+  ['#convert-detail', /overflow-y:\s*auto/],
+  ['#convert-cols', /max-height:\s*none/],
+  ['#convert-preview', /flex:\s*0 0 auto/],
+]) {
+  if (!declaration.test(ruleIn(compact760, selector))) {
+    errors.push(`style.css: ${selector} is missing ${declaration.source} below 760px — the converter detail must scroll as one surface`);
+  }
+}
+
+// A full-width search field pushes `ask` onto a toolbar row of its own, where
+// one 46px button costs a whole row of a phone screen.
+if (/flex-basis:\s*100%/.test(ruleIn(compactBodies(420), '.tb-search'))) {
+  errors.push('style.css: .tb-search must keep its 760px basis below 420px — full width strands #ask-btn on its own row');
+}
+
 // ---------- dead tokens ----------
 
 const definedTokens = new Set();

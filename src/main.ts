@@ -122,6 +122,10 @@ const landing = $('#landing');
 const viewer = $('#viewer');
 const pasteBox = $<HTMLTextAreaElement>('#paste-box');
 const parseError = $('#parse-error');
+const sidebar = $('#sidebar');
+const sidebarOpenBtn = $<HTMLButtonElement>('#sidebar-open');
+const sidebarCloseBtn = $<HTMLButtonElement>('#sidebar-close');
+const sidebarScrim = $<HTMLButtonElement>('#sidebar-scrim');
 const recentsEl = $('#recents');
 const docTitleEl = $('#doc-title');
 const docStatsEl = $('#doc-stats');
@@ -202,6 +206,90 @@ const codeBarOps = $('#code-bar-ops');
 const collapseBtn = $<HTMLButtonElement>('#collapse-btn');
 const treeCopyBtn = $<HTMLButtonElement>('#fmt-btn');
 const treeDownloadBtn = $<HTMLButtonElement>('#dl-btn');
+
+// ---------- compact Documents drawer ----------
+
+// Width is a layout concern, so one media query owns the sidebar's semantic
+// state as well as its CSS state. A closed off-canvas rail is inert and hidden
+// from the accessibility tree; the unchanged desktop rail is neither.
+const compactShell = window.matchMedia('(max-width: 900px)');
+let documentsDrawerOpen = false;
+let documentsReturnFocus: HTMLElement | null = null;
+
+function paintDocumentsDrawer(): void {
+  const open = compactShell.matches && documentsDrawerOpen;
+  sidebar.classList.toggle('drawer-open', open);
+  sidebarScrim.hidden = !open;
+  sidebarOpenBtn.setAttribute('aria-expanded', String(open));
+  document.body.classList.toggle('documents-open', open);
+  if (compactShell.matches) {
+    sidebar.inert = !open;
+    sidebar.setAttribute('role', 'dialog');
+    sidebar.setAttribute('aria-hidden', String(!open));
+    if (open) sidebar.setAttribute('aria-modal', 'true');
+    else sidebar.removeAttribute('aria-modal');
+  } else {
+    sidebar.inert = false;
+    sidebar.removeAttribute('role');
+    sidebar.removeAttribute('aria-hidden');
+    sidebar.removeAttribute('aria-modal');
+  }
+}
+
+function openDocumentsDrawer(): void {
+  if (!compactShell.matches || documentsDrawerOpen) return;
+  documentsReturnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : sidebarOpenBtn;
+  documentsDrawerOpen = true;
+  paintDocumentsDrawer();
+  requestAnimationFrame(() => sidebarCloseBtn.focus());
+}
+
+function closeDocumentsDrawer(returnFocus = true): void {
+  const wasOpen = documentsDrawerOpen;
+  documentsDrawerOpen = false;
+  paintDocumentsDrawer();
+  if (!returnFocus || !wasOpen) return;
+  const target = documentsReturnFocus?.isConnected ? documentsReturnFocus : sidebarOpenBtn;
+  requestAnimationFrame(() => target.focus());
+}
+
+function drawerFocusable(): HTMLElement[] {
+  return [...sidebar.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )].filter((el) => !el.hidden && el.getClientRects().length > 0);
+}
+
+sidebarOpenBtn.addEventListener('click', openDocumentsDrawer);
+sidebarCloseBtn.addEventListener('click', () => closeDocumentsDrawer());
+sidebarScrim.addEventListener('click', () => closeDocumentsDrawer());
+document.addEventListener('keydown', (event) => {
+  if (!documentsDrawerOpen) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeDocumentsDrawer();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = drawerFocusable();
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+compactShell.addEventListener('change', () => {
+  closeDocumentsDrawer(false);
+  scheduleResponsiveRefresh();
+});
+paintDocumentsDrawer();
 
 // Split-view line map: `$`-path → 1-based line in the code editor.
 let codeLineMap = new Map<string, number>();
@@ -317,6 +405,7 @@ function showPane(p: Pane): void {
   // ops group upstairs when the tree stands alone, the split strip when it does
   // not (contract rule 10, revised).
   viewer.dataset.pane = p;
+  paintMobileRunSurface();
   // Top-layer panels outlive the pane that opened them (rule 21) — the plan
   // panel would otherwise still be floating over the tree.
   if (p !== 'semantic') closeSemPlan();
@@ -1111,6 +1200,7 @@ function persistCurrentSnapshot(
 // learns that it is no longer about this document.
 function markCurrentContentEdited(): void {
   currentDocumentRevision++;
+  resetAskPanel();
   markRunResultStale();
   if (!currentProvenance) return;
   currentProvenance = null;
@@ -1319,10 +1409,14 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
 // After an inline tree edit, pull the fresh serialized text so download/zstd/copy
 // and (if open) the code editor stay in sync with the mutated document.
 async function refreshAfterEdit(documentToken: number): Promise<void> {
+  if (documentToken !== currentDocumentToken) return;
+  // setValue has already mutated the worker document. Invalidate anything
+  // derived from the old content before a potentially expensive stringify can
+  // give an in-flight Ask time to run its old-schema query on the new value.
+  markCurrentContentEdited();
   const r = await call<{ text: string }>({ type: 'stringify', space: 2 });
   if (documentToken !== currentDocumentToken) return;
   currentText = r.text;
-  markCurrentContentEdited();
   docStatsEl.textContent = `${fmtBytes(currentText.length)} · edited`;
   persistCurrentSnapshot(currentText, null);
   if (!codeView.hidden) void loadCodeContent(); // split (or code) is showing → refresh it
@@ -1332,10 +1426,13 @@ async function refreshAfterEdit(documentToken: number): Promise<void> {
 // structure/row count may differ, so refresh the tree total too, then reuse the
 // same stringify → persist → reload-code path Apply/setValue already use.
 async function refreshAfterDocChange(totalRows: number, documentToken: number): Promise<void> {
+  if (documentToken !== currentDocumentToken) return;
+  // undo/redo has already changed the worker document; cancel stale Ask work
+  // before serializing the replacement back to the main thread.
+  markCurrentContentEdited();
   const r = await call<{ text: string }>({ type: 'stringify', space: 2 });
   if (documentToken !== currentDocumentToken) return;
   currentText = r.text;
-  markCurrentContentEdited();
   docStatsEl.textContent = `${fmtBytes(currentText.length)} · edited`;
   persistCurrentSnapshot(currentText, null);
   tree.setTotal(totalRows);
@@ -1397,12 +1494,16 @@ function docRow(
   // hovered, so a never-pruned document says so without a tooltip.
   row.className = `doc-row${opts.active ? ' active' : ''}${d.pinned ? ' pinned' : ''}`;
   row.dataset.id = d.id;
-  // The picker's rows were real <button>s; they carry nested action buttons now,
-  // so they keep the keyboard route explicitly rather than losing it.
+  // Keep the primary open action separate from pin/delete/compare. A button
+  // containing those buttons would be invalid nested interaction, while a
+  // focusable div would make us reimplement native Enter/Space behavior.
+  let content: HTMLElement = row;
   if (opts.focusable) {
-    row.tabIndex = 0;
-    row.setAttribute('role', 'button');
-    row.classList.add('focus-ring');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'doc-row-open focus-ring';
+    content = open;
+    row.appendChild(open);
   }
 
   const title = document.createElement('div');
@@ -1417,14 +1518,14 @@ function docRow(
     ].filter(Boolean);
     title.title = notes.join('\n');
   }
-  row.appendChild(title);
+  content.appendChild(title);
 
   const meta = document.createElement('div');
   meta.className = 'doc-row-meta';
   // The open document says so: a timestamp on the row you are reading answers a
   // question nobody is asking.
   meta.textContent = `${fmtBytes(d.size)} · ${opts.active ? 'open' : relTime(d.updatedAt)}`;
-  row.appendChild(meta);
+  content.appendChild(meta);
 
   if (opts.actions.length) {
     const actions = document.createElement('div');
@@ -1483,7 +1584,7 @@ async function renderRecents(): Promise<void> {
   }
   for (const d of docs) {
     recentsEl.appendChild(
-      docRow(d, { active: d.id === currentDocId, actions: ['dif', 'pin', 'del'] }),
+      docRow(d, { active: d.id === currentDocId, actions: ['dif', 'pin', 'del'], focusable: true }),
     );
   }
 }
@@ -1513,8 +1614,7 @@ async function openStoredDoc(id: string): Promise<'opened' | 'missing' | 'supers
   return 'opened';
 }
 
-recentsEl.addEventListener('click', async (e) => {
-  const t = e.target as HTMLElement;
+async function activateRecentTarget(t: HTMLElement): Promise<void> {
   const item = t.closest('.doc-row') as HTMLElement | null;
   if (!item) return;
   const id = item.dataset.id!;
@@ -1527,6 +1627,7 @@ recentsEl.addEventListener('click', async (e) => {
       showToast('that is the open document — pick a different baseline');
       return;
     }
+    closeDocumentsDrawer();
     await compareRecent(id);
     return;
   }
@@ -1535,6 +1636,10 @@ recentsEl.addEventListener('click', async (e) => {
     return;
   }
   if (await openStoredDoc(id) === 'missing') showToast('document body missing', 'bad');
+}
+
+recentsEl.addEventListener('click', (event) => {
+  void activateRecentTarget(event.target as HTMLElement);
 });
 
 // A visible, document-level entry point for semantic comparison. The picker is
@@ -1638,6 +1743,7 @@ const converter = new ConvertView(
     setNote: setStatusNote,
     docTitle,
     docStem,
+    docRevision: () => currentDocumentRevision,
   },
 );
 
@@ -1658,7 +1764,28 @@ convertBtn.addEventListener('click', openConverter);
 // convert, and when there is nothing yet it waits — an empty converter answers
 // no question a visitor arriving from a link has.
 const CONVERT_ROUTE = '#convert';
+const CONVERT_HANDOFF = 'wb-convert-handoff';
 let convertRouteWaiting = false;
+
+type ConvertHandoff =
+  | { kind: 'none' }
+  | { kind: 'ready'; text: string }
+  | { kind: 'unavailable' };
+
+// The dedicated converter landing leaves one document here, for one navigation.
+// Read and remove it in the same guarded operation: if storage is unavailable
+// (or removal is refused), report that state without retaining or opening a
+// payload we could not consume safely.
+function consumeConvertHandoff(): ConvertHandoff {
+  try {
+    const text = sessionStorage.getItem(CONVERT_HANDOFF);
+    sessionStorage.removeItem(CONVERT_HANDOFF);
+    return text === null ? { kind: 'none' } : { kind: 'ready', text };
+  } catch {
+    try { sessionStorage.removeItem(CONVERT_HANDOFF); } catch { /* storage unavailable */ }
+    return { kind: 'unavailable' };
+  }
+}
 
 function enterConvertRoute(): void {
   if (!viewer.hidden && currentText) {
@@ -1722,20 +1849,6 @@ baselineRecents.addEventListener('click', async (event) => {
   }
   baselinePicker.close();
   void compareRecent(id);
-});
-
-// The rows are divs so they can carry action buttons; Enter and Space still
-// pick one, the way the <button> they replaced did.
-baselineRecents.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter' && event.key !== ' ') return;
-  const target = event.target as HTMLElement;
-  // An action button inside the row fires its own click natively; synthesising
-  // a second one on the row would pick the baseline as well as pin it.
-  if (target.closest('button')) return;
-  const row = target.closest<HTMLElement>('.doc-row');
-  if (!row) return;
-  event.preventDefault();
-  row.click();
 });
 
 async function compareBaselineFile(file: File): Promise<void> {
@@ -1929,6 +2042,7 @@ async function openText(
   landing.hidden = true;
   codecPane.hidden = true;
   viewer.hidden = false;
+  closeDocumentsDrawer();
 
   tree.setTotal(res.totalRows);
   treeViewport.scrollTop = 0;
@@ -2208,6 +2322,7 @@ window.addEventListener('drop', async (e) => {
 // someone already inside the app ("+ new" / "◂ back"), or the marketing page for
 // a cold visitor backing out of payload tools, who has not opened anything yet.
 function goLanding(): void {
+  closeDocumentsDrawer(false);
   beginOpenRequest();
   // Back/+new skip showPane, so the run teardown must happen here too — a
   // result worker holding a large parsed result must not outlive the visit.
@@ -2242,6 +2357,7 @@ let codecDecodedTitle = 'decoded payload.json';
 let codecDecodedProvenance: store.DocProvenance | null = null;
 
 function showCodec(): void {
+  closeDocumentsDrawer(false);
   beginOpenRequest();
   landing.hidden = true;
   viewer.hidden = true;
@@ -3746,16 +3862,17 @@ type QueryResp =
   | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: { i: number; pathText: string; preview: string }[] }
   | { ok: true; kind: 'value'; label: string; value: number | string | null; note?: string }
   | { ok: true; kind: 'groups'; label: string; groups: { key: string; count: number }[]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: unknown[][]; total: number; truncated: boolean }
+  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean }
   | { ok: false; error: string; pos: number };
 
 const askPanel = $('#ask-panel');
 const askBox = $<HTMLInputElement>('#ask-box');
+const askRunBtn = $<HTMLButtonElement>('#ask-run');
 const askStatus = $('#ask-status');
 const askResult = $('#ask-result');
 const askQueryLine = $('#ask-query-line');
 const askQueryEdit = $<HTMLInputElement>('#ask-query-edit');
-const askQueryRun = $('#ask-query-run');
+const askQueryRun = $<HTMLButtonElement>('#ask-query-run');
 const askQueryCopy = $('#ask-query-copy');
 const askDisclosure = $<HTMLDetailsElement>('#ask-disclosure');
 const askDisclosureBody = $('#ask-disclosure-body');
@@ -3776,11 +3893,34 @@ askKeyInput.placeholder = ASK_KEY_PLACEHOLDER;
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let previewToken = 0;
 let askOrigin: { kind: 'english'; question: string } | { kind: 'direct' } | null = null;
+let askGeneration = 0;
+let askAbort: AbortController | null = null;
+let askBusy = false;
 
-// A newly opened document invalidates everything the panel is showing about the
-// previous one. The question text and the saved chips survive — they are the
-// user's own input and are meant to be re-run across documents.
+const ASK_RUN_TITLE = askRunBtn.title;
+
+function setAskBusy(busy: boolean): void {
+  askBusy = busy;
+  askRunBtn.disabled = busy;
+  askQueryEdit.disabled = busy;
+  askQueryRun.disabled = busy;
+  askRunBtn.title = busy ? 'Asking…' : ASK_RUN_TITLE;
+  askRunBtn.setAttribute('aria-label', busy ? 'Asking this question' : 'Ask this question');
+  askPanel.setAttribute('aria-busy', String(busy));
+}
+
+function cancelAskRun(): void {
+  askGeneration++;
+  askAbort?.abort();
+  askAbort = null;
+  setAskBusy(false);
+}
+
+// A newly opened or edited document invalidates everything the panel is showing
+// about the previous revision. The question text and saved chips survive — they
+// are the user's own input and are meant to be re-run across documents.
 function resetAskPanel(): void {
+  cancelAskRun();
   if (previewTimer) clearTimeout(previewTimer);
   previewToken++; // an in-flight preview must not repopulate the cleared result
   askOrigin = null;
@@ -3915,7 +4055,10 @@ function renderAskResult(res: QueryResp, preview = false): void {
       const tr = document.createElement('tr');
       for (const cell of r) {
         const td = document.createElement('td');
-        td.textContent = cell === undefined ? '' : cell === null ? 'null' : typeof cell === 'object' ? JSON.stringify(cell) : String(cell);
+        // These are worker-rendered display cells. In particular, exact numbers
+        // and nested values arrive as strings so the main thread never has to
+        // reconstruct (and potentially round) the raw query result.
+        td.textContent = cell;
         tr.appendChild(td);
       }
       table.appendChild(tr);
@@ -3924,9 +4067,15 @@ function renderAskResult(res: QueryResp, preview = false): void {
     if (!preview) {
       const copyBtn = document.createElement('button');
       copyBtn.textContent = 'copy rows as JSON';
-      copyBtn.addEventListener('click', () => {
-        const objs = res.rows.map((r) => Object.fromEntries(res.cols.map((c, i) => [c, r[i]])));
-        void copyText(JSON.stringify(objs, null, 2)).then(() => showToast(`${res.rows.length} rows copied`));
+      copyBtn.addEventListener('click', async () => {
+        type RowsCopy = { ok: true; text: string; count: number } | { ok: false; error: string };
+        const copied = await call<RowsCopy>({ type: 'queryRowsCopy' });
+        if (!copied.ok) {
+          showToast(copied.error, 'bad');
+          return;
+        }
+        await copyText(copied.text);
+        showToast(`${copied.count} rows copied`);
       });
       askResult.append(copyBtn, queryCsvButton());
     }
@@ -4035,6 +4184,7 @@ function renderDisclosure(sent: SentPayload | null, query: string | null): void 
 // `previewToken` discards a stale response if a newer keystroke has since fired.
 async function runPreview(q: string): Promise<void> {
   const token = ++previewToken;
+  const documentToken = currentDocumentToken;
   if (!q) {
     askResult.replaceChildren();
     askResult.classList.remove('preview');
@@ -4046,76 +4196,126 @@ async function runPreview(q: string): Promise<void> {
     return;
   }
   const res = await call<QueryResp>({ type: 'query', q });
-  if (token !== previewToken) return; // superseded by a newer edit or a commit
+  if (token !== previewToken || documentToken !== currentDocumentToken) return;
   renderAskResult(res, true);
 }
 
 // Commit the edited query: run it for real, render as a committed result, and —
 // exactly as today — save a chip only when the query originated from English.
 async function commitEditedQuery(): Promise<void> {
-  if (previewTimer) clearTimeout(previewTimer);
-  previewToken++; // invalidate any in-flight preview
+  if (askBusy) return;
+  if (previewTimer) {
+    clearTimeout(previewTimer);
+    previewTimer = undefined;
+  }
+  const token = ++previewToken; // invalidate any in-flight preview
+  const generation = ++askGeneration;
+  const documentToken = currentDocumentToken;
   const q = askQueryEdit.value.trim();
   if (!q) return;
-  const res = await call<QueryResp>({ type: 'query', q });
-  renderAskResult(res, false);
-  if (res.ok && askOrigin?.kind === 'english') {
-    await store.saveQuery(askOrigin.question, q);
-    await renderSavedChips();
+  setAskBusy(true);
+  const isCurrent = (): boolean =>
+    generation === askGeneration
+    && token === previewToken
+    && documentToken === currentDocumentToken;
+  try {
+    const res = await call<QueryResp>({ type: 'query', q });
+    if (!isCurrent()) return;
+    renderAskResult(res, false);
+    if (res.ok && askOrigin?.kind === 'english') {
+      await store.saveQuery(askOrigin.question, q);
+      if (!isCurrent()) return;
+      await renderSavedChips();
+    }
+  } finally {
+    if (generation === askGeneration) setAskBusy(false);
   }
 }
 
 async function runAsk(presetQuery?: string): Promise<void> {
   const input = presetQuery ?? askBox.value.trim();
-  if (!input) return;
-  let query = input;
-  const isEnglish = !input.startsWith('$');
-  if (isEnglish && !presetQuery) {
-    const key = await getApiKey();
-    if (!key) {
-      askKeyRow.hidden = false;
-      askKeyInput.focus();
-      setAskStatus(
-        import.meta.env.DEV
-          ? 'no API key found — drop it in a .api-key file next to package.json (or point WB_KEY_FILE at your .env), or paste one here'
-          : 'no API key configured — paste an OpenRouter or Anthropic key here (stored only in this browser)',
-      );
-      return;
-    }
-    setAskStatus('translating… (only the question and field names are sent)');
-    let sent: SentPayload | null = null;
-    try {
-      const schema = await call<{ text: string }>({ type: 'schema' });
-      sent = buildSentPayload(key, schema.text, input); // the one object we send AND disclose
-      renderDisclosure(sent, null);
-      query = await translateToQuery(key, sent);
-      renderDisclosure(sent, query);
-    } catch (err) {
-      setAskStatus(null);
-      askQueryLine.hidden = true;
-      if (sent) renderDisclosure(sent, '(request failed)');
-      renderAskResult({ ok: false, error: String(err), pos: 0 });
-      return;
-    }
-    askOrigin = { kind: 'english', question: input };
-  } else {
-    // A directly-typed `$…` query or a saved-chip re-run — engine only, no model.
-    askOrigin = { kind: 'direct' };
-    renderDisclosure(null, null);
+  if (!input || askBusy) return;
+
+  // Claim the committed-result lane before the first await. This invalidates a
+  // preview or edited-query commit that was already in flight; otherwise it
+  // could render/save old work while this question was still translating.
+  if (previewTimer) {
+    clearTimeout(previewTimer);
+    previewTimer = undefined;
   }
-  setAskStatus(null);
-  askQueryLine.hidden = false;
-  askQueryEdit.value = query;
-  previewToken++; // any pending preview is now stale
-  const res = await call<QueryResp>({ type: 'query', q: query });
-  renderAskResult(res, false);
-  if (res.ok && isEnglish && !presetQuery) {
-    await store.saveQuery(input, query);
-    await renderSavedChips();
+  const token = ++previewToken;
+  const generation = ++askGeneration;
+  const documentToken = currentDocumentToken;
+  const controller = new AbortController();
+  askAbort = controller;
+  setAskBusy(true);
+  const isCurrent = (): boolean =>
+    generation === askGeneration
+    && token === previewToken
+    && documentToken === currentDocumentToken;
+
+  try {
+    let query = input;
+    const isEnglish = !input.startsWith('$');
+    if (isEnglish && !presetQuery) {
+      const key = await getApiKey();
+      if (!isCurrent()) return;
+      if (!key) {
+        askKeyRow.hidden = false;
+        askKeyInput.focus();
+        setAskStatus(
+          import.meta.env.DEV
+            ? 'no API key found — drop it in a .api-key file next to package.json (or point WB_KEY_FILE at your .env), or paste one here'
+            : 'no API key configured — paste an OpenRouter or Anthropic key here (stored only in this browser)',
+        );
+        return;
+      }
+      setAskStatus('translating… (only the question and field names are sent)');
+      let sent: SentPayload | null = null;
+      try {
+        const schema = await call<{ text: string }>({ type: 'schema' });
+        if (!isCurrent()) return;
+        sent = buildSentPayload(key, schema.text, input); // the one object we send AND disclose
+        renderDisclosure(sent, null);
+        query = await translateToQuery(key, sent, controller.signal);
+        if (!isCurrent()) return;
+        renderDisclosure(sent, query);
+      } catch (err) {
+        if (!isCurrent() || controller.signal.aborted) return;
+        setAskStatus(null);
+        askQueryLine.hidden = true;
+        if (sent) renderDisclosure(sent, '(request failed)');
+        renderAskResult({ ok: false, error: String(err), pos: 0 });
+        return;
+      }
+      askOrigin = { kind: 'english', question: input };
+    } else {
+      // A directly-typed `$…` query or a saved-chip re-run — engine only, no model.
+      askOrigin = { kind: 'direct' };
+      renderDisclosure(null, null);
+    }
+    if (!isCurrent()) return;
+    setAskStatus(null);
+    askQueryLine.hidden = false;
+    askQueryEdit.value = query;
+    const res = await call<QueryResp>({ type: 'query', q: query });
+    if (!isCurrent()) return;
+    renderAskResult(res, false);
+    if (res.ok && isEnglish && !presetQuery) {
+      await store.saveQuery(input, query);
+      if (!isCurrent()) return;
+      await renderSavedChips();
+    }
+  } finally {
+    // A stale completion must not re-enable a newer run that now owns the UI.
+    if (generation === askGeneration) {
+      askAbort = null;
+      setAskBusy(false);
+    }
   }
 }
 
-$('#ask-run').addEventListener('click', () => void runAsk());
+askRunBtn.addEventListener('click', () => void runAsk());
 askBox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -4225,6 +4425,7 @@ const runExportBtn = $<HTMLButtonElement>('#run-export');
 const runImportBtn = $<HTMLButtonElement>('#run-import');
 const runImportInput = $<HTMLInputElement>('#run-import-file');
 const runSrcSwitch = $('#run-src-switch');
+const runMobileSwitch = $('#run-mobile-switch');
 const runResultLabel = $('#run-result-label');
 const runStaleBadge = $('#run-stale');
 const runViewport = $('#run-viewport');
@@ -4241,6 +4442,9 @@ let runResultText = '';
 let runResultChannel: WorkerChannel | null = null;
 /** Which pane the left half is showing. Whatever the user arrived from. */
 let runSource: 'tree' | 'code' = 'tree';
+/** Which full-width Run group owns the phone viewport; independent of both the
+ * source's tree/code state and the workspace's functions/result face. */
+let mobileRunSurface: 'source' | 'workspace' = 'workspace';
 /** Which face the right column is showing: the library, or the last result. */
 let runFace: 'functions' | 'result' = 'result';
 /** True while the editor is open. Picking a function needs no editor at all. */
@@ -4285,6 +4489,22 @@ let runResultKind = '';
 let runLibraryCount = 0;
 /** What the bar's count says when nothing is ticked — restored on the last untick. */
 let runLibCountResting = 'functions';
+
+function paintMobileRunSurface(): void {
+  viewer.dataset.mobileRun = mobileRunSurface;
+  for (const button of runMobileSwitch.querySelectorAll<HTMLButtonElement>('button[data-mobile-run]')) {
+    const on = button.dataset.mobileRun === mobileRunSurface;
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+  }
+}
+
+function setMobileRunSurface(surface: 'source' | 'workspace'): void {
+  if (surface === mobileRunSurface) return;
+  mobileRunSurface = surface;
+  paintMobileRunSurface();
+  scheduleResponsiveRefresh();
+}
 
 runEmpty.replaceChildren(
   emptyState(
@@ -4342,6 +4562,24 @@ const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'
       });
   },
 });
+
+// Virtualized surfaces measure their visible viewport. A phone surface switch
+// and an orientation change can expose one after it was measured at zero, so
+// repaint all four bounded readers in the next frame. This never changes their
+// data, selection, scroll state, or the persisted desktop split width.
+let responsiveRefreshFrame = 0;
+function scheduleResponsiveRefresh(): void {
+  if (responsiveRefreshFrame) cancelAnimationFrame(responsiveRefreshFrame);
+  responsiveRefreshFrame = requestAnimationFrame(() => {
+    responsiveRefreshFrame = 0;
+    tree.refresh();
+    semanticCompare.refresh();
+    resultTree.refresh();
+    if (activePane === 'table') void renderTable();
+  });
+}
+window.addEventListener('orientationchange', scheduleResponsiveRefresh);
+window.addEventListener('resize', scheduleResponsiveRefresh);
 
 function loadLastScript(): string {
   try {
@@ -4870,7 +5108,12 @@ async function showRunSource(): Promise<void> {
 async function openRun(): Promise<void> {
   // The source pane starts as the view being left — someone reading raw code
   // keeps reading it; split (and re-entry) fall back to the tree.
-  if (activePane !== 'run') runSource = activePane === 'code' ? 'code' : 'tree';
+  if (activePane !== 'run') {
+    runSource = activePane === 'code' ? 'code' : 'tree';
+    // Pressing Run means the workspace is the immediate destination on a
+    // phone; source stays one explicit segment away and keeps its own state.
+    mobileRunSurface = 'workspace';
+  }
   // Entering a pane layout closes the panels stacked above the panes, like
   // every other pane swap does.
   searchPanel.hidden = true;
@@ -4890,6 +5133,7 @@ async function openRun(): Promise<void> {
     setRunFace('result');
     setAuthoring(true);
   }
+  scheduleResponsiveRefresh();
 }
 
 runSrcSwitch.addEventListener('click', (e) => {
@@ -4898,6 +5142,13 @@ runSrcSwitch.addEventListener('click', (e) => {
   if ((src !== 'tree' && src !== 'code') || src === runSource) return;
   runSource = src;
   void showRunSource();
+});
+
+runMobileSwitch.addEventListener('click', (event) => {
+  const surface = (event.target as HTMLElement)
+    .closest<HTMLButtonElement>('button[data-mobile-run]')?.dataset.mobileRun;
+  if (surface !== 'source' && surface !== 'workspace') return;
+  setMobileRunSurface(surface);
 });
 
 // One sandbox, two shapes of press: a single script, or a batch of named ones
@@ -5282,16 +5533,40 @@ async function boot(): Promise<void> {
   // the stored one below, or one pasted minutes from now — is the one the
   // converter opens on.
   const wantsConverter = location.hash === CONVERT_ROUTE;
+  // The handoff must win over a recent document. It is consumed synchronously
+  // before even the sidebar read, so no IndexedDB restore can race ahead of it.
+  const convertHandoff: ConvertHandoff = wantsConverter
+    ? consumeConvertHandoff()
+    : { kind: 'none' };
   await renderRecents(); // sidebar is populated the same either way
   if (location.hash === '#about') {
+    closeDocumentsDrawer(false);
     ungate();
     pasteBox.focus();
+    return;
+  }
+  if (convertHandoff.kind === 'unavailable') {
+    landing.classList.add('landing--app');
+    convertRouteWaiting = true;
+    ungate();
+    pasteBox.focus();
+    showToast('the converter handoff could not be read — paste the document again', 'bad');
+    return;
+  }
+  if (convertHandoff.kind === 'ready') {
+    landing.classList.add('landing--app');
+    convertRouteWaiting = true;
+    await openText(convertHandoff.text, deriveTitle(convertHandoff.text), null);
+    // Invalid input stays in the paste surface with its parse error; a stored
+    // recent must not replace it and make the handoff appear to have worked.
+    ungate();
     return;
   }
   const docs = await store.listDocs();
   if (!docs.length) {
     // Cold visitor: marketing landing. Also heal a stale flag (all docs pruned
     // or deleted since the last visit) so the gate doesn't hide it next load.
+    closeDocumentsDrawer(false);
     try { localStorage.removeItem('wb-returning'); } catch { /* private mode */ }
     ungate();
     if (wantsConverter) enterConvertRoute();

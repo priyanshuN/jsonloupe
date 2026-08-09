@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
+import { runQuery } from './query';
 // Pulled in through Vite's ?raw rather than node:fs: this file lives under src/,
 // which tsconfig.json types for the browser and deliberately denies node types.
 import html from '../index.html?raw';
@@ -57,6 +58,28 @@ const withoutComments = (source: string): string => {
 };
 
 /**
+ * The text a reader would see in a markup fragment — everything NOT inside a
+ * tag, with `join` standing in for each tag that is dropped. A scan rather than
+ * a `.replace(/<[^>]*>/g, …)`, for the same reason withoutComments above is
+ * one: strip-tags-by-regex is the shape of a sanitizer, it is never a correct
+ * one, and writing it here invites the next person to reach for it somewhere it
+ * matters. (CodeQL agrees, and said so.)
+ */
+function textOutsideTags(fragment: string, join = ''): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = fragment.indexOf('<', i);
+    if (open < 0) return (out + fragment.slice(i)).trim();
+    out += fragment.slice(i, open) + join;
+    const close = fragment.indexOf('>', open);
+    // Unterminated tag: nothing after it is text a reader would see.
+    if (close < 0) return out.trim();
+    i = close + 1;
+  }
+}
+
+/**
  * Everything a reader actually sees: text between tags, plus the three
  * attributes this app speaks through. Deliberately not the raw markup — ids
  * and file filters are not copy, and scanning them would flag `#convert-spec`
@@ -64,7 +87,7 @@ const withoutComments = (source: string): string => {
  */
 function copy(source: string): string {
   const bare = withoutComments(source);
-  const text = bare.replace(/<[^>]*>/g, ' ');
+  const text = textOutsideTags(bare, ' ');
   const attrs = [...bare.matchAll(/(?:title|placeholder|aria-label)="([^"]*)"/g)].map((m) => m[1]);
   return [text, ...attrs].join(' ').replace(/\s+/g, ' ');
 }
@@ -123,6 +146,20 @@ describe('the shell as a landing page', () => {
     // The promise itself survives, next to the result it acts on.
     expect(copy(html)).toMatch(/sortable table.*exact-digit CSV/i);
   });
+
+  it('shows a public query example that the one-pipe grammar can execute', () => {
+    const section = element(html, 'query');
+    const code = section.match(/<pre class="lp-code">([\s\S]*?)<\/pre>/)?.[1] ?? '';
+    const query = textOutsideTags(code).replace(/\s+/g, ' ').trim();
+
+    expect(query.match(/\|/g)).toHaveLength(1);
+    expect(runQuery({
+      tasks: [
+        { status: 'FAILED', failureReason: 'NO_SLOT' },
+        { status: 'FAILED', failureReason: 'CAPACITY' },
+      ],
+    }, query)).toMatchObject({ ok: true, kind: 'groups' });
+  });
 });
 
 describe('the converter view the panel code fills in', () => {
@@ -168,6 +205,52 @@ describe('the converter view the panel code fills in', () => {
     const accent = view.match(/<button[^>]*class="[^"]*\bprimary\b/g) ?? [];
     expect(accent).toHaveLength(1);
     expect(accent[0]).toContain('id="convert-dl"');
+  });
+});
+
+describe('the responsive workbench shell', () => {
+  it('gives the Documents drawer a stable trigger, close control, and light-dismiss surface', () => {
+    const shellBar = element(html, 'mobile-shell-bar');
+    const open = element(shellBar, 'sidebar-open');
+    const sidebar = element(html, 'sidebar');
+    const close = element(sidebar, 'sidebar-close');
+    const scrim = element(html, 'sidebar-scrim');
+
+    expect(open).toContain('aria-controls="sidebar"');
+    expect(open).toContain('aria-expanded="false"');
+    expect(sidebar).toContain('aria-label="Documents"');
+    expect(close).toContain('aria-label="Close documents"');
+    expect(scrim).toContain('aria-label="Close documents"');
+    expect(scrim).toContain('tabindex="-1"');
+    expect(scrim).toContain('hidden');
+  });
+
+  it('keeps the compact trigger outside the drawer and both ahead of the content surface', () => {
+    const trigger = html.indexOf('id="mobile-shell-bar"');
+    const drawer = html.indexOf('id="sidebar"');
+    const content = html.indexOf('id="content"');
+    expect(trigger).toBeGreaterThan(-1);
+    expect(trigger).toBeLessThan(drawer);
+    expect(drawer).toBeLessThan(content);
+  });
+
+  it('keeps the converter settings, table selector, and preview in its one responsive surface', () => {
+    const view = element(html, 'convert-view');
+    for (const id of ['convert-missing', 'convert-array-join', 'convert-tables', 'convert-cols', 'convert-preview']) {
+      const opening = view.match(new RegExp(`<[^>]+id="${id}"[^>]*>`))?.[0] ?? '';
+      expect(opening, `#${id} is present`).not.toBe('');
+      expect(opening).not.toMatch(/\shidden(?:\s|>)/);
+    }
+    expect(element(view, 'convert-tables')).toContain('aria-label="Detected tables"');
+  });
+
+  it('offers one full-width Run group without replacing its existing switches', () => {
+    const mobile = element(html, 'run-mobile-switch');
+    expect(mobile).toContain('role="group"');
+    expect(mobile).toContain('data-mobile-run="source"');
+    expect(mobile).toContain('data-mobile-run="workspace"');
+    expect(html).toContain('id="run-src-switch"');
+    expect(html).toContain('id="run-face-switch"');
   });
 });
 
@@ -229,27 +312,6 @@ describe('the icon sprite', () => {
 // AND to a screen reader. Neither is optional, and neither is checkable by
 // looking at the bar — they only exist in the markup.
 describe('glyph-only controls (rule 10, revised)', () => {
-  /**
-   * The text a reader would see in a markup fragment — everything NOT inside a
-   * tag. A scan rather than a `.replace(/<[^>]*>/g, '')`, for the same reason
-   * withoutComments above is one: strip-tags-by-regex is the shape of a
-   * sanitizer, it is never a correct one, and writing it here invites the next
-   * person to reach for it somewhere it matters. (CodeQL agrees, and said so.)
-   */
-  function textOutsideTags(fragment: string): string {
-    let out = '';
-    let i = 0;
-    for (;;) {
-      const open = fragment.indexOf('<', i);
-      if (open < 0) return (out + fragment.slice(i)).trim();
-      out += fragment.slice(i, open);
-      const close = fragment.indexOf('>', open);
-      // Unterminated tag: nothing after it is text a reader would see.
-      if (close < 0) return out.trim();
-      i = close + 1;
-    }
-  }
-
   /** Buttons whose entire visible content is one <svg class="ic">. */
   const glyphOnly = [...withoutComments(html).matchAll(/<button\b[\s\S]*?<\/button>/g)]
     .map((m) => m[0])

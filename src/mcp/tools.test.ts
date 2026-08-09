@@ -48,6 +48,9 @@ afterAll(async () => {
 
 const INT64 = '9007199254740993';
 const DOC = `{"tasks":[{"id":${INT64},"status":"FAILED"},{"id":9007199254740994,"status":"OK"}]}`;
+const INSPECT_PRIVATE_INT64 = '9223372036854775806';
+const INSPECT_PRIVATE_VALUE = 'MCP_INSPECT_VALUE_SENTINEL_8f4c2a';
+const INSPECT_PRIVATE_MAP_KEY = 'MCP_INSPECT_MAP_KEY_SENTINEL_7d3b1e';
 
 const call = (name: string, args: Record<string, unknown>) => router.call(name, args);
 const load = (text: string) => call('load_doc', { text });
@@ -140,14 +143,39 @@ describe('tool definitions', () => {
 // ---------- deterministic converter workflow ----------
 
 describe('converter workflow', () => {
-  it('inspects shape without returning source values', async () => {
-    await load(DOC);
+  it('returns useful inspection metadata without exposing detector samples', async () => {
+    await load(`{"entities":{"${INSPECT_PRIVATE_MAP_KEY}":{"id":${INSPECT_PRIVATE_INT64},"payload":"${INSPECT_PRIVATE_VALUE}"},"second-map-key":{"id":9223372036854775805,"payload":"another-private-value"}}}`);
     const r = await call('inspect', { docId: 'd1' });
     expect(r.isError).toBe(false);
-    expect(r.text).toContain('tasks: 2 rows at $.tasks[]');
+    expect(r.text).toContain('entities: 2 rows at $.entities{}');
     expect(r.text).toContain('id: 2/2 · number · unique');
-    expect(r.text).not.toContain(INT64);
-    expect(r.text).not.toContain('FAILED');
+    expect(r.text).toContain('payload: 2/2 · string · unique');
+
+    const structured = JSON.stringify(r.structuredContent);
+    for (const privateValue of [INSPECT_PRIVATE_INT64, INSPECT_PRIVATE_VALUE, INSPECT_PRIVATE_MAP_KEY]) {
+      expect(r.text).not.toContain(privateValue);
+      expect(structured).not.toContain(privateValue);
+    }
+    expect(structured).not.toMatch(/"(?:samples|keySamples)":/);
+    expect(r.structuredContent).toMatchObject({
+      ok: true,
+      tool: 'inspect',
+      inspection: {
+        source: 'json',
+        truncated: false,
+        tables: [{
+          anchor: '$.entities{}',
+          name: 'entities',
+          rows: 2,
+          isMap: true,
+          parentAnchor: null,
+          fields: [
+            { path: 'id', present: 2, kinds: ['number'], unique: true },
+            { path: 'payload', present: 2, kinds: ['string'], unique: true },
+          ],
+        }],
+      },
+    });
   });
 
   it('drafts a reviewable spec and refuses accidental replacement', async () => {
@@ -260,12 +288,25 @@ describe('converter workflow', () => {
       { stamp: '2026-08-01 09:30:00', time: '09:30', coordinate: '28.53, 77.39', ambiguous: '01/02/2026' },
       { stamp: '2026-08-02 10:30:00', time: '10:30', coordinate: '28.54, 77.40', ambiguous: '03/04/2026' },
     ] }));
-    const text = (await call('inspect', { docId: 'd1' })).text;
+    const inspected = await call('inspect', { docId: 'd1' });
+    const text = inspected.text;
 
     expect(text).toContain('suggest datetime');
     expect(text).toContain('+ base date');
     expect(text).toContain('suggest geo');
     expect(text).toContain('ambiguous dayMonth');
+    expect(inspected.structuredContent).toMatchObject({
+      inspection: {
+        tables: [{
+          fields: [
+            { path: 'stamp', suggest: { type: 'datetime', needsBaseDate: false } },
+            { path: 'time', suggest: { type: 'datetime', needsBaseDate: true } },
+            { path: 'coordinate', suggest: { type: 'geo', form: 'pair' } },
+            { path: 'ambiguous', suggest: { ambiguous: 'dayMonth' } },
+          ],
+        }],
+      },
+    });
   });
 });
 
@@ -386,6 +427,47 @@ describe('response cap', () => {
     expect(r.text).toContain('…truncated');
     expect(JSON.stringify(r.structuredContent).length).toBeLessThanOrEqual(RESPONSE_CAP);
     expect(r.structuredContent).toMatchObject({ structuredTruncated: true });
+  });
+
+  it('sizes structured output after private inspection samples are removed', async () => {
+    const oversizedPrivateValue = `MCP_INSPECT_OVERSIZED_SAMPLE_${'x'.repeat(RESPONSE_CAP)}`;
+    await load(JSON.stringify({ rows: [{ payload: oversizedPrivateValue }, { payload: `${oversizedPrivateValue}y` }] }));
+
+    const r = await call('inspect', { docId: 'd1' });
+    const structured = JSON.stringify(r.structuredContent);
+
+    expect(r.text).toContain('payload: 2/2 · string · unique');
+    expect(r.structuredContent).not.toHaveProperty('structuredTruncated');
+    expect(r.structuredContent).toMatchObject({
+      ok: true,
+      tool: 'inspect',
+      inspection: { tables: [{ rows: 2, fields: [{ path: 'payload', present: 2, kinds: ['string'], unique: true }] }] },
+    });
+    expect(r.text).not.toContain('MCP_INSPECT_OVERSIZED_SAMPLE_');
+    expect(structured).not.toContain('MCP_INSPECT_OVERSIZED_SAMPLE_');
+    expect(structured).not.toMatch(/"(?:samples|keySamples)":/);
+  });
+
+  it('keeps redaction intact when a large inspection reaches both response caps', async () => {
+    const fields = Array.from({ length: 260 }, (_, i) => {
+      const name = `metadata_field_${String(i).padStart(3, '0')}`;
+      const value = i === 0 ? INSPECT_PRIVATE_INT64 : JSON.stringify(`MCP_INSPECT_CAP_VALUE_${String(i).padStart(3, '0')}`);
+      return `${JSON.stringify(name)}:${value}`;
+    });
+    await load(`{"rows":[{${fields.join(',')}}]}`);
+
+    const r = await call('inspect', { docId: 'd1' });
+    const structured = JSON.stringify(r.structuredContent);
+
+    expect(r.text).toHaveLength(RESPONSE_CAP);
+    expect(r.text).toContain('…truncated');
+    expect(structured.length).toBeLessThanOrEqual(RESPONSE_CAP);
+    expect(r.structuredContent).toMatchObject({ ok: true, tool: 'inspect', structuredTruncated: true });
+    expect(r.text).not.toContain(INSPECT_PRIVATE_INT64);
+    expect(r.text).not.toContain('MCP_INSPECT_CAP_VALUE_001');
+    expect(structured).not.toContain(INSPECT_PRIVATE_INT64);
+    expect(structured).not.toContain('MCP_INSPECT_CAP_VALUE_001');
+    expect(structured).not.toMatch(/"(?:samples|keySamples)":/);
   });
 
   it('leaves a result that fits completely alone', async () => {

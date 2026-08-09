@@ -61,10 +61,17 @@ export interface ConvertCallbacks {
   /** What the document is called; what a file made from it is called. Not the same string. */
   docTitle(): string;
   docStem(): string;
+  /**
+   * Which document this is. It changes when another one is opened AND when the
+   * open one is edited — both are re-detection, and neither is a revisit.
+   */
+  docRevision(): number;
 }
 
 const PREVIEW_ROWS = 12;
 const DEBOUNCE_MS = 120;
+// How long a preview may take before the wait is worth a line of its own.
+const WAIT_NOTE_MS = 250;
 // The strip's resting line for this pane: what to do when nothing is chosen yet.
 const RESTING_LEAD = 'Pick a table, adjust its columns, then download.';
 // Detection reads at most this many rows of a table before it stops counting
@@ -267,6 +274,29 @@ export function ceilingBreaches(table: {
   return said;
 }
 
+/**
+ * What "needs review" actually means, before the download rather than in the
+ * report after it. A count on its own — `12 values need review` — says a number
+ * and withholds the only part that tells the user whether to care: a date the
+ * engine could not read is a column to fix, and a cell too long for a spreadsheet
+ * is Excel's problem with a document that is otherwise correct.
+ *
+ * Kinds are named biggest-first and capped at two, because this line shares a
+ * strip with the row count and the ceilings; the rest are counted, not listed.
+ */
+export function warningSummary(warnings: readonly Warning[], limit = 2): string[] {
+  const byCode = new Map<Warning['code'], number>();
+  for (const warning of warnings) {
+    byCode.set(warning.code, (byCode.get(warning.code) ?? 0) + warning.count);
+  }
+  const ranked = [...byCode].sort((a, b) => b[1] - a[1]);
+  const said = ranked.slice(0, limit).map(([code, count]) =>
+    `${count.toLocaleString()} × ${warningLabel(code)}`);
+  const rest = ranked.slice(limit).reduce((total, [, count]) => total + count, 0);
+  if (rest) said.push(`${rest.toLocaleString()} more to review`);
+  return said;
+}
+
 /** The outcome, named: what comes out, how big, and that nothing else is required. */
 export function outcomeLine(out: {
   tables: number;
@@ -364,6 +394,13 @@ export class ConvertView {
   private epoch = 0;
   private currentMappingId: string | null = null;
   private savedMappings: SavedMapping[] = [];
+  // What detection drafted for this document, kept so `starter mapping` in the
+  // saved list is a mapping you can actually go back to.
+  private drafted: ConvertSpec | null = null;
+  // Which document the mapping on screen belongs to, and what it looked like at
+  // the last point it was nobody's edit — drafted, loaded, imported or saved.
+  private shownRevision = -1;
+  private cleanSpec = '';
   // The last answer the engine gave, kept because three things describe it: the
   // outcome sentence, the preview note, and the CSV caution.
   private lastPreview: PreviewResult | null = null;
@@ -374,6 +411,14 @@ export class ConvertView {
   private errorHosts = new Map<ColumnSpec, HTMLElement>();
   private tableMetas = new Map<string, HTMLElement>();
   private problemsHost: HTMLElement | null = null;
+  // Writing the file is the one operation here that is neither debounced nor
+  // cancellable, so it is the one that has to say it is running.
+  private converting = false;
+  private downloadRest = { label: '', title: '' };
+  private waitTimer = 0;
+  // Told apart from "detection has not answered yet", because the two states
+  // read identically on an empty pane and only one of them ever ends.
+  private detectionFailed = false;
 
   constructor(
     private els: {
@@ -419,6 +464,12 @@ export class ConvertView {
       this.full.output.arrayJoin = this.els.arrayJoin.value;
       void this.refreshPreview();
     });
+    // The resting label and tooltip come off the markup rather than being said
+    // again here — this button's wording is the page's to decide.
+    this.downloadRest = {
+      label: this.els.download.lastChild?.textContent ?? '',
+      title: this.els.download.title,
+    };
     this.els.addColumn.addEventListener('click', () => this.addColumn());
     this.els.saved.addEventListener('change', () => void this.loadSelectedMapping());
     this.els.save.addEventListener('click', () => void this.saveMapping());
@@ -435,12 +486,33 @@ export class ConvertView {
     });
   }
 
-  /** Fresh detection for the open document. Safe to call on every reveal. */
+  /**
+   * Detection for the open document. Safe to call on every reveal: a revisit to
+   * a document already detected keeps the mapping the user built, because
+   * detection describes a document and not a visit. It used to re-draft on every
+   * reveal, so stepping out to the tree to check a value and stepping back threw
+   * away every renamed column, with nothing said and nothing to undo.
+   */
   async open(): Promise<void> {
+    const revision = this.cbs.docRevision();
+    if (this.full && revision === this.shownRevision) {
+      // The pane is intact; only the shell's strip was taken over while away.
+      this.cbs.setLead(RESTING_LEAD);
+      this.syncActions();
+      this.renderPreviewNote();
+      return;
+    }
+    // A mapping built for a document that has since changed cannot quietly
+    // become a mapping for the new one — but it is the user's work, so its loss
+    // is said out loud rather than left to be noticed.
+    if (this.full && this.isDirty()) {
+      this.cbs.toast('the document changed, so this mapping was detected again');
+    }
     window.clearTimeout(this.timer);
     const mine = ++this.epoch;
     // A converter opened on a new document must never flash the previous
     // document's preview while inspection is in flight.
+    this.detectionFailed = false;
     this.full = null;
     this.inspection = null;
     this.lastPreview = null;
@@ -461,10 +533,24 @@ export class ConvertView {
     this.els.report.hidden = true;
     this.cbs.setLead(RESTING_LEAD);
     this.syncActions();
-    const { inspection, spec } = await this.cbs.inspect();
+    let detected: { inspection: Inspection; spec: ConvertSpec };
+    try {
+      detected = await this.cbs.inspect();
+    } catch (error) {
+      if (mine !== this.epoch) return;
+      // A failed detection used to leave `Looking through this document…` on
+      // screen forever, with the reason spent on a toast that then left. The
+      // pane says what happened and keeps the one thing worth offering.
+      this.failInspection(error);
+      return;
+    }
+    const { inspection, spec } = detected;
     if (mine !== this.epoch) return;
     this.inspection = inspection;
+    this.drafted = cloneSpec(spec);
     this.full = cloneSpec(spec);
+    this.shownRevision = revision;
+    this.markClean();
     this.offTables.clear();
     this.offCols.clear();
     this.selected = 0;
@@ -479,6 +565,43 @@ export class ConvertView {
     this.renderDetail();
     await this.refreshSavedMappings();
     void this.refreshPreview();
+  }
+
+  /** Detection did not answer. Say why, and leave the way to ask again. */
+  private failInspection(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.detectionFailed = true;
+    const state = this.cbs.emptyState(
+      'Detection failed',
+      `${message}. Nothing about the document has changed — try again.`,
+      { pane: true },
+    );
+    const retry = el('button', undefined, 'try again') as HTMLButtonElement;
+    retry.type = 'button';
+    retry.addEventListener('click', () => void this.open());
+    state.append(retry);
+    this.els.tables.replaceChildren(state);
+    this.showPreviewNote(`detection failed: ${message}`, 'error');
+    this.syncActions();
+  }
+
+  /**
+   * The mapping as it stands, ticks included — the string a later edit is
+   * compared against. Ticking a table off is an edit like any other, so it has
+   * to be part of what "unchanged" means.
+   */
+  private specSignature(): string {
+    if (!this.full) return '';
+    return JSON.stringify([this.full, [...this.offTables].sort(), [...this.offCols].sort()]);
+  }
+
+  private markClean(): void {
+    this.cleanSpec = this.specSignature();
+  }
+
+  /** Has the user changed anything since the mapping was last somebody else's? */
+  isDirty(): boolean {
+    return !!this.full && this.specSignature() !== this.cleanSpec;
   }
 
   /** The spec as currently edited: excluded tables and columns actually removed. */
@@ -503,6 +626,38 @@ export class ConvertView {
     this.els.arrayJoin.value = this.full?.output.arrayJoin ?? '; ';
   }
 
+  /**
+   * Writing the file can take as long as the document is big, and nothing about
+   * a pressed button said so: the press looked like it had missed, and a second
+   * one started a second conversion of the same document.
+   */
+  private setConverting(converting: boolean): void {
+    this.converting = converting;
+    const label = this.els.download.lastChild;
+    if (label && label.nodeType === 3) {
+      label.textContent = converting ? 'converting…' : this.downloadRest.label;
+    }
+    this.els.download.title = converting ? 'Converting this document…' : this.downloadRest.title;
+    this.els.download.setAttribute('aria-busy', String(converting));
+    this.syncActions();
+  }
+
+  /**
+   * A wait only worth naming once it is one. Under the threshold the round trip
+   * finishes before anyone could read the line, and a note that appears and
+   * vanishes on every keystroke is noise in the place the answers go.
+   */
+  private waitingFor(text: string): void {
+    window.clearTimeout(this.waitTimer);
+    this.els.preview.setAttribute('aria-busy', 'true');
+    this.waitTimer = window.setTimeout(() => this.showPreviewNote(text), WAIT_NOTE_MS);
+  }
+
+  private doneWaiting(): void {
+    window.clearTimeout(this.waitTimer);
+    this.els.preview.setAttribute('aria-busy', 'false');
+  }
+
   /** An action with nothing to act on is disabled, not left live to fail on click. */
   private syncActions(): void {
     this.els.addColumn.disabled = !this.full?.tables[this.selected];
@@ -512,7 +667,7 @@ export class ConvertView {
     // refusal is spent on the disabled button rather than on a toast after the
     // click. The mapping itself stays downloadable — a broken one is exactly
     // what someone wants to hand over when they are asking why it is broken.
-    this.els.download.disabled = !convertible || this.errors.length > 0;
+    this.els.download.disabled = this.converting || !convertible || this.errors.length > 0;
     this.renderOutcome();
   }
 
@@ -525,7 +680,9 @@ export class ConvertView {
   private renderOutcome(): void {
     const host = this.els.count;
     if (!this.full) {
-      host.textContent = 'Looking through this document…';
+      host.textContent = this.detectionFailed
+        ? 'This document could not be looked through.'
+        : 'Looking through this document…';
       return;
     }
     const effective = this.effective();
@@ -616,8 +773,17 @@ export class ConvertView {
   private async loadSelectedMapping(): Promise<void> {
     const id = this.els.saved.value;
     if (!id) {
+      // `starter mapping` is an entry in this list, so picking it has to load
+      // one. It used to only clear the id, which left the list naming a mapping
+      // the view was not showing and no way back to what detection drafted.
       this.currentMappingId = null;
       this.els.forget.disabled = true;
+      if (!this.drafted) return;
+      const dirty = this.isDirty();
+      this.applyMapping(this.drafted, `${this.cbs.docTitle()} mapping`, null);
+      this.cbs.toast(dirty
+        ? 'starter mapping restored — your edits to it are gone'
+        : 'starter mapping restored');
       return;
     }
     const mapping = this.savedMappings.find((item) => item.id === id);
@@ -638,6 +804,9 @@ export class ConvertView {
     this.offTables.clear();
     this.offCols.clear();
     this.selected = 0;
+    // Somebody else's mapping, freshly laid down: this is the state a later
+    // edit is measured against.
+    this.markClean();
     this.syncOutputControls();
     for (const button of this.els.format.querySelectorAll<HTMLButtonElement>('button[data-fmt]')) {
       button.classList.toggle('on', button.dataset.fmt === this.full.output.format);
@@ -663,6 +832,7 @@ export class ConvertView {
       const saved = await this.cbs.saveMapping(name, spec, this.currentMappingId ?? undefined);
       this.currentMappingId = saved.id;
       this.els.mappingName.value = saved.name;
+      this.markClean();
       await this.refreshSavedMappings(saved.id);
       // The list this landed in is normally folded away, so open it: a save
       // whose result is hidden reads as a save that did not happen.
@@ -730,6 +900,8 @@ export class ConvertView {
     host.textContent = '';
     this.tableMetas.clear();
     if (!this.full || !this.full.tables.length) {
+      host.removeAttribute('role');
+      host.removeAttribute('aria-rowcount');
       host.append(this.cbs.emptyState(
         'No tables here',
         'This document has no repeating list of objects to flatten. Try a document with an array of objects in it.',
@@ -739,14 +911,26 @@ export class ConvertView {
       return;
     }
 
+    // A grid lets each selectable row expose its current state without turning
+    // the row into a button/option that illegally contains the include checkbox
+    // and editable name. Focus stays on one row at a time; both axes work because
+    // this rail becomes horizontal on narrow screens and is vertical on desktop.
+    host.setAttribute('role', 'grid');
+    host.setAttribute('aria-label', 'Detected tables');
+    host.setAttribute('aria-rowcount', String(this.full.tables.length));
     this.full.tables.forEach((t, i) => {
       const row = el('div', 'convert-table' + (i === this.selected ? ' on' : ''));
-      row.setAttribute('role', 'listitem');
+      row.setAttribute('role', 'row');
+      row.setAttribute('aria-rowindex', String(i + 1));
+      row.setAttribute('aria-selected', String(i === this.selected));
+      row.setAttribute('aria-label', `${t.name}, ${friendlyPath(t.anchor)}`);
+      row.tabIndex = i === this.selected ? 0 : -1;
 
       const chk = el('input', 'chk') as HTMLInputElement;
       chk.type = 'checkbox';
       chk.checked = !this.offTables.has(t.name);
       chk.title = 'Include this table in the output';
+      chk.setAttribute('aria-label', `Include ${t.name} in the output`);
       chk.addEventListener('click', (e) => e.stopPropagation());
       chk.addEventListener('change', () => {
         if (chk.checked) this.offTables.delete(t.name);
@@ -759,6 +943,7 @@ export class ConvertView {
       name.value = t.name;
       name.spellcheck = false;
       name.title = 'Name of this sheet or file';
+      name.setAttribute('aria-label', `Output name for ${t.name}`);
       name.addEventListener('click', (e) => e.stopPropagation());
       name.addEventListener('change', () => this.renameTable(t.name, name.value.trim() || t.name));
 
@@ -769,19 +954,54 @@ export class ConvertView {
       const where = el('div', 'convert-where', friendlyPath(t.anchor));
 
       const head = el('div', 'convert-table-head');
+      head.setAttribute('role', 'gridcell');
+      where.setAttribute('role', 'gridcell');
       head.append(chk, name, meta);
       row.append(head, where);
       if (this.offTables.has(t.name)) row.classList.add('off');
-      row.addEventListener('click', () => {
-        this.selected = i;
-        this.renderTables();
-        this.renderDetail();
-        void this.refreshPreview();
+      row.addEventListener('click', () => this.selectTable(i, false));
+      row.addEventListener('keydown', (event) => {
+        // Text editing, checkbox toggling, and any future row controls keep
+        // their native keys. Only the focused row owns selection/navigation.
+        if (event.target !== row) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          this.selectTable(i, true);
+          return;
+        }
+        const delta = event.key === 'ArrowDown' || event.key === 'ArrowRight'
+          ? 1
+          : event.key === 'ArrowUp' || event.key === 'ArrowLeft'
+            ? -1
+            : 0;
+        if (!delta) return;
+        event.preventDefault();
+        const last = (this.full?.tables.length ?? 1) - 1;
+        this.selectTable(Math.max(0, Math.min(last, i + delta)), true);
       });
       host.append(row);
     });
     this.syncActions();
     this.paintErrors();
+  }
+
+  /** Select a table without rebuilding the rail (and taking focus with it). */
+  private selectTable(index: number, focus: boolean): void {
+    if (!this.full?.tables[index]) return;
+    const changed = index !== this.selected;
+    this.selected = index;
+    const rows = this.els.tables.querySelectorAll<HTMLElement>('.convert-table');
+    rows.forEach((row, rowIndex) => {
+      const selected = rowIndex === index;
+      row.classList.toggle('on', selected);
+      row.setAttribute('aria-selected', String(selected));
+      row.tabIndex = selected ? 0 : -1;
+    });
+    if (changed) {
+      this.renderDetail();
+      void this.refreshPreview();
+    }
+    if (focus) rows[index]?.focus();
   }
 
   private renameTable(from: string, to: string): void {
@@ -1256,6 +1476,7 @@ export class ConvertView {
   private async doPreview(mine: number): Promise<void> {
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
+      this.doneWaiting();
       this.errors = [];
       this.lastPreview = null;
       this.paintErrors();
@@ -1269,6 +1490,7 @@ export class ConvertView {
       return;
     }
     let res: PreviewResult | { errors: SpecError[] };
+    this.waitingFor('reading the rows…');
     try {
       res = await this.cbs.preview(spec, PREVIEW_ROWS);
     } catch (error) {
@@ -1276,6 +1498,7 @@ export class ConvertView {
       // so a failed round-trip would otherwise leave the previous mapping's rows
       // on screen as if they were the current ones.
       if (mine !== this.epoch) return;
+      this.doneWaiting();
       const message = error instanceof Error ? error.message : String(error);
       this.els.preview.textContent = '';
       this.lastPreview = null;
@@ -1284,6 +1507,7 @@ export class ConvertView {
       return;
     }
     if (mine !== this.epoch) return; // a later edit already won
+    this.doneWaiting();
 
     if ('errors' in res) {
       this.els.preview.textContent = '';
@@ -1338,11 +1562,15 @@ export class ConvertView {
       const dropped = t.skipped.toLocaleString();
       parts.push(`${dropped} row${t.skipped === 1 ? '' : 's'} skipped`);
     }
-    const warningCount = res.warnings
-      .filter((w) => w.table === t.name)
+    parts.push(...warningSummary(res.warnings.filter((w) => w.table === t.name)));
+    // A problem in a table nobody has clicked is still going into the file. The
+    // note is about the previewed table, so the others are counted here rather
+    // than described — one line saying they exist beats finding out afterwards.
+    const elsewhere = res.warnings
+      .filter((w) => w.table !== t.name)
       .reduce((total, item) => total + item.count, 0);
-    if (warningCount) {
-      parts.push(`${warningCount.toLocaleString()} value${warningCount === 1 ? '' : 's'} need review`);
+    if (elsewhere) {
+      parts.push(`${elsewhere.toLocaleString()} in other tables`);
     }
     // The ceilings are the spreadsheet's, so they are only a cost when a
     // spreadsheet is what is being written. Saying them under CSV would warn
@@ -1393,6 +1621,9 @@ export class ConvertView {
   }
 
   async downloadResult(): Promise<void> {
+    // Two presses are two conversions of the same document — the second one
+    // wins the download and the first is spent for nothing.
+    if (this.converting) return;
     const spec = this.effective();
     if (!spec || !spec.tables.length) {
       // Two different emptinesses: nothing was found, or everything found was
@@ -1402,7 +1633,22 @@ export class ConvertView {
         : 'nothing to convert — no tables were detected in this document', 'bad');
       return;
     }
-    const res = await this.cbs.run(spec);
+    let res: Awaited<ReturnType<ConvertCallbacks['run']>>;
+    this.setConverting(true);
+    this.showPreviewNote('writing the file…');
+    try {
+      res = await this.cbs.run(spec);
+    } catch (error) {
+      // The mapping is untouched and the document is untouched, so the only
+      // thing lost is the wait: say that, rather than a bare failure that reads
+      // as work needing to be redone.
+      const message = error instanceof Error ? error.message : String(error);
+      this.showPreviewNote(`conversion failed: ${message} — press download to try again`, 'error');
+      this.cbs.toast(`conversion failed: ${message}`, 'bad');
+      return;
+    } finally {
+      this.setConverting(false);
+    }
     if ('errors' in res) {
       // The same treatment the preview's errors get: all of them, each on the
       // column it names, rather than the first one in a toast that then leaves.
@@ -1424,6 +1670,9 @@ export class ConvertView {
       this.cbs.download(`${stem}_tables.zip`, res.bytes, 'application/zip');
     }
     this.renderReport(res.report);
+    // The strip goes back to describing the mapping; `writing the file…` is
+    // over the moment the file exists.
+    this.renderPreviewNote();
     const tables = spec.tables.length;
     this.cbs.toast(
       `${res.rows.toLocaleString()} row${res.rows === 1 ? '' : 's'}`
@@ -1447,7 +1696,7 @@ export class ConvertView {
         const where = warning.column ? `${warning.table}.${warning.column}` : warning.table;
         const sample = warning.sample === undefined ? '' : ` · e.g. ${warning.sample}`;
         list.append(el('li', undefined,
-          `${where}: ${warningLabel(warning)} on ${warning.count.toLocaleString()} value${warning.count === 1 ? '' : 's'}${sample}`));
+          `${where}: ${warningLabel(warning.code)} on ${warning.count.toLocaleString()} value${warning.count === 1 ? '' : 's'}${sample}`));
       }
       host.append(list);
     } else if (!report.tables.some((table) => table.skipped)) {
@@ -1457,8 +1706,8 @@ export class ConvertView {
   }
 }
 
-function warningLabel(warning: Warning): string {
-  switch (warning.code) {
+function warningLabel(code: Warning['code']): string {
+  switch (code) {
     case 'BAD_DATETIME': return 'date/time could not be read';
     case 'BAD_GEO': return 'coordinate could not be read';
     case 'BAD_BASEDATE': return 'base date could not be read; today was used';
