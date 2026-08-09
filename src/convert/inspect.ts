@@ -65,9 +65,12 @@ export function inspect(input: SourceInput, source: SourceFormat = 'json'): Insp
   const state = { truncated: false };
 
   if (isCollectionOfObjects(Array.isArray(root) ? [root] : [])) {
-    const rows = (root as unknown[]).filter(isRecord);
-    tables.push(makeTable([{ kind: 'array' }], rows, null, state));
-    exploreChildren(rows, [{ kind: 'array' }], formatAnchor([{ kind: 'array' }]), tables, state, 1);
+    const items = (root as unknown[]).filter(isRecord);
+    const unwrapped = unwrapIdMap(items);
+    const segs: AnchorSeg[] = unwrapped ? [{ kind: 'array' }, { kind: 'map' }] : [{ kind: 'array' }];
+    const rows = unwrapped?.rows ?? items;
+    tables.push(makeTable(segs, rows, null, state, unwrapped?.keys ?? []));
+    exploreChildren(rows, segs, formatAnchor(segs), tables, state, 1);
   } else if (isRecord(root)) {
     exploreChildren([root], [], null, tables, state, 1);
   }
@@ -104,6 +107,31 @@ function isMapOfObjects(vals: unknown[]): boolean {
   return homogeneous(objs);
 }
 
+/**
+ * `[{"18567": {…}}, {"18570": {…}}]` is one map keyed by id, delivered an entry
+ * per array slot — not 223 rows of different shapes. Left as-is every id reads
+ * as a field name, so the row's real fields are never seen twice and each id
+ * also becomes a table of its own. Same rule as ID_KEY, one level deeper: the
+ * key is data, so it belongs in `{key}`, not in the anchor.
+ */
+function unwrapIdMap(
+  rows: Record<string, unknown>[],
+): { rows: Record<string, unknown>[]; keys: string[] } | null {
+  if (!rows.length) return null;
+  const keys: string[] = [];
+  const inner: Record<string, unknown>[] = [];
+  for (const r of rows) {
+    const entries = Object.entries(r);
+    if (!entries.length) return null;
+    for (const [k, v] of entries) {
+      if (!ID_KEY.test(k) || !isRecord(v)) return null;
+      keys.push(k);
+      inner.push(v);
+    }
+  }
+  return { rows: inner, keys };
+}
+
 function homogeneous(objs: Record<string, unknown>[]): boolean {
   if (objs.length < 2) return false;
   const first = new Set(Object.keys(objs[0]));
@@ -136,8 +164,11 @@ function exploreChildren(
 
     if (isCollectionOfObjects(vals)) {
       const segs: AnchorSeg[] = [...anchor, { kind: 'key', name: k }, { kind: 'array' }];
-      const rows = vals.flatMap((v) => (Array.isArray(v) ? v : [])).filter(isRecord);
-      const t = makeTable(segs, rows, parentAnchor, state);
+      const items = vals.flatMap((v) => (Array.isArray(v) ? v : [])).filter(isRecord);
+      const unwrapped = unwrapIdMap(items);
+      if (unwrapped) segs.push({ kind: 'map' });
+      const rows = unwrapped?.rows ?? items;
+      const t = makeTable(segs, rows, parentAnchor, state, unwrapped?.keys ?? []);
       tables.push(t);
       exploreChildren(rows, segs, t.anchor, tables, state, depth + 1);
     } else if (isMapOfObjects(vals)) {
