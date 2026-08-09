@@ -4001,8 +4001,23 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 
 /* One line saying what saving a mapping buys, under the controls that do it.
    Rule 13's dim rank: it is explanation, and it is read once. */
+/* A bar stacked under .convert-bar, so it takes the second chrome tier. Centred
+   rather than baseline-aligned, because it holds controls and rule 3 centres a
+   control on the box: `save to a file` carries an icon, so it is inline-flex,
+   and an inline-flex baseline is wherever its centred first item leaves it — in
+   a block container that lifted the button 2.5px off the row its neighbours sat
+   on. Centred boxes never consult a baseline, so the question stops arising. */
+#convert-mappings:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  min-height: var(--bar-h);
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-chrome-2);
+}
+
 .convert-mappings-note {
-  flex-basis: 100%;
   color: var(--text-dim);
   font-size: var(--fs-chip);
 }
@@ -4279,16 +4294,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 
   /* Mapping management is a disclosure strip, so at drawer widths it wraps
      in document order instead of becoming a horizontally clipped form. */
-  #convert-mappings:not([hidden]) {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--gap-2);
-    min-height: var(--bar-h);
-    padding: var(--gap-2) var(--gap-3);
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-chrome-2);
-  }
+  #convert-mappings:not([hidden]) { flex-wrap: wrap; }
   #convert-mappings > .spacer { flex-basis: 100%; }
   #convert-saved,
   .convert-map-name {
