@@ -58,6 +58,28 @@ const withoutComments = (source: string): string => {
 };
 
 /**
+ * The text a reader would see in a markup fragment — everything NOT inside a
+ * tag, with `join` standing in for each tag that is dropped. A scan rather than
+ * a `.replace(/<[^>]*>/g, …)`, for the same reason withoutComments above is
+ * one: strip-tags-by-regex is the shape of a sanitizer, it is never a correct
+ * one, and writing it here invites the next person to reach for it somewhere it
+ * matters. (CodeQL agrees, and said so.)
+ */
+function textOutsideTags(fragment: string, join = ''): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = fragment.indexOf('<', i);
+    if (open < 0) return (out + fragment.slice(i)).trim();
+    out += fragment.slice(i, open) + join;
+    const close = fragment.indexOf('>', open);
+    // Unterminated tag: nothing after it is text a reader would see.
+    if (close < 0) return out.trim();
+    i = close + 1;
+  }
+}
+
+/**
  * Everything a reader actually sees: text between tags, plus the three
  * attributes this app speaks through. Deliberately not the raw markup — ids
  * and file filters are not copy, and scanning them would flag `#convert-spec`
@@ -65,7 +87,7 @@ const withoutComments = (source: string): string => {
  */
 function copy(source: string): string {
   const bare = withoutComments(source);
-  const text = bare.replace(/<[^>]*>/g, ' ');
+  const text = textOutsideTags(bare, ' ');
   const attrs = [...bare.matchAll(/(?:title|placeholder|aria-label)="([^"]*)"/g)].map((m) => m[1]);
   return [text, ...attrs].join(' ').replace(/\s+/g, ' ');
 }
@@ -128,7 +150,7 @@ describe('the shell as a landing page', () => {
   it('shows a public query example that the one-pipe grammar can execute', () => {
     const section = element(html, 'query');
     const code = section.match(/<pre class="lp-code">([\s\S]*?)<\/pre>/)?.[1] ?? '';
-    const query = code.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const query = textOutsideTags(code).replace(/\s+/g, ' ').trim();
 
     expect(query.match(/\|/g)).toHaveLength(1);
     expect(runQuery({
@@ -290,27 +312,6 @@ describe('the icon sprite', () => {
 // AND to a screen reader. Neither is optional, and neither is checkable by
 // looking at the bar — they only exist in the markup.
 describe('glyph-only controls (rule 10, revised)', () => {
-  /**
-   * The text a reader would see in a markup fragment — everything NOT inside a
-   * tag. A scan rather than a `.replace(/<[^>]*>/g, '')`, for the same reason
-   * withoutComments above is one: strip-tags-by-regex is the shape of a
-   * sanitizer, it is never a correct one, and writing it here invites the next
-   * person to reach for it somewhere it matters. (CodeQL agrees, and said so.)
-   */
-  function textOutsideTags(fragment: string): string {
-    let out = '';
-    let i = 0;
-    for (;;) {
-      const open = fragment.indexOf('<', i);
-      if (open < 0) return (out + fragment.slice(i)).trim();
-      out += fragment.slice(i, open);
-      const close = fragment.indexOf('>', open);
-      // Unterminated tag: nothing after it is text a reader would see.
-      if (close < 0) return out.trim();
-      i = close + 1;
-    }
-  }
-
   /** Buttons whose entire visible content is one <svg class="ic">. */
   const glyphOnly = [...withoutComments(html).matchAll(/<button\b[\s\S]*?<\/button>/g)]
     .map((m) => m[0])
