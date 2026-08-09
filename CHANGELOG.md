@@ -2,7 +2,63 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.3.0 — 2026-08-09
+
+- **The workbench has a shape that fits a phone.** Below 900px the navigation
+  column becomes a drawer over the document instead of a third of the screen —
+  modal, dismissed by Escape or a tap outside, and inert to the keyboard while
+  closed. Below 760 the toolbar reflows, split view stacks its two panes
+  vertically, Run gives the whole width to its source or its workspace, and the
+  converter's table rail turns horizontal. Four things that only a 390px screen
+  reveals were fixed: the converter's column editor was rendering 16px tall with
+  every mapping control unreachable inside it, the landing's agent and split
+  bands ran off the right edge and clipped their own copy, `ask` was stranded on
+  a toolbar row of its own, and semantic compare parked half its filters past the
+  edge with nothing to say they were there.
+- **The converter stops throwing away work and stops going quiet.** Stepping out
+  to the tree and back re-ran detection, which discarded every renamed column and
+  untick — a revisit now keeps the mapping, and only a document that actually
+  changed is detected again. `starter mapping` in the saved list restores the
+  mapping detection drafted, which is what an entry in a list of mappings has
+  always looked like it would do. Writing the file says `converting…` and refuses
+  a second press, a failed conversion reports that only the wait was lost, and a
+  failed detection offers `try again` instead of `Looking through this
+  document…` forever.
+- **The preflight line says what needs review, not how much.** `12 values need
+  review` withheld the part that decides whether to care: a date the engine could
+  not read is a column to fix, a cell too long for a spreadsheet is Excel's
+  problem with a document that is otherwise correct. Kinds are named biggest
+  first, and problems in tables you have not clicked are counted rather than left
+  to appear after the download.
+- **Ask, and the numbers it hands back.** Stale answers can no longer arrive
+  after a newer question, a second press cannot start a second request, and a
+  request bound to a document that has since changed is refused rather than
+  answered wrongly. Large integers render and copy with their exact digits
+  instead of a wrapper leaking into the row.
+- **Two controls that were lying about their state.** The theme control persisted
+  a preference on the boot that merely resolved the default, so the first page
+  view anyone ever took pinned whatever the OS said at that instant and nobody
+  was following the system any more. `apply changes` ran the full commit path on
+  a buffer with nothing to apply, which cleared the tree selection and silently
+  severed a decoded document's link back to the blob it came from.
+- **Run mode is a library, not a row of chips.** Saved scripts are named records
+  you update or fork, several can run over one parse of the document into a
+  single keyed report, and a playbook of them exports and imports as a file that
+  merges rather than overwrites. A script learns which top-level paths it reads
+  on its first run and says when a document lacks them — a statement, never a
+  block on pressing run.
+- **`compress` was silently dead in the browser.** The page's own
+  `script-src 'self'` policy refuses WebAssembly on the main thread with no error
+  anywhere, so the button hung forever; the call moved into the worker that
+  `decode` had always used, rather than the policy being weakened.
+- **One design system, enforced.** Two text weights, a fixed type ramp, tokens
+  for motion, radius, bar height and focus rings, WCAG floors on every token
+  pair, and `npm run lint:contract` in CI to keep them. The toolbar regrouped
+  into which document, how you are viewing it, and what you can do with it, so
+  one accent remains per view.
+- **A file read for MCP is stat-ed and read through one handle.** A path swapped
+  between the size check and the read let a file past a limit the check had
+  already approved.
 
 - **Nested JSON becomes a reusable spreadsheet workflow.** The browser detects
   repeatable arrays/maps as linked tables, previews real rows, and now exposes
@@ -49,6 +105,9 @@ Notable changes to jsonloupe. Dates are UTC.
   instead of naming the key that failed and leaving the reader to work out
   which of their own decisions it refers to. The error codes behind the
   messages are unchanged, so anything routing on them still can.
+
+## 1.2.0 — 2026-08-07
+
 - **The MCP is now the shortest path, not a Python fallback.** Query responses
   return only 10 details by default and support summary-only (`limit=0`) plus
   `offset`/`limit` paging; counts and projected totals stream past the old
