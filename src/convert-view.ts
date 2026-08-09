@@ -61,6 +61,11 @@ export interface ConvertCallbacks {
   /** What the document is called; what a file made from it is called. Not the same string. */
   docTitle(): string;
   docStem(): string;
+  /**
+   * Which document this is. It changes when another one is opened AND when the
+   * open one is edited — both are re-detection, and neither is a revisit.
+   */
+  docRevision(): number;
 }
 
 const PREVIEW_ROWS = 12;
@@ -364,6 +369,13 @@ export class ConvertView {
   private epoch = 0;
   private currentMappingId: string | null = null;
   private savedMappings: SavedMapping[] = [];
+  // What detection drafted for this document, kept so `starter mapping` in the
+  // saved list is a mapping you can actually go back to.
+  private drafted: ConvertSpec | null = null;
+  // Which document the mapping on screen belongs to, and what it looked like at
+  // the last point it was nobody's edit — drafted, loaded, imported or saved.
+  private shownRevision = -1;
+  private cleanSpec = '';
   // The last answer the engine gave, kept because three things describe it: the
   // outcome sentence, the preview note, and the CSV caution.
   private lastPreview: PreviewResult | null = null;
@@ -435,8 +447,28 @@ export class ConvertView {
     });
   }
 
-  /** Fresh detection for the open document. Safe to call on every reveal. */
+  /**
+   * Detection for the open document. Safe to call on every reveal: a revisit to
+   * a document already detected keeps the mapping the user built, because
+   * detection describes a document and not a visit. It used to re-draft on every
+   * reveal, so stepping out to the tree to check a value and stepping back threw
+   * away every renamed column, with nothing said and nothing to undo.
+   */
   async open(): Promise<void> {
+    const revision = this.cbs.docRevision();
+    if (this.full && revision === this.shownRevision) {
+      // The pane is intact; only the shell's strip was taken over while away.
+      this.cbs.setLead(RESTING_LEAD);
+      this.syncActions();
+      this.renderPreviewNote();
+      return;
+    }
+    // A mapping built for a document that has since changed cannot quietly
+    // become a mapping for the new one — but it is the user's work, so its loss
+    // is said out loud rather than left to be noticed.
+    if (this.full && this.isDirty()) {
+      this.cbs.toast('the document changed, so this mapping was detected again');
+    }
     window.clearTimeout(this.timer);
     const mine = ++this.epoch;
     // A converter opened on a new document must never flash the previous
@@ -464,7 +496,10 @@ export class ConvertView {
     const { inspection, spec } = await this.cbs.inspect();
     if (mine !== this.epoch) return;
     this.inspection = inspection;
+    this.drafted = cloneSpec(spec);
     this.full = cloneSpec(spec);
+    this.shownRevision = revision;
+    this.markClean();
     this.offTables.clear();
     this.offCols.clear();
     this.selected = 0;
@@ -479,6 +514,25 @@ export class ConvertView {
     this.renderDetail();
     await this.refreshSavedMappings();
     void this.refreshPreview();
+  }
+
+  /**
+   * The mapping as it stands, ticks included — the string a later edit is
+   * compared against. Ticking a table off is an edit like any other, so it has
+   * to be part of what "unchanged" means.
+   */
+  private specSignature(): string {
+    if (!this.full) return '';
+    return JSON.stringify([this.full, [...this.offTables].sort(), [...this.offCols].sort()]);
+  }
+
+  private markClean(): void {
+    this.cleanSpec = this.specSignature();
+  }
+
+  /** Has the user changed anything since the mapping was last somebody else's? */
+  isDirty(): boolean {
+    return !!this.full && this.specSignature() !== this.cleanSpec;
   }
 
   /** The spec as currently edited: excluded tables and columns actually removed. */
@@ -616,8 +670,17 @@ export class ConvertView {
   private async loadSelectedMapping(): Promise<void> {
     const id = this.els.saved.value;
     if (!id) {
+      // `starter mapping` is an entry in this list, so picking it has to load
+      // one. It used to only clear the id, which left the list naming a mapping
+      // the view was not showing and no way back to what detection drafted.
       this.currentMappingId = null;
       this.els.forget.disabled = true;
+      if (!this.drafted) return;
+      const dirty = this.isDirty();
+      this.applyMapping(this.drafted, `${this.cbs.docTitle()} mapping`, null);
+      this.cbs.toast(dirty
+        ? 'starter mapping restored — your edits to it are gone'
+        : 'starter mapping restored');
       return;
     }
     const mapping = this.savedMappings.find((item) => item.id === id);
@@ -638,6 +701,9 @@ export class ConvertView {
     this.offTables.clear();
     this.offCols.clear();
     this.selected = 0;
+    // Somebody else's mapping, freshly laid down: this is the state a later
+    // edit is measured against.
+    this.markClean();
     this.syncOutputControls();
     for (const button of this.els.format.querySelectorAll<HTMLButtonElement>('button[data-fmt]')) {
       button.classList.toggle('on', button.dataset.fmt === this.full.output.format);
@@ -663,6 +729,7 @@ export class ConvertView {
       const saved = await this.cbs.saveMapping(name, spec, this.currentMappingId ?? undefined);
       this.currentMappingId = saved.id;
       this.els.mappingName.value = saved.name;
+      this.markClean();
       await this.refreshSavedMappings(saved.id);
       // The list this landed in is normally folded away, so open it: a save
       // whose result is hidden reads as a save that did not happen.

@@ -1743,6 +1743,7 @@ const converter = new ConvertView(
     setNote: setStatusNote,
     docTitle,
     docStem,
+    docRevision: () => currentDocumentRevision,
   },
 );
 

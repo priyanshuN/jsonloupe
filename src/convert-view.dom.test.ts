@@ -51,6 +51,8 @@ interface Harness {
   setNote: ReturnType<typeof vi.fn>;
   setPreview(value: 'ok' | 'errors' | 'throw'): void;
   setRun(value: 'xlsx' | 'csv' | 'errors' | 'throw'): void;
+  /** What the shell does when the open document's content changes. */
+  editDocument(): void;
 }
 
 function node<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagNameMap[K] {
@@ -115,6 +117,9 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
 
   let previewMode: 'ok' | 'errors' | 'throw' = 'ok';
   let runMode: 'xlsx' | 'csv' | 'errors' | 'throw' = 'xlsx';
+  // The shell's document revision: same number means the same document, so a
+  // second open() is a revisit rather than a new detection.
+  let revision = 1;
   const downloads = vi.fn();
   const toasts = vi.fn();
   const setLead = vi.fn();
@@ -181,6 +186,7 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
     setNote,
     docTitle: () => 'Orders August',
     docStem: () => 'orders-august',
+    docRevision: () => revision,
   };
 
   return {
@@ -195,6 +201,7 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
     setNote,
     setPreview(value) { previewMode = value; },
     setRun(value) { runMode = value; },
+    editDocument() { revision++; },
   };
 }
 
@@ -467,6 +474,57 @@ describe('converter view workflow', () => {
     await settlePreview();
     expect(h.els.mappingName.value).toBe('shared');
     expect(h.els.saved.value).toBe('');
+  });
+
+  it('keeps an edited mapping across a revisit and re-detects when the document changes', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+    const rename = h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!;
+    rename.value = 'order id';
+    change(rename);
+    await settlePreview();
+    expect(h.view.isDirty()).toBe(true);
+
+    // Stepping out to the tree and back is a revisit: same document, same work.
+    await h.view.open();
+    await settlePreview();
+    expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(1);
+    expect(h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value).toBe('order id');
+
+    // An edit to the document itself is a different document to detect against,
+    // and losing the mapping to it is said rather than left to be noticed.
+    h.editDocument();
+    await h.view.open();
+    await settlePreview();
+    expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(2);
+    expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('detected again'));
+    expect(h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value).not.toBe('order id');
+    expect(h.view.isDirty()).toBe(false);
+  });
+
+  it('restores the drafted mapping when the starter entry is picked again', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+    const drafted = h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value;
+
+    const rename = h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!;
+    rename.value = 'renamed';
+    change(rename);
+    await settlePreview();
+    expect(h.view.isDirty()).toBe(true);
+
+    h.els.saved.value = '';
+    change(h.els.saved);
+    await settlePreview();
+
+    expect(h.els.cols.querySelector<HTMLInputElement>('.convert-colname')!.value).toBe(drafted);
+    expect(h.els.mappingName.value).toBe('Orders August mapping');
+    expect(h.els.forget.disabled).toBe(true);
+    expect(h.view.isDirty()).toBe(false);
+    // The loss is stated: this entry replaces work, and the list gives no undo.
+    expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('edits to it are gone'));
   });
 
   it('renders the no-table state and explains that there is nothing to convert', async () => {
