@@ -5,6 +5,7 @@ import { fmtBytes, hasRawZstdMagic, payloadSniffNeedsDecode } from './intake';
 import appHtml from '../index.html?raw';
 import converterHtml from '../json-to-excel.html?raw';
 import readme from '../README.md?raw';
+import security from '../SECURITY.md?raw';
 import specHtml from '../spec.html?raw';
 import styleguideHtml from '../styleguide.html?raw';
 import packageText from '../package.json?raw';
@@ -89,6 +90,28 @@ describe('first-paint and navigation regression contracts', () => {
     expect(handler).toContain('pasteBox.focus()');
   });
 
+  it('consumes a converter handoff before restoring any recent document', () => {
+    const consume = mainSource.match(/function consumeConvertHandoff\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(consume).toContain('sessionStorage.getItem(CONVERT_HANDOFF)');
+    expect(consume).toContain('sessionStorage.removeItem(CONVERT_HANDOFF)');
+    expect(consume).toContain('catch');
+
+    const bootStart = mainSource.indexOf('async function boot()');
+    const handoffRead = mainSource.indexOf('const convertHandoff:', bootStart);
+    const sidebarRead = mainSource.indexOf('await renderRecents()', bootStart);
+    const recentRead = mainSource.indexOf('const docs = await store.listDocs()', bootStart);
+    expect(handoffRead).toBeGreaterThan(bootStart);
+    expect(handoffRead).toBeLessThan(sidebarRead);
+    expect(sidebarRead).toBeLessThan(recentRead);
+
+    const handoffBranch = mainSource.slice(handoffRead, recentRead);
+    expect(handoffBranch).toContain("convertHandoff.kind === 'unavailable'");
+    expect(handoffBranch).toContain('the converter handoff could not be read');
+    expect(handoffBranch).toContain('convertRouteWaiting = true');
+    expect(handoffBranch).toContain('await openText(convertHandoff.text, deriveTitle(convertHandoff.text), null)');
+    expect(handoffBranch).toMatch(/ungate\(\);\s*return;/);
+  });
+
   it('keeps the spec page theme-aware and names the cross-platform save shortcut', () => {
     expect(specHtml).toContain('<script src="/prepaint.js"></script>');
     expect(prepaintSource).toContain("localStorage.getItem('wb-theme')");
@@ -153,10 +176,67 @@ describe('interactive UI regression contracts', () => {
 
   it('clears Ask results on document changes and cancels stale previews', () => {
     const reset = mainSource.match(/function resetAskPanel\(\)[\s\S]*?\n\}/)?.[0] ?? '';
+    const cancel = mainSource.match(/function cancelAskRun\(\)[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(reset).toContain('cancelAskRun()');
     expect(reset).toContain('clearTimeout(previewTimer)');
     expect(reset).toContain('previewToken++');
     expect(reset).toContain('askResult.replaceChildren()');
+    expect(cancel).toContain('askGeneration++');
+    expect(cancel).toContain('askAbort?.abort()');
     expect(mainSource).toMatch(/async function openText[\s\S]*?resetAskPanel\(\)/);
+    expect(mainSource).toMatch(/function markCurrentContentEdited[\s\S]*?resetAskPanel\(\)/);
+  });
+
+  it('keeps one Ask request tied to one document generation and exposes its busy state', () => {
+    const run = mainSource.match(/async function runAsk\([\s\S]*?^\}/m)?.[0] ?? '';
+    const preview = mainSource.match(/async function runPreview\([\s\S]*?^\}/m)?.[0] ?? '';
+    const commit = mainSource.match(/async function commitEditedQuery\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(run).toContain('if (!input || askBusy) return;');
+    expect(run).toContain('const token = ++previewToken');
+    expect(run).toContain('const controller = new AbortController()');
+    expect(run).toContain('const documentToken = currentDocumentToken');
+    expect(run).toContain('generation === askGeneration');
+    expect(run).toContain('token === previewToken');
+    expect(run).toContain('documentToken === currentDocumentToken');
+    expect(run).toContain('translateToQuery(key, sent, controller.signal)');
+    expect(run).toMatch(/finally[\s\S]*?generation === askGeneration[\s\S]*?setAskBusy\(false\)/);
+    expect(preview).toContain('const documentToken = currentDocumentToken');
+    expect(preview).toContain('documentToken !== currentDocumentToken');
+    expect(commit).toContain('const documentToken = currentDocumentToken');
+    expect(commit).toContain('documentToken === currentDocumentToken');
+    expect(run.indexOf('const token = ++previewToken')).toBeLessThan(run.indexOf('await getApiKey()'));
+    expect(commit).toContain('const generation = ++askGeneration');
+    expect(commit).toContain('generation === askGeneration');
+    expect(commit).toContain('setAskBusy(true)');
+    expect(commit).toMatch(/finally[\s\S]*?generation === askGeneration[\s\S]*?setAskBusy\(false\)/);
+
+    expect(appHtml).toContain('id="ask-panel" aria-busy="false"');
+    expect(mainSource).toContain('askRunBtn.disabled = busy');
+    expect(mainSource).toContain('askQueryEdit.disabled = busy');
+    expect(mainSource).toContain('askQueryRun.disabled = busy');
+  });
+
+  it('invalidates Ask immediately after an inline edit, undo, or redo mutates the worker', () => {
+    for (const name of ['refreshAfterEdit', 'refreshAfterDocChange']) {
+      const refresh = mainSource.match(new RegExp(`async function ${name}\\([\\s\\S]*?^\\}`, 'm'))?.[0] ?? '';
+      expect(refresh).toContain('markCurrentContentEdited()');
+      expect(refresh.indexOf('markCurrentContentEdited()')).toBeLessThan(
+        refresh.indexOf("type: 'stringify'"),
+      );
+    }
+  });
+
+  it('copies raw row-query results in the worker rather than rebuilding display cells', () => {
+    expect(mainSource).toContain("type: 'queryRowsCopy'");
+    expect(mainSource).toContain("rows: string[][]");
+    expect(mainSource).not.toContain('Object.fromEntries(res.cols');
+  });
+
+  it('describes the Ask disclosure at the time it actually appears', () => {
+    expect(appHtml).toContain('After you press Ask, “sent to model” records the exact request.');
+    expect(security).toContain('disclosure records the exact payload sent after you press Ask.');
+    expect(appHtml).not.toMatch(/shown to you in full before anything is sent/i);
+    expect(security).not.toMatch(/disclosure shows the exact payload before anything is sent/i);
   });
 
   // `apply changes` was armed and accented while the strip beside it read

@@ -1708,6 +1708,20 @@ let lastQueryText: string | null = null;
 
 const QUERY_PANEL_CAP = 300;
 
+// Query rows cross the Worker structured-clone boundary, where a
+// LosslessNumber arrives as its implementation object instead of as the digits
+// the user asked to see. Keep lastQueryResult raw for exact copy/export, and
+// send only inert display text to the UI. Containers use lossless JSON rather
+// than native JSON.stringify so exact numbers nested inside them stay exact too.
+function queryDisplayCell(value: unknown): string {
+  if (value === undefined) return '';
+  if (value === null) return 'null';
+  if (isLosslessNumber(value)) return value.toString();
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return llStringify(value) ?? '';
+  return String(value);
+}
+
 function doQuery(q: string, options?: QueryOptions): object {
   const root = nodes.get(rootId);
   if (!root) {
@@ -1738,6 +1752,9 @@ function doQuery(q: string, options?: QueryOptions): object {
   }
   lastQueryPaths = [];
   lastQueryValues = [];
+  if (r.kind === 'rows') {
+    return { ...r, rows: r.rows.map((row) => row.map(queryDisplayCell)) };
+  }
   return r;
 }
 
@@ -1752,6 +1769,25 @@ function queryFilter(): { totalRows: number; matches: number } {
 
 function queryCopy(): { text: string; count: number } {
   return { text: llStringify(lastQueryValues, undefined, 2) ?? '', count: lastQueryValues.length };
+}
+
+type QueryRowsCopyResult =
+  | { ok: true; text: string; count: number }
+  | { ok: false; error: string };
+
+function queryRowsCopy(): QueryRowsCopyResult {
+  const result = lastQueryResult;
+  if (!result || !result.ok || result.kind !== 'rows') {
+    return { ok: false, error: 'no row query result' };
+  }
+  const objects = result.rows.map((row) =>
+    Object.fromEntries(result.cols.map((column, index) => [column, row[index]])),
+  );
+  return {
+    ok: true,
+    text: llStringify(objects, undefined, 2) ?? '[]',
+    count: result.rows.length,
+  };
 }
 
 // ---------- schema summary (for the NL layer — field names/types only) ----------
@@ -2219,6 +2255,8 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return queryFilter();
     case 'queryCopy':
       return queryCopy();
+    case 'queryRowsCopy':
+      return queryRowsCopy();
     case 'schema':
       return buildSchema(msg.path as string | undefined);
     case 'hasPaths':

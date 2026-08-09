@@ -272,8 +272,7 @@ SPDX-License-Identifier: MIT -->
                  spreadsheet-shaped reader mistakes for the converter. -->
             <p class="lp-body">Filter, pluck, group and count across the whole document — evaluated in the worker, never on the main thread. Any array opens as a sortable table, and the table or the result downloads as exact-digit CSV.</p>
             <pre class="lp-code">$.tasks[?(@.status == <span class="lp-str">'FAILED'</span>)]
-  | group(@.failureReason)
-  | count()</pre>
+  | group(@.failureReason)</pre>
           </section>
           <section class="lp-split-cell">
             <h2 class="lp-h2 lp-h2-sm">Diff that understands identity</h2>
@@ -303,7 +302,7 @@ SPDX-License-Identifier: MIT -->
         <section class="lp-band lp-privacy" id="privacy">
           <div>
             <h2 class="lp-h2 lp-h2-sm">Your documents never leave your machine</h2>
-            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>Ask</strong> — the optional English-to-query feature — stays off until you add your own API key, and even then it sends only the document's shape: field names and types, never values, shown to you in full before anything is sent.</p>
+            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>Ask</strong> — the optional English-to-query feature — stays off until you add your own API key, and even then it sends only the document's shape: field names and types, never values. After you press Ask, “sent to model” records the exact request.</p>
           </div>
           <div class="lp-facts">
             <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">3 · all opt-in Ask</span></div>
@@ -499,7 +498,7 @@ SPDX-License-Identifier: MIT -->
             </div>
           </div>
         </div>
-        <div id="ask-panel" hidden>
+        <div id="ask-panel" aria-busy="false" hidden>
           <div class="ask-row">
             <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
             <button id="ask-run" class="btn-icon primary" title="Ask this question"
@@ -527,7 +526,7 @@ SPDX-License-Identifier: MIT -->
             <summary>sent to model</summary>
             <div id="ask-disclosure-body"></div>
           </details>
-          <div id="ask-status" hidden></div>
+          <div id="ask-status" aria-live="polite" hidden></div>
           <div id="ask-result" hidden></div>
           <div id="ask-saved"></div>
         </div>

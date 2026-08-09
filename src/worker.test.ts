@@ -879,6 +879,106 @@ describe('filter keeps expansion state (W3)', () => {
   });
 });
 
+// ---------- query rows stay lossless across the worker boundary ----------
+
+describe('query row transport', () => {
+  interface QueryRowsResponse {
+    ok: true;
+    kind: 'rows';
+    cols: string[];
+    rows: string[][];
+    total: number;
+    truncated: boolean;
+  }
+
+  type QueryRowsCopyResponse =
+    | { ok: true; text: string; count: number }
+    | { ok: false; error: string };
+
+  const queryRows = (q: string): QueryRowsResponse => h<QueryRowsResponse>({ type: 'query', q });
+  const copyRows = (): QueryRowsCopyResponse => h<QueryRowsCopyResponse>({ type: 'queryRowsCopy' });
+
+  it('returns display-only strings without floating exact or nested numbers', () => {
+    parse(
+      '{"rows":[{"id":9007199254740993,"decimal":88.10,' +
+      '"nested":{"id":9007199254740995,"text":"a\\\"b\\nc"},' +
+      '"nil":null,"literal":"null"}]}',
+    );
+
+    const result = queryRows(
+      '$.rows[*] | pluck(@.id, @.decimal, @.nested, @.nil, @.literal, @.missing)',
+    );
+
+    expect(result.cols).toEqual(['id', 'decimal', 'nested', 'nil', 'literal', 'missing']);
+    expect(result.rows).toEqual([
+      [
+        '9007199254740993',
+        '88.10',
+        '{"id":9007199254740995,"text":"a\\\"b\\nc"}',
+        'null',
+        'null',
+        '',
+      ],
+    ]);
+    expect(result.rows.flat().every((cell) => typeof cell === 'string')).toBe(true);
+  });
+
+  it('normalizes every row-producing query shape before structured clone', () => {
+    parse('{"rows":[{"id":9007199254740993},{"id":7}]}');
+
+    for (const q of [
+      '$.rows[*] | pluck(@.id)',
+      '$.rows[*].id | distinct',
+      '$.rows[*] | top(@.id)',
+      '$.rows[*] | bottom(@.id)',
+    ]) {
+      const result = queryRows(q);
+      expect(result.rows.flat()).toContain('9007199254740993');
+      expect(result.rows.flat().every((cell) => typeof cell === 'string')).toBe(true);
+    }
+  });
+
+  it('copies raw rows as exact JSON objects instead of copying display text', () => {
+    parse(
+      '{"rows":[{"id":9007199254740993,"decimal":88.10,' +
+      '"nested":{"id":9007199254740995},"nil":null,"literal":"null"}]}',
+    );
+    queryRows('$.rows[*] | pluck(@.id, @.decimal, @.nested, @.nil, @.literal, @.missing)');
+
+    const copied = copyRows();
+    expect(copied.ok).toBe(true);
+    if (!copied.ok) throw new Error(copied.error);
+    expect(copied.count).toBe(1);
+    expect(copied.text).toContain('"id": 9007199254740993');
+    expect(copied.text).toContain('"decimal": 88.10');
+    expect(copied.text).toContain('"nil": null');
+    expect(copied.text).toContain('"literal": "null"');
+
+    const value = lparse(copied.text) as Record<string, unknown>[];
+    expect(value[0].id).toBeInstanceOf(LosslessNumber);
+    expect(String(value[0].id)).toBe('9007199254740993');
+    expect(String(value[0].decimal)).toBe('88.10');
+    expect(String((value[0].nested as Record<string, unknown>).id)).toBe('9007199254740995');
+    expect(value[0].nil).toBeNull();
+    expect(value[0].literal).toBe('null');
+    expect(Object.hasOwn(value[0], 'missing')).toBe(false);
+  });
+
+  it('distinguishes an empty row result from no row result and clears stale rows after errors', () => {
+    parse('{"rows":[]}');
+    expect(copyRows()).toEqual({ ok: false, error: 'no row query result' });
+
+    queryRows('$.rows[*] | pluck(@.id)');
+    expect(copyRows()).toEqual({ ok: true, text: '[]', count: 0 });
+
+    expect(h({ type: 'query', q: '$.rows[*] | pluck' })).toMatchObject({ ok: false });
+    expect(copyRows()).toEqual({ ok: false, error: 'no row query result' });
+
+    expect(h({ type: 'query', q: '$.rows[*]' })).toMatchObject({ ok: true, kind: 'matches' });
+    expect(copyRows()).toEqual({ ok: false, error: 'no row query result' });
+  });
+});
+
 // A sanity check that the number parser used above matches the worker's own,
 // so the "exact digits" assertions are meaningful (guards against a silent float).
 describe('CSV export (U2)', () => {

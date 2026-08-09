@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
+import { runQuery } from './query';
 // Pulled in through Vite's ?raw rather than node:fs: this file lives under src/,
 // which tsconfig.json types for the browser and deliberately denies node types.
 import html from '../index.html?raw';
@@ -122,6 +123,20 @@ describe('the shell as a landing page', () => {
     expect(grid).not.toContain('RFC 4180');
     // The promise itself survives, next to the result it acts on.
     expect(copy(html)).toMatch(/sortable table.*exact-digit CSV/i);
+  });
+
+  it('shows a public query example that the one-pipe grammar can execute', () => {
+    const section = element(html, 'query');
+    const code = section.match(/<pre class="lp-code">([\s\S]*?)<\/pre>/)?.[1] ?? '';
+    const query = code.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
+    expect(query.match(/\|/g)).toHaveLength(1);
+    expect(runQuery({
+      tasks: [
+        { status: 'FAILED', failureReason: 'NO_SLOT' },
+        { status: 'FAILED', failureReason: 'CAPACITY' },
+      ],
+    }, query)).toMatchObject({ ok: true, kind: 'groups' });
   });
 });
 

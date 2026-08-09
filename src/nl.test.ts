@@ -122,6 +122,7 @@ describe('API key storage', () => {
 describe('translateToQuery', () => {
   it('sends the disclosed OpenRouter payload and extracts one query', async () => {
     const sent = buildSentPayload('sk-or-key', SCHEMA, QUESTION);
+    const controller = new AbortController();
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ choices: [{ message: { content: '```\n$.tasks[*] | count\n```' } }] }),
@@ -129,10 +130,11 @@ describe('translateToQuery', () => {
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('location', { origin: 'https://jsonloupe.dev' });
 
-    await expect(translateToQuery('sk-or-key', sent)).resolves.toBe('$.tasks[*] | count');
+    await expect(translateToQuery('sk-or-key', sent, controller.signal)).resolves.toBe('$.tasks[*] | count');
     expect(fetchMock).toHaveBeenCalledWith(sent.endpoint, expect.objectContaining({
       method: 'POST',
       body: JSON.stringify(sent.body),
+      signal: controller.signal,
       headers: expect.objectContaining({
         Authorization: 'Bearer sk-or-key',
         'HTTP-Referer': 'https://jsonloupe.dev',
@@ -142,20 +144,39 @@ describe('translateToQuery', () => {
 
   it('sends the disclosed Anthropic payload and selects the text block', async () => {
     const sent = buildSentPayload('sk-ant-key', SCHEMA, QUESTION);
+    const controller = new AbortController();
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ content: [{ type: 'thinking' }, { type: 'text', text: '$.orders[*].id' }] }),
     }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(translateToQuery('sk-ant-key', sent)).resolves.toBe('$.orders[*].id');
+    await expect(translateToQuery('sk-ant-key', sent, controller.signal)).resolves.toBe('$.orders[*].id');
     expect(fetchMock).toHaveBeenCalledWith(sent.endpoint, expect.objectContaining({
       body: JSON.stringify(sent.body),
+      signal: controller.signal,
       headers: expect.objectContaining({
         'x-api-key': 'sk-ant-key',
         'anthropic-version': '2023-06-01',
       }),
     }));
+  });
+
+  it('lets an aborted translation reject as AbortError for the Ask lifecycle to discard', async () => {
+    const sent = buildSentPayload('sk-or-key', SCHEMA, QUESTION);
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    vi.stubGlobal('location', { origin: 'https://jsonloupe.dev' });
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBe(controller.signal);
+      if (init.signal?.aborted) throw aborted;
+      throw new Error('expected an aborted signal');
+    }));
+
+    await expect(translateToQuery('sk-or-key', sent, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
   });
 
   it.each([
