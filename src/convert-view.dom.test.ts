@@ -211,12 +211,93 @@ function input(element: HTMLElement): void {
   element.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function keydown(element: HTMLElement, key: string): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  element.dispatchEvent(event);
+  return event;
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   document.body.replaceChildren();
 });
 
 describe('converter view workflow', () => {
+  it('exposes table selection and moves it with either rail axis', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    expect(h.els.tables.getAttribute('role')).toBe('grid');
+    expect(h.els.tables.getAttribute('aria-label')).toBe('Detected tables');
+    expect(h.els.tables.getAttribute('aria-rowcount')).toBe('2');
+    const rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.getAttribute('role') === 'row')).toBe(true);
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(rows[0].tabIndex).toBe(0);
+    expect(rows[1].getAttribute('aria-selected')).toBe('false');
+    expect(rows[1].tabIndex).toBe(-1);
+
+    const expectSelected = (index: number, name: string): void => {
+      expect(rows[index].getAttribute('aria-selected')).toBe('true');
+      expect(rows[index].tabIndex).toBe(0);
+      expect(rows[1 - index].getAttribute('aria-selected')).toBe('false');
+      expect(rows[1 - index].tabIndex).toBe(-1);
+      expect(document.activeElement).toBe(rows[index]);
+      expect(h.els.detailName.textContent).toBe(name);
+    };
+
+    rows[0].focus();
+    expect(keydown(rows[0], 'ArrowRight').defaultPrevented).toBe(true);
+    expectSelected(1, 'items');
+    keydown(rows[1], 'ArrowLeft');
+    expectSelected(0, 'orders');
+    keydown(rows[0], 'ArrowDown');
+    expectSelected(1, 'items');
+    keydown(rows[1], 'ArrowUp');
+    expectSelected(0, 'orders');
+
+    rows[1].focus();
+    expect(keydown(rows[1], 'Enter').defaultPrevented).toBe(true);
+    expectSelected(1, 'items');
+    rows[0].focus();
+    expect(keydown(rows[0], ' ').defaultPrevented).toBe(true);
+    expectSelected(0, 'orders');
+  });
+
+  it('keeps row clicks selectable without stealing checkbox or name interactions', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    let rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
+    rows[1].click();
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+
+    const include = rows[0].querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    include.click();
+    expect(include.checked).toBe(false);
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+
+    const name = rows[0].querySelector<HTMLInputElement>('.convert-name')!;
+    name.click();
+    keydown(name, 'ArrowDown');
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+    name.value = 'shipments';
+    change(name);
+
+    rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('items');
+    rows[0].querySelector<HTMLElement>('.convert-where')!.click();
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(h.els.detailName.textContent).toBe('shipments');
+  });
+
   it('opens a real mapping and keeps table, column, format, and preview edits connected', async () => {
     const h = makeHarness();
     await h.view.open();

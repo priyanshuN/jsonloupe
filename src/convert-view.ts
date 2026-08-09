@@ -730,6 +730,8 @@ export class ConvertView {
     host.textContent = '';
     this.tableMetas.clear();
     if (!this.full || !this.full.tables.length) {
+      host.removeAttribute('role');
+      host.removeAttribute('aria-rowcount');
       host.append(this.cbs.emptyState(
         'No tables here',
         'This document has no repeating list of objects to flatten. Try a document with an array of objects in it.',
@@ -739,14 +741,26 @@ export class ConvertView {
       return;
     }
 
+    // A grid lets each selectable row expose its current state without turning
+    // the row into a button/option that illegally contains the include checkbox
+    // and editable name. Focus stays on one row at a time; both axes work because
+    // this rail becomes horizontal on narrow screens and is vertical on desktop.
+    host.setAttribute('role', 'grid');
+    host.setAttribute('aria-label', 'Detected tables');
+    host.setAttribute('aria-rowcount', String(this.full.tables.length));
     this.full.tables.forEach((t, i) => {
       const row = el('div', 'convert-table' + (i === this.selected ? ' on' : ''));
-      row.setAttribute('role', 'listitem');
+      row.setAttribute('role', 'row');
+      row.setAttribute('aria-rowindex', String(i + 1));
+      row.setAttribute('aria-selected', String(i === this.selected));
+      row.setAttribute('aria-label', `${t.name}, ${friendlyPath(t.anchor)}`);
+      row.tabIndex = i === this.selected ? 0 : -1;
 
       const chk = el('input', 'chk') as HTMLInputElement;
       chk.type = 'checkbox';
       chk.checked = !this.offTables.has(t.name);
       chk.title = 'Include this table in the output';
+      chk.setAttribute('aria-label', `Include ${t.name} in the output`);
       chk.addEventListener('click', (e) => e.stopPropagation());
       chk.addEventListener('change', () => {
         if (chk.checked) this.offTables.delete(t.name);
@@ -759,6 +773,7 @@ export class ConvertView {
       name.value = t.name;
       name.spellcheck = false;
       name.title = 'Name of this sheet or file';
+      name.setAttribute('aria-label', `Output name for ${t.name}`);
       name.addEventListener('click', (e) => e.stopPropagation());
       name.addEventListener('change', () => this.renameTable(t.name, name.value.trim() || t.name));
 
@@ -769,19 +784,54 @@ export class ConvertView {
       const where = el('div', 'convert-where', friendlyPath(t.anchor));
 
       const head = el('div', 'convert-table-head');
+      head.setAttribute('role', 'gridcell');
+      where.setAttribute('role', 'gridcell');
       head.append(chk, name, meta);
       row.append(head, where);
       if (this.offTables.has(t.name)) row.classList.add('off');
-      row.addEventListener('click', () => {
-        this.selected = i;
-        this.renderTables();
-        this.renderDetail();
-        void this.refreshPreview();
+      row.addEventListener('click', () => this.selectTable(i, false));
+      row.addEventListener('keydown', (event) => {
+        // Text editing, checkbox toggling, and any future row controls keep
+        // their native keys. Only the focused row owns selection/navigation.
+        if (event.target !== row) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          this.selectTable(i, true);
+          return;
+        }
+        const delta = event.key === 'ArrowDown' || event.key === 'ArrowRight'
+          ? 1
+          : event.key === 'ArrowUp' || event.key === 'ArrowLeft'
+            ? -1
+            : 0;
+        if (!delta) return;
+        event.preventDefault();
+        const last = (this.full?.tables.length ?? 1) - 1;
+        this.selectTable(Math.max(0, Math.min(last, i + delta)), true);
       });
       host.append(row);
     });
     this.syncActions();
     this.paintErrors();
+  }
+
+  /** Select a table without rebuilding the rail (and taking focus with it). */
+  private selectTable(index: number, focus: boolean): void {
+    if (!this.full?.tables[index]) return;
+    const changed = index !== this.selected;
+    this.selected = index;
+    const rows = this.els.tables.querySelectorAll<HTMLElement>('.convert-table');
+    rows.forEach((row, rowIndex) => {
+      const selected = rowIndex === index;
+      row.classList.toggle('on', selected);
+      row.setAttribute('aria-selected', String(selected));
+      row.tabIndex = selected ? 0 : -1;
+    });
+    if (changed) {
+      this.renderDetail();
+      void this.refreshPreview();
+    }
+    if (focus) rows[index]?.focus();
   }
 
   private renameTable(from: string, to: string): void {

@@ -186,6 +186,52 @@ describe('the converter view the panel code fills in', () => {
   });
 });
 
+describe('the responsive workbench shell', () => {
+  it('gives the Documents drawer a stable trigger, close control, and light-dismiss surface', () => {
+    const shellBar = element(html, 'mobile-shell-bar');
+    const open = element(shellBar, 'sidebar-open');
+    const sidebar = element(html, 'sidebar');
+    const close = element(sidebar, 'sidebar-close');
+    const scrim = element(html, 'sidebar-scrim');
+
+    expect(open).toContain('aria-controls="sidebar"');
+    expect(open).toContain('aria-expanded="false"');
+    expect(sidebar).toContain('aria-label="Documents"');
+    expect(close).toContain('aria-label="Close documents"');
+    expect(scrim).toContain('aria-label="Close documents"');
+    expect(scrim).toContain('tabindex="-1"');
+    expect(scrim).toContain('hidden');
+  });
+
+  it('keeps the compact trigger outside the drawer and both ahead of the content surface', () => {
+    const trigger = html.indexOf('id="mobile-shell-bar"');
+    const drawer = html.indexOf('id="sidebar"');
+    const content = html.indexOf('id="content"');
+    expect(trigger).toBeGreaterThan(-1);
+    expect(trigger).toBeLessThan(drawer);
+    expect(drawer).toBeLessThan(content);
+  });
+
+  it('keeps the converter settings, table selector, and preview in its one responsive surface', () => {
+    const view = element(html, 'convert-view');
+    for (const id of ['convert-missing', 'convert-array-join', 'convert-tables', 'convert-cols', 'convert-preview']) {
+      const opening = view.match(new RegExp(`<[^>]+id="${id}"[^>]*>`))?.[0] ?? '';
+      expect(opening, `#${id} is present`).not.toBe('');
+      expect(opening).not.toMatch(/\shidden(?:\s|>)/);
+    }
+    expect(element(view, 'convert-tables')).toContain('aria-label="Detected tables"');
+  });
+
+  it('offers one full-width Run group without replacing its existing switches', () => {
+    const mobile = element(html, 'run-mobile-switch');
+    expect(mobile).toContain('role="group"');
+    expect(mobile).toContain('data-mobile-run="source"');
+    expect(mobile).toContain('data-mobile-run="workspace"');
+    expect(html).toContain('id="run-src-switch"');
+    expect(html).toContain('id="run-face-switch"');
+  });
+});
+
 describe('the icon sprite', () => {
   /** id → normalised symbol body, so indentation differences do not count. */
   function symbols(source: string): Record<string, string> {

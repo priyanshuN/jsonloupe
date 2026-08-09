@@ -142,6 +142,56 @@ describe('deployment hardening contracts', () => {
 });
 
 describe('interactive UI regression contracts', () => {
+  it('keeps the compact Documents drawer modal, dismissible, and focus-safe', () => {
+    const paint = mainSource.match(/function paintDocumentsDrawer\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const open = mainSource.match(/function openDocumentsDrawer\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const close = mainSource.match(/function closeDocumentsDrawer\([\s\S]*?^\}/m)?.[0] ?? '';
+
+    expect(appHtml).toContain('id="sidebar-open" type="button" aria-controls="sidebar" aria-expanded="false"');
+    expect(appHtml).toContain('id="sidebar-scrim" type="button" tabindex="-1" aria-label="Close documents" hidden');
+    expect(paint).toContain('sidebar.inert = !open');
+    expect(paint).toContain("sidebar.setAttribute('aria-hidden', String(!open))");
+    expect(paint).toContain("sidebar.setAttribute('aria-modal', 'true')");
+    expect(open).toContain('documentsReturnFocus = document.activeElement');
+    expect(open).toContain('sidebarCloseBtn.focus()');
+    expect(close).toContain('target.focus()');
+    expect(mainSource).toContain("if (event.key === 'Escape')");
+    expect(mainSource).toContain("sidebarScrim.addEventListener('click', () => closeDocumentsDrawer())");
+  });
+
+  it('closes the drawer on navigation and makes recent documents keyboard-operable', () => {
+    const opened = mainSource.match(/async function openText\([\s\S]*?^\}/m)?.[0] ?? '';
+    const landing = mainSource.match(/function goLanding\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const codec = mainSource.match(/function showCodec\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const recents = mainSource.match(/async function renderRecents\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+
+    expect(opened).toContain('closeDocumentsDrawer();');
+    expect(landing).toContain('closeDocumentsDrawer(false)');
+    expect(codec).toContain('closeDocumentsDrawer(false)');
+    expect(recents).toContain('focusable: true');
+    expect(mainSource).toContain("open.className = 'doc-row-open focus-ring'");
+    expect(mainSource).not.toContain("row.setAttribute('role', 'button')");
+    expect(mainSource).toContain('closeDocumentsDrawer();\n    await compareRecent(id);');
+  });
+
+  it('keeps mobile Run surface state separate and refreshes virtual readers after reflow', () => {
+    const paint = mainSource.match(/function paintMobileRunSurface\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const set = mainSource.match(/function setMobileRunSurface\([\s\S]*?^\}/m)?.[0] ?? '';
+    const refresh = mainSource.match(/function scheduleResponsiveRefresh\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+
+    expect(mainSource).toContain("let runSource: 'tree' | 'code' = 'tree'");
+    expect(mainSource).toContain("let runFace: 'functions' | 'result' = 'result'");
+    expect(mainSource).toContain("let mobileRunSurface: 'source' | 'workspace' = 'workspace'");
+    expect(paint).toContain('viewer.dataset.mobileRun = mobileRunSurface');
+    expect(paint).toContain("button.setAttribute('aria-pressed', String(on))");
+    expect(set).toContain('scheduleResponsiveRefresh()');
+    expect(refresh).toContain('tree.refresh()');
+    expect(refresh).toContain('semanticCompare.refresh()');
+    expect(refresh).toContain('resultTree.refresh()');
+    expect(refresh).toContain("if (activePane === 'table') void renderTable()");
+    expect(mainSource).toContain("window.addEventListener('orientationchange', scheduleResponsiveRefresh)");
+  });
+
   it('contains the API-key password input in a submit form', () => {
     const form = appHtml.match(/<form class="ask-row" id="ask-key-row"[\s\S]*?<\/form>/)?.[0] ?? '';
     expect(form).toContain('id="ask-key-input" type="password"');

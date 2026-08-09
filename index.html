@@ -124,7 +124,17 @@ SPDX-License-Identifier: MIT -->
     </symbol>
   </svg>
   <div id="app">
-    <aside id="sidebar">
+    <!-- On compact screens this is the one persistent shell row. The sidebar
+         becomes a modal drawer beneath it; keeping the trigger outside that
+         drawer gives Escape and light-dismiss somewhere stable to return
+         focus to. Desktop CSS removes this row entirely. -->
+    <div id="mobile-shell-bar">
+      <button id="sidebar-open" type="button" aria-controls="sidebar" aria-expanded="false"
+        title="Open documents">documents</button>
+      <span class="spacer"></span>
+      <span class="mobile-shell-brand">json<span class="brand-loupe">loupe</span></span>
+    </div>
+    <aside id="sidebar" aria-label="Documents">
       <div class="side-head">
         <a class="brand" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec"><img class="brand-mark" src="/favicon.svg" alt="" width="27" height="27" /><span>json<span class="brand-loupe">loupe</span></span></a>
         <!-- The drawn plus, not the character: `+` carries its own optical
@@ -132,6 +142,8 @@ SPDX-License-Identifier: MIT -->
              exists. Keeps its word — this is the sidebar's one CTA, and it has
              the room. -->
         <button id="new-btn" title="New document"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>new</button>
+        <button id="sidebar-close" class="btn-icon btn-quiet" type="button"
+          title="Close documents" aria-label="Close documents">×</button>
       </div>
       <div class="side-label">Recents</div>
       <div id="recents"></div>
@@ -155,6 +167,7 @@ SPDX-License-Identifier: MIT -->
         <a class="about-link" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec">about</a>
       </div>
     </aside>
+    <button id="sidebar-scrim" type="button" tabindex="-1" aria-label="Close documents" hidden></button>
     <main id="content">
       <section id="landing">
         <header class="lp-header">
@@ -497,6 +510,14 @@ SPDX-License-Identifier: MIT -->
               </div>
             </div>
           </div>
+        </div>
+        <!-- At phone widths Run uses one full-width surface at a time. This is
+             deliberately independent of the source's tree/code switch and the
+             workspace's functions/result switch: it only chooses which pane
+             receives the available width. -->
+        <div class="mode-switch" id="run-mobile-switch" role="group" aria-label="Run pane">
+          <button type="button" data-mobile-run="source" aria-pressed="false">source</button>
+          <button type="button" data-mobile-run="workspace" class="on" aria-pressed="true">workspace</button>
         </div>
         <div id="ask-panel" aria-busy="false" hidden>
           <div class="ask-row">
