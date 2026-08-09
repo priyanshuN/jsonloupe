@@ -1089,8 +1089,22 @@ export class ConvertView {
       host.append(link);
     }
 
+    // Every column of a table offers the same fields, so the list is built once
+    // and shared. Per row it was quadratic — a wide table spent the whole click
+    // making option nodes nothing had asked to see yet.
+    const fields = this.sourceOptions(t.name);
+    const list = el('datalist') as HTMLDataListElement;
+    list.id = `convert-sources-${this.selected}`;
+    for (const field of fields) {
+      const option = el('option') as HTMLOptionElement;
+      option.value = field.path;
+      if (field.hint) option.label = field.hint;
+      list.append(option);
+    }
+    host.append(list);
+
     for (const c of t.columns) {
-      host.append(this.columnRow(t.name, c));
+      host.append(this.columnRow(t.name, c, list.id, fields));
     }
     this.syncActions();
     this.paintErrors();
@@ -1152,7 +1166,7 @@ export class ConvertView {
     }
   }
 
-  private columnRow(table: string, c: ColumnSpec): HTMLElement {
+  private columnRow(table: string, c: ColumnSpec, listId: string, fields: SourceOption[]): HTMLElement {
     const key = `${table}\u0000${c.name}`;
     const row = el('div', 'convert-col');
     row.setAttribute('role', 'listitem');
@@ -1202,20 +1216,10 @@ export class ConvertView {
     source.spellcheck = false;
     source.placeholder = mode.value === 'constant' ? 'constant value' : 'source field';
     source.value = mode.value === 'constant' ? (c.const ?? '') : (c.from ?? '');
-    const list = el('datalist') as HTMLDataListElement;
-    const listId = `convert-sources-${this.selected}-${Math.random().toString(36).slice(2)}`;
-    list.id = listId;
-    source.setAttribute('list', listId);
     // A field is picked by looking at what is in it, not by reading its name and
     // hoping. Detection already counted how often each one is filled and kept a
     // few real values; the picker is where those belong.
-    const fields = this.sourceOptions(table);
-    for (const field of fields) {
-      const option = el('option') as HTMLOptionElement;
-      option.value = field.path;
-      if (field.hint) option.label = field.hint;
-      list.append(option);
-    }
+    source.setAttribute('list', listId);
     // What the chosen field holds stays on the row after the list closes — the
     // datalist disappears the moment it is used, and it was the thing telling
     // the user they had picked the right field.
@@ -1261,7 +1265,7 @@ export class ConvertView {
     remove.setAttribute('aria-label', 'Remove column');
     remove.addEventListener('click', () => this.removeColumn(c));
 
-    row.append(chk, name, mode, source, list, up, down, remove);
+    row.append(chk, name, mode, source, up, down, remove);
     const options = this.columnOptions(c);
     options.prepend(hint);
     describe();
