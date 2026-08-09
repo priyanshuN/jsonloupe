@@ -272,6 +272,29 @@ export function ceilingBreaches(table: {
   return said;
 }
 
+/**
+ * What "needs review" actually means, before the download rather than in the
+ * report after it. A count on its own — `12 values need review` — says a number
+ * and withholds the only part that tells the user whether to care: a date the
+ * engine could not read is a column to fix, and a cell too long for a spreadsheet
+ * is Excel's problem with a document that is otherwise correct.
+ *
+ * Kinds are named biggest-first and capped at two, because this line shares a
+ * strip with the row count and the ceilings; the rest are counted, not listed.
+ */
+export function warningSummary(warnings: readonly Warning[], limit = 2): string[] {
+  const byCode = new Map<Warning['code'], number>();
+  for (const warning of warnings) {
+    byCode.set(warning.code, (byCode.get(warning.code) ?? 0) + warning.count);
+  }
+  const ranked = [...byCode].sort((a, b) => b[1] - a[1]);
+  const said = ranked.slice(0, limit).map(([code, count]) =>
+    `${count.toLocaleString()} × ${warningLabel(code)}`);
+  const rest = ranked.slice(limit).reduce((total, [, count]) => total + count, 0);
+  if (rest) said.push(`${rest.toLocaleString()} more to review`);
+  return said;
+}
+
 /** The outcome, named: what comes out, how big, and that nothing else is required. */
 export function outcomeLine(out: {
   tables: number;
@@ -1455,11 +1478,15 @@ export class ConvertView {
       const dropped = t.skipped.toLocaleString();
       parts.push(`${dropped} row${t.skipped === 1 ? '' : 's'} skipped`);
     }
-    const warningCount = res.warnings
-      .filter((w) => w.table === t.name)
+    parts.push(...warningSummary(res.warnings.filter((w) => w.table === t.name)));
+    // A problem in a table nobody has clicked is still going into the file. The
+    // note is about the previewed table, so the others are counted here rather
+    // than described — one line saying they exist beats finding out afterwards.
+    const elsewhere = res.warnings
+      .filter((w) => w.table !== t.name)
       .reduce((total, item) => total + item.count, 0);
-    if (warningCount) {
-      parts.push(`${warningCount.toLocaleString()} value${warningCount === 1 ? '' : 's'} need review`);
+    if (elsewhere) {
+      parts.push(`${elsewhere.toLocaleString()} in other tables`);
     }
     // The ceilings are the spreadsheet's, so they are only a cost when a
     // spreadsheet is what is being written. Saying them under CSV would warn
@@ -1564,7 +1591,7 @@ export class ConvertView {
         const where = warning.column ? `${warning.table}.${warning.column}` : warning.table;
         const sample = warning.sample === undefined ? '' : ` · e.g. ${warning.sample}`;
         list.append(el('li', undefined,
-          `${where}: ${warningLabel(warning)} on ${warning.count.toLocaleString()} value${warning.count === 1 ? '' : 's'}${sample}`));
+          `${where}: ${warningLabel(warning.code)} on ${warning.count.toLocaleString()} value${warning.count === 1 ? '' : 's'}${sample}`));
       }
       host.append(list);
     } else if (!report.tables.some((table) => table.skipped)) {
@@ -1574,8 +1601,8 @@ export class ConvertView {
   }
 }
 
-function warningLabel(warning: Warning): string {
-  switch (warning.code) {
+function warningLabel(code: Warning['code']): string {
+  switch (code) {
     case 'BAD_DATETIME': return 'date/time could not be read';
     case 'BAD_GEO': return 'coordinate could not be read';
     case 'BAD_BASEDATE': return 'base date could not be read; today was used';

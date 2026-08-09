@@ -527,6 +527,36 @@ describe('converter view workflow', () => {
     expect(h.toasts).toHaveBeenCalledWith(expect.stringContaining('edits to it are gone'));
   });
 
+  it('names what needs review before the download, including the tables not on screen', async () => {
+    const h = makeHarness();
+    vi.mocked(h.callbacks.preview).mockResolvedValue({
+      tables: [{
+        name: 'orders',
+        columns: ['id', 'dispatchDate'],
+        rows: [['101', '2026-08-08']],
+        total: 40,
+        skipped: 2,
+        widest: { column: 'id', chars: 3 },
+      }],
+      warnings: [
+        { table: 'orders', column: 'dispatchDate', code: 'BAD_DATETIME', count: 4 },
+        { table: 'items', column: 'sku', code: 'CELL_TOO_LONG', count: 7 },
+      ],
+    });
+    await h.view.open();
+    await settlePreview();
+
+    const note = h.els.previewNote.textContent ?? '';
+    expect(note).toContain('40 rows');
+    expect(note).toContain('2 rows skipped');
+    // The kind, not a count of anonymous values: a date that could not be read
+    // is a column to fix; a cell too long is Excel's problem with a good one.
+    expect(note).toContain('4 × date/time could not be read');
+    expect(note).not.toMatch(/values? need review/);
+    // The other table is going into the same file, whether or not it is open.
+    expect(note).toContain('7 in other tables');
+  });
+
   it('renders the no-table state and explains that there is nothing to convert', async () => {
     const h = makeHarness();
     const emptyInspection = inspect({ doc: { name: 'not a collection' } });
