@@ -372,6 +372,52 @@ describe('detection', () => {
     expect(ins.tables.map((t) => t.anchor)).toEqual(['$.hubs{}']);
   });
 
+  it('collapses an array of id-keyed wrappers into one table', async () => {
+    // A routing request delivers its jobs as one array slot per job id. Read
+    // literally, every id becomes a field name and a table of its own: the rail
+    // fills with hundreds of near-identical entries, and the fields every row
+    // actually shares are each seen exactly once.
+    const doc = {
+      problems: [
+        {
+          fenceId: 'F1',
+          pickupDeliveryJob: [
+            { '18567': { pickup: { lat: '1.1' }, delivery: { lat: '2.2' } } },
+            { '18570': { pickup: { lat: '3.3' }, delivery: { lat: '4.4' } } },
+          ],
+        },
+      ],
+    };
+    const ins = inspect({ doc });
+    expect(ins.tables.map((t) => t.anchor)).toEqual([
+      '$.problems[]',
+      '$.problems[].pickupDeliveryJob[]{}',
+    ]);
+
+    const jobs = ins.tables[1];
+    expect(jobs.rows).toBe(2);
+    expect(jobs.isMap).toBe(true);
+    expect(jobs.keySamples).toEqual(['18567', '18570']);
+    // The shape, not the ids — and every field filled on both rows.
+    expect(jobs.fields.map((f) => f.path).sort()).toEqual([
+      'delivery',
+      'delivery.lat',
+      'pickup',
+      'pickup.lat',
+    ]);
+    expect(jobs.fields.every((f) => f.present === 2)).toBe(true);
+
+    // The id survives as data: one row per job, with the key as a real column.
+    const spec = draftSpec(ins);
+    const table = spec.tables.find((t) => t.anchor === jobs.anchor);
+    const keyCol = table?.columns.find((c) => c.from === '{key}');
+    expect(keyCol).toBeDefined();
+    const { sink } = await run(doc, spec);
+    const out = sink.byName(table!.name);
+    expect(out?.rows.length).toBe(2);
+    expect(out?.rows.map((r) => r[out.columns.indexOf(keyCol!.name)])).toEqual(['18567', '18570']);
+  });
+
   it('tells a map-of-objects from an ordinary record', () => {
     const ins = inspect({
       doc: {
