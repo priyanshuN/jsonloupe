@@ -93,6 +93,50 @@ function matchLabel(n: number): string {
   return `${countText(n)} ${n === 1 ? 'match' : 'matches'}`;
 }
 
+// The seven CodeMirror packages, fetched once and remembered. They are pulled
+// in here rather than at the top of the file so the main bundle stays free of
+// them (see the header), but the import() that does it lives in create(), which
+// means importing THIS module warms only the few KB of wrapper — the ~130 KB
+// gzipped that actually makes the user wait is behind a second hop. Hoisting it
+// into a memoized promise gives the app something it can start ahead of the
+// click; create() then awaits the same promise and finds it already settled.
+type CmModules = [
+  typeof import('@codemirror/state'),
+  typeof import('@codemirror/view'),
+  typeof import('@codemirror/language'),
+  typeof import('@codemirror/commands'),
+  typeof import('@codemirror/search'),
+  typeof import('@codemirror/lang-json'),
+  typeof import('@lezer/highlight'),
+];
+let cmModules: Promise<CmModules> | null = null;
+function loadCm(): Promise<CmModules> {
+  cmModules ??= Promise.all([
+    import('@codemirror/state'),
+    import('@codemirror/view'),
+    import('@codemirror/language'),
+    import('@codemirror/commands'),
+    import('@codemirror/search'),
+    import('@codemirror/lang-json'),
+    import('@lezer/highlight'),
+  ]).catch((e: unknown) => {
+    // A failed warm must not poison the real open — forget it and let create()
+    // try again (and surface its own error) when the user actually clicks.
+    cmModules = null;
+    throw e;
+  }) as Promise<CmModules>;
+  return cmModules;
+}
+
+/**
+ * Start fetching the editor's modules without building one. Safe to call at any
+ * time, more than once, and to ignore the result — the promise it returns is
+ * the same one create() will await.
+ */
+export function preload(): Promise<unknown> {
+  return loadCm();
+}
+
 export class CodeEditor {
   private constructor(
     private view: EditorView,
@@ -107,15 +151,7 @@ export class CodeEditor {
   ) {}
 
   static async create(opts: CreateOpts): Promise<CodeEditor> {
-    const [state, view, lang, cmds, search, jsonLang, hl] = await Promise.all([
-      import('@codemirror/state'),
-      import('@codemirror/view'),
-      import('@codemirror/language'),
-      import('@codemirror/commands'),
-      import('@codemirror/search'),
-      import('@codemirror/lang-json'),
-      import('@lezer/highlight'),
-    ]);
+    const [state, view, lang, cmds, search, jsonLang, hl] = await loadCm();
 
     const { EditorState, Compartment, Annotation, StateEffect, StateField } = state;
     const {
