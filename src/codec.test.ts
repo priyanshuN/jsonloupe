@@ -388,6 +388,58 @@ describe('encodePayload', () => {
     expect(bytea.startsWith('\\x')).toBe(true);
     // Plain base64 is NOT compressed — the point of the option.
     expect(atob(plain)).toBe(doc);
+    // ...and it has to come back, which this only ever asserted about the other
+    // two. Checking that an encoding was written correctly without once reading
+    // it back is how the pane shipped refusing its own output for a whole
+    // format: compress on `base64`, press decode, `unsupported-format`.
+    expect(await decodeJsonPayload(plain)).toMatchObject({ ok: true, text: doc });
+  });
+
+  it('reads plain base64 back, and reports it as its own format', async () => {
+    const plain = await encodePayload(doc, 'base64');
+    const decoded = unwrap(await decodeJsonPayload(plain));
+    expect(decoded.text).toBe(doc);
+    expect(decoded.metadata.format).toBe('base64-json');
+    expect(decoded.metadata.compressedByteLength).toBeUndefined();
+    expect(decoded.metadata.layers.map((l) => l.kind)).toEqual(['base64', 'json']);
+    // The other alphabet, which only shows up in a payload whose base64
+    // actually contains + or / — for anything else the two encodings are the
+    // same string and `standard` is the honest answer.
+    const spicy = '{"note":"a>b?c~d"}';
+    const urlSafe = (await encodePayload(spicy, 'base64'))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    expect(urlSafe).toMatch(/[-_]/);
+    const urlDecoded = unwrap(await decodeJsonPayload(urlSafe));
+    expect(urlDecoded.text).toBe(spicy);
+    expect(urlDecoded.metadata.format).toBe('base64url-json');
+  });
+
+  it('goes back out as plain base64, not wrapped in a Zstd frame nobody asked for', () => {
+    expect(encodeFormatFor('base64-json')).toBe('base64');
+    expect(encodeFormatFor('base64url-json')).toBe('base64');
+  });
+
+  // The gate on this branch is the decoded CONTENT, not a signature, so what it
+  // must NOT swallow matters as much as what it reads.
+  it('does not claim base64 that decodes to something other than JSON', async () => {
+    const notJson = btoa('just some prose, not a document');
+    const result = await decodeJsonPayload(notJson);
+    expect(result).toMatchObject({ ok: false });
+    if (!result.ok) expect(result.error.code).toBe('unsupported-format');
+    // Malformed JSON inside base64 is a different answer: it IS the format,
+    // and the syntax is what is wrong.
+    const broken = await decodeJsonPayload(btoa('{"a":}'));
+    expect(broken).toMatchObject({ ok: false });
+    if (!broken.ok) expect(broken.error.code).toBe('invalid-json');
+  });
+
+  // The automatic paths (paste, open a file, the nested `decode payload` chip)
+  // decide FOR the user and must keep guessing only from magic bytes.
+  it('stays out of the automatic sniff, which has no signature to go on', async () => {
+    const plain = await encodePayload(doc, 'base64');
+    expect(sniffPayloadText(plain)).toMatchObject({ recognized: false, format: 'unknown' });
+    // The explicit press still reads it — that is the whole distinction.
+    expect(await decodeJsonPayload(plain)).toMatchObject({ ok: true, text: doc });
   });
 
   it('renders bytea as PostgreSQL does: \\x and lowercase hex', () => {
