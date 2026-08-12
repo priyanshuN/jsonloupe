@@ -113,6 +113,45 @@ flagged, with the original bytes preserved.
   the page makes zero network requests. A disclosure panel shows exactly what
   would be sent. See [SECURITY.md](SECURITY.md).
 
+### Browser query cookbook
+
+Open a document, press **ask**, and paste a query into the question field.
+Queries beginning with `$` run directly in this tab: they need no API key and
+send nothing to a model.
+
+Given this small document:
+
+```json
+{"tasks":[
+  {"id":9007199254740992,"status":"FAILED"},
+  {"id":9007199254740993,"status":"READY"}
+]}
+```
+
+- Filter to the failed rows:
+
+  ```text
+  $.tasks[?(@.status == 'FAILED')]
+  ```
+
+  Result: one match, `$.tasks[0]`.
+
+- Count rows by status:
+
+  ```text
+  $.tasks[*] | group(@.status)
+  ```
+
+  Result: `FAILED 1`, `READY 1`.
+
+- Compare an integer beyond JavaScript's safe range without rounding it:
+
+  ```text
+  $.tasks[?(@.id > 9007199254740992)] | count
+  ```
+
+  Result: `1` — only the exact `9007199254740993` id is greater.
+
 ## Nested JSON to linked tables
 
 If a spreadsheet is the only thing you came for,
