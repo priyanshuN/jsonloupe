@@ -702,6 +702,21 @@ describe('unpack', () => {
     const res = h<{ ok: boolean; error?: string }>({ type: 'unpack', id: s.id, index: s.index });
     expect(res.ok).toBe(false);
   });
+
+  it('can commit embedded JSON as an undoable document edit', () => {
+    parse('{"payload":"{\\"inner\\":7}"}');
+    const p = rows().find((r) => r.key === 'payload')!;
+    const res = h<{ ok: boolean; totalRows: number }>({
+      type: 'unpack', id: p.id, index: p.index, commit: true,
+    });
+    expect(res.ok).toBe(true);
+    expect(stringify(0)).toBe('{"payload":{"inner":7}}');
+
+    expect(h<UndoRes>({ type: 'undo' }).did).toBe('replaceValue');
+    expect(stringify(0)).toBe('{"payload":"{\\"inner\\":7}"}');
+    expect(h<UndoRes>({ type: 'redo' }).did).toBe('replaceValue');
+    expect(stringify(0)).toBe('{"payload":{"inner":7}}');
+  });
 });
 
 // ---------- W1: undo-by-path (cross-boundary edge) ----------
