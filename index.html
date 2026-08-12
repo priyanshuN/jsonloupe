@@ -203,7 +203,7 @@ SPDX-License-Identifier: MIT -->
           <div class="lp-paste">
             <div class="lp-paste-head">
               <span class="lp-paste-title">Paste JSON</span>
-              <span class="lp-paste-status">paste and it opens · nothing leaves this tab</span>
+              <span class="lp-paste-status">paste and it opens · document values stay in this tab</span>
             </div>
             <div class="lp-paste-body">
               <textarea id="paste-box" spellcheck="false"
@@ -524,13 +524,16 @@ SPDX-License-Identifier: MIT -->
             <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
             <button id="ask-run" class="btn-icon primary" title="Ask this question"
               aria-label="Ask this question"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
-            <button id="ask-key" class="btn-quiet" title="Set the Anthropic API key (stored in this browser only)">key</button>
+            <button id="ask-key" class="btn-quiet" title="Set an OpenRouter or Anthropic API key (stored in this browser only)"
+              aria-describedby="ask-key-note">key</button>
           </div>
+          <p id="ask-key-note" hidden>English Ask sends your question and document shape (field names, types and array lengths — never values) to OpenRouter or Anthropic. Direct $.queries stay local. Your key stays in this browser.</p>
           <!-- A real form: satisfies Chrome's password-field containment warning
                and makes Enter save. autocomplete=off because this is an API key,
                not a login — password managers must not offer to save/autofill. -->
           <form class="ask-row" id="ask-key-row" hidden>
-            <input id="ask-key-input" type="password" placeholder="sk-or-… / sk-ant-…" spellcheck="false" autocomplete="off">
+            <input id="ask-key-input" type="password" placeholder="sk-or-… / sk-ant-…" spellcheck="false" autocomplete="off"
+              aria-describedby="ask-key-note">
             <button id="ask-key-save" type="submit" class="primary">save key</button>
           </form>
           <div id="ask-query-line" hidden>
@@ -574,9 +577,9 @@ SPDX-License-Identifier: MIT -->
             <div class="bar-ops" id="tree-bar-ops"></div>
             <span class="spacer"></span>
           </div>
-          <div id="tree-viewport">
-            <div id="tree-spacer"></div>
-            <div id="tree-layer"></div>
+          <div id="tree-viewport" role="tree" aria-label="JSON document">
+            <div id="tree-spacer" aria-hidden="true"></div>
+            <div id="tree-layer" role="group"></div>
           </div>
         </div>
         <div id="split-divider" hidden></div>

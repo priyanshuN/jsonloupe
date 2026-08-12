@@ -199,6 +199,15 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toMatch(/askKeyRow\.addEventListener\('submit',[\s\S]*?preventDefault\(\)/);
   });
 
+  it('discloses Ask data handling before the API-key field accepts input', () => {
+    expect(appHtml).toContain('document values stay in this tab');
+    expect(appHtml).toContain('field names, types and array lengths — never values');
+    expect(appHtml).toContain('Direct $.queries stay local');
+    expect(appHtml).toContain('aria-describedby="ask-key-note"');
+    expect(mainSource).toMatch(/function setAskKeyOpen[\s\S]*?askKeyNote\.hidden = !open/);
+    expect(mainSource).toMatch(/if \(!key\) \{[\s\S]*?setAskKeyOpen\(true\)[\s\S]*?askKeyInput\.focus\(\)/);
+  });
+
   it('wraps long code lines instead of forcing horizontal document scroll', () => {
     expect(codeSource).toContain('EditorView.lineWrapping');
   });
@@ -311,6 +320,25 @@ describe('interactive UI regression contracts', () => {
     // The visible half, driven from the one place the buffer's state changes.
     const status = mainSource.match(/function setCodeStatus\([\s\S]*?\n\}/)?.[0] ?? '';
     expect(status).toContain('codeApplyBtn.disabled = !codeDirty');
+  });
+
+  it('keeps Code Apply strict instead of silently repairing the typed buffer', () => {
+    const apply = mainSource.match(/async function applyCode\(\)[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(apply).toContain('repair: false');
+  });
+
+  it('clears the active tree filter when the search field is cleared', () => {
+    expect(mainSource).toMatch(
+      /searchBox\.addEventListener\('input',[\s\S]*?searchPanel\.hidden = true[\s\S]*?if \(filterOn\) void setFilter\(''\)/,
+    );
+  });
+
+  it('scopes structural tree keys to the tree instead of focused controls', () => {
+    expect(mainSource).toContain("closest('button, a, select, summary, [role=\"button\"], [role=\"menuitem\"]')");
+    expect(mainSource).toContain('const treeHasFocus = ae instanceof Node && treeViewport.contains(ae)');
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Enter']) {
+      expect(mainSource).toMatch(new RegExp(`case '${key}':[\\s\\S]*?if \\(!treeHasFocus\\) return;`));
+    }
   });
 
   it('prevents Ask Enter submission and keeps dev-only key-file advice out of production', () => {

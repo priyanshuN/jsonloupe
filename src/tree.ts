@@ -177,8 +177,14 @@ export class VirtualTree {
   // The selection marker is one class on one row, so moving it does not need a
   // rebuild of the visible slice — and must not be one while a row has focus.
   private paintSelection(): void {
-    for (const el of this.layer.children) {
-      el.classList.toggle('sel', Number((el as HTMLElement).dataset.index) === this.selected);
+    for (const [position, child] of [...this.layer.children].entries()) {
+      const el = child as HTMLElement;
+      const selected = Number(el.dataset.index) === this.selected;
+      el.classList.toggle('sel', selected);
+      el.setAttribute('aria-selected', String(selected));
+      // One row, not every rendered row, participates in page Tab order. Once
+      // inside the tree, arrows move the active row and its focus with it.
+      el.tabIndex = selected || (this.selected < 0 && position === 0) ? 0 : -1;
     }
   }
 
@@ -192,6 +198,7 @@ export class VirtualTree {
 
   resetSelection(): void {
     this.selected = -1;
+    this.paintSelection();
   }
 
   setTotal(n: number): void {
@@ -258,14 +265,27 @@ export class VirtualTree {
 
   private rowEl(r: Row): HTMLElement {
     const el = document.createElement('div');
+    const selected = r.index === this.selected;
     // focus-ring is rule 5's one ring, carried to a widget that is not a button.
-    el.className = `row focus-ring${r.index === this.flashIndex ? ' flash' : ''}${r.index === this.selected ? ' sel' : ''}`;
+    el.className = `row focus-ring${r.index === this.flashIndex ? ' flash' : ''}${selected ? ' sel' : ''}`;
     el.dataset.id = String(r.id);
     el.dataset.index = String(r.index);
     el.dataset.children = r.hasChildren ? '1' : '0';
-    // Reachable without a pointer: the row is the tab stop, and its actions
-    // appear on focus exactly as they do on hover (style.css rule 20).
-    el.tabIndex = 0;
+    el.setAttribute('role', 'treeitem');
+    el.setAttribute('aria-level', String(r.depth + 1));
+    el.setAttribute('aria-selected', String(selected));
+    el.setAttribute(
+      'aria-label',
+      r.type === 'chunk'
+        ? `${r.preview}, ${r.childCount} items`
+        : r.key === null
+          ? r.preview
+          : `${r.key}: ${r.preview}`,
+    );
+    if (r.hasChildren) el.setAttribute('aria-expanded', String(r.expanded));
+    // Roving tab stop: enter the tree once, then use arrows. The first visible
+    // row is the entry point until a row has been selected.
+    el.tabIndex = selected || (this.selected < 0 && r.index === this.lastRows[0]?.index) ? 0 : -1;
 
     const num = document.createElement('span');
     num.className = 'rownum';

@@ -609,10 +609,12 @@ function looksJsonish(text: string): boolean {
   return c === '{' || c === '[';
 }
 
-// Parse precedence: valid JSON → JSONL → repair → fail (original error). `isApply`
-// distinguishes a code-view Apply (push a replaceDoc onto the undo stack) from a
-// fresh document open (clear both stacks).
-function doParse(text: string, isApply: boolean): ParseOk | ParseErr {
+// Parse precedence: valid JSON → JSONL → optional repair → fail (original
+// error). Fresh intake opts into repair; Code Apply does not, because silently
+// completing an editor buffer would commit data the user never typed.
+// `isApply` distinguishes a code-view Apply (push a replaceDoc onto the undo
+// stack) from a fresh document open (clear both stacks).
+function doParse(text: string, isApply: boolean, allowRepair: boolean): ParseOk | ParseErr {
   let prevText: string | null = null;
   if (isApply) {
     const prev = nodes.get(rootId);
@@ -635,7 +637,7 @@ function doParse(text: string, isApply: boolean): ParseOk | ParseErr {
     if (arr) {
       value = arr;
       jsonl = true;
-    } else if (looksJsonish(parserText)) {
+    } else if (allowRepair && looksJsonish(parserText)) {
       try {
         value = lparse(jsonrepair(parserText));
         repaired = true;
@@ -1988,6 +1990,25 @@ function buildSchema(path?: string): SchemaResult {
   return { text: renderSpec(spec!, '').slice(0, 4000) };
 }
 
+// A blank Run editor should teach against the document that is actually open,
+// not against a made-up `tasks` property. Prefer the first top-level array: it
+// gives a useful, safe expression without exposing or duplicating any values.
+function jsPropertyAccess(key: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
+}
+
+function buildRunExample(): { code: string } {
+  const root = nodes.get(rootId)?.value;
+  if (Array.isArray(root)) return { code: 'data.length' };
+  if (isContainer(root)) {
+    const record = root as Record<string, unknown>;
+    const arrayKey = Object.keys(record).find((key) => Array.isArray(record[key]));
+    if (arrayKey !== undefined) return { code: `data${jsPropertyAccess(arrayKey)}.length` };
+    return { code: 'Object.keys(data).length' };
+  }
+  return { code: 'data' };
+}
+
 // ---------- table view over an array node ----------
 
 let tableArr: unknown[] | null = null;
@@ -2238,7 +2259,7 @@ function buildCsv(source: string): { ok: true; text: string } | { ok: false; err
 export function handle(msg: { type: string } & Record<string, unknown>): object {
   switch (msg.type) {
     case 'parse':
-      return doParse(msg.text as string, msg.apply === true);
+      return doParse(msg.text as string, msg.apply === true, msg.repair !== false);
     case 'formatText':
       return formatStandalone(msg.text as string);
     case 'rows':
@@ -2323,6 +2344,8 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return queryRowsCopy();
     case 'schema':
       return buildSchema(msg.path as string | undefined);
+    case 'runExample':
+      return buildRunExample();
     case 'hasPaths':
       return pathsPresent((msg.paths as string[] | undefined) ?? []);
     case 'undo':

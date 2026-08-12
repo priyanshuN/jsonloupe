@@ -1202,6 +1202,10 @@ function markCurrentContentEdited(): void {
   currentDocumentRevision++;
   resetAskPanel();
   markRunResultStale();
+  // An Apply or inline edit can change the top-level shape just as completely
+  // as opening another file. Keep an empty Run editor's example honest too.
+  runPlaceholderRevision = -1;
+  void loadRunPlaceholder();
   if (!currentProvenance) return;
   currentProvenance = null;
   payloadBadge.hidden = true;
@@ -3166,7 +3170,14 @@ async function applyCode(): Promise<void> {
   const requestToken = openRequestToken;
   // apply:true → the worker records a replaceDoc on the undo stack instead of
   // clearing it (a fresh open clears; an Apply is undoable).
-  const res = await call<ParseOk | ParseErr>({ type: 'parse', text, apply: true });
+  const res = await call<ParseOk | ParseErr>({
+    type: 'parse',
+    text,
+    apply: true,
+    // Intake may repair pasted data; an editor must never invent and commit
+    // bytes the user did not type.
+    repair: false,
+  });
   if (
     documentToken !== currentDocumentToken ||
     requestToken !== openRequestToken
@@ -3372,6 +3383,15 @@ searchBox.addEventListener('keydown', (e) => {
     searchPanel.hidden = true;
     searchBox.blur();
   }
+});
+searchBox.addEventListener('input', () => {
+  // An empty field cannot truthfully describe a still-filtered tree. Restore
+  // the expansion/scroll snapshot immediately instead of leaving an invisible
+  // old query pruning the document behind a blank box.
+  if (searchBox.value.trim()) return;
+  searchTotals = null;
+  searchPanel.hidden = true;
+  if (filterOn) void setFilter('');
 });
 
 searchPanel.addEventListener('click', async (e) => {
@@ -4038,6 +4058,7 @@ const askDisclosure = $<HTMLDetailsElement>('#ask-disclosure');
 const askDisclosureBody = $('#ask-disclosure-body');
 const askSaved = $('#ask-saved');
 const askKeyRow = $('#ask-key-row');
+const askKeyNote = $('#ask-key-note');
 const askKeyInput = $<HTMLInputElement>('#ask-key-input');
 
 // The .api-key file is served by the dev-server middleware only (see
@@ -4058,6 +4079,11 @@ let askAbort: AbortController | null = null;
 let askBusy = false;
 
 const ASK_RUN_TITLE = askRunBtn.title;
+
+function setAskKeyOpen(open: boolean): void {
+  askKeyRow.hidden = !open;
+  askKeyNote.hidden = !open;
+}
 
 function setAskBusy(busy: boolean): void {
   askBusy = busy;
@@ -4091,6 +4117,7 @@ function resetAskPanel(): void {
   askResult.hidden = true;
   askDisclosure.hidden = true;
   askDisclosure.open = false;
+  setAskKeyOpen(false);
   setAskStatus(null);
 }
 
@@ -4103,8 +4130,9 @@ $('#ask-btn').addEventListener('click', () => {
 });
 
 $('#ask-key').addEventListener('click', async () => {
-  askKeyRow.hidden = !askKeyRow.hidden;
-  if (!askKeyRow.hidden) {
+  const shouldOpen = askKeyRow.hidden === true;
+  setAskKeyOpen(shouldOpen);
+  if (shouldOpen) {
     const key = await getApiKey();
     askKeyInput.value = '';
     askKeyInput.placeholder = key
@@ -4118,7 +4146,7 @@ $('#ask-key').addEventListener('click', async () => {
 askKeyRow.addEventListener('submit', (e) => {
   e.preventDefault();
   setApiKey(askKeyInput.value.trim());
-  askKeyRow.hidden = true;
+  setAskKeyOpen(false);
   showToast(askKeyInput.value.trim() ? 'key saved (this browser only)' : 'key cleared');
 });
 
@@ -4421,7 +4449,7 @@ async function runAsk(presetQuery?: string): Promise<void> {
       const key = await getApiKey();
       if (!isCurrent()) return;
       if (!key) {
-        askKeyRow.hidden = false;
+        setAskKeyOpen(true);
         askKeyInput.focus();
         setAskStatus(
           import.meta.env.DEV
@@ -4552,7 +4580,7 @@ askSaved.addEventListener('click', async (e) => {
 
 const RUN_TIMEOUT_MS = 10_000;
 const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
-const RUN_PLACEHOLDER = 'data.tasks.filter(t => t.status === "FAILED").length';
+const RUN_PLACEHOLDER_FALLBACK = 'data';
 
 const runPane = $('#run-pane');
 const runLossy = $('#run-lossy');
@@ -4595,6 +4623,8 @@ const runDownloadBtn = $<HTMLButtonElement>('#run-dl');
 const runOpenBtn = $<HTMLButtonElement>('#run-open');
 
 let runEditor: ScriptEditor | null = null;
+let runPlaceholder = RUN_PLACEHOLDER_FALLBACK;
+let runPlaceholderRevision = -1;
 let runInFlight = false;
 /** The last run's whole compact result — what copy, download and open hand over. */
 let runResultText = '';
@@ -5208,6 +5238,8 @@ function resetRunState(hasUnsafeNumbers: boolean): void {
   setRunStatus('');
   resultDownloadName = '';
   clearRunResult();
+  runPlaceholderRevision = -1;
+  void loadRunPlaceholder();
   // A new document is exactly when "does this function fit?" changes its answer
   // — for the loaded one, and for every row in the library.
   void paintRunFit();
@@ -5242,7 +5274,7 @@ async function ensureRunEditor(): Promise<void> {
   runEditor = await mod.ScriptEditor.create({
     host: runEditorHost,
     doc: loadLastScript(),
-    placeholder: RUN_PLACEHOLDER,
+    placeholder: await loadRunPlaceholder(),
     onRun: () => void runScript(),
     // Every keystroke is both a scratch save and the answer to "has this
     // drifted from the record it came from" — the head's `unsaved` mark is
@@ -5252,6 +5284,22 @@ async function ensureRunEditor(): Promise<void> {
       paintRunHead();
     },
   });
+}
+
+async function loadRunPlaceholder(): Promise<string> {
+  const documentRevision = currentDocumentRevision;
+  if (runPlaceholderRevision === documentRevision) return runPlaceholder;
+  try {
+    const example = await call<{ code: string }>({ type: 'runExample' });
+    if (documentRevision !== currentDocumentRevision) return runPlaceholder;
+    runPlaceholder = example.code || RUN_PLACEHOLDER_FALLBACK;
+    runPlaceholderRevision = documentRevision;
+    runEditor?.setPlaceholder(runPlaceholder);
+  } catch {
+    // A placeholder is guidance, never a reason to make Run unavailable.
+    runPlaceholder = RUN_PLACEHOLDER_FALLBACK;
+  }
+  return runPlaceholder;
 }
 
 // Whatever the source pane needs to be showing, mounted. Split arrives on the
@@ -5596,31 +5644,49 @@ window.addEventListener('keydown', async (e) => {
     return;
   }
   if (viewer.hidden || typing || treePane.hidden) return;
+  // Buttons and links own their Enter/arrow keys. Without this guard, pressing
+  // Enter on the Tree mode button both activated the button and toggled the
+  // selected JSON row. Row action buttons have the same requirement.
+  const focusedControl = ae instanceof HTMLElement
+    && ae.closest('button, a, select, summary, [role="button"], [role="menuitem"]') !== null;
+  if (focusedControl) return;
+  const treeHasFocus = ae instanceof Node && treeViewport.contains(ae);
   const sel = tree.selectedIndex();
   switch (e.key) {
     case 'j':
+      e.preventDefault();
+      tree.select(sel + 1);
+      break;
     case 'ArrowDown':
+      if (!treeHasFocus) return;
       e.preventDefault();
       tree.select(sel + 1);
       break;
     case 'k':
+      e.preventDefault();
+      tree.select(sel - 1);
+      break;
     case 'ArrowUp':
+      if (!treeHasFocus) return;
       e.preventDefault();
       tree.select(sel - 1);
       break;
     case 'ArrowRight': {
+      if (!treeHasFocus) return;
       e.preventDefault();
       const r = tree.getSelected();
       if (r?.hasChildren && !r.expanded) await doToggle(r.id, r.index);
       break;
     }
     case 'ArrowLeft': {
+      if (!treeHasFocus) return;
       e.preventDefault();
       const r = tree.getSelected();
       if (r?.expanded) await doToggle(r.id, r.index);
       break;
     }
     case 'Enter': {
+      if (!treeHasFocus) return;
       const r = tree.getSelected();
       if (r?.hasChildren) await doToggle(r.id, r.index);
       break;

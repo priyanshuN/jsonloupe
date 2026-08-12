@@ -26,7 +26,10 @@ interface CreateOpts {
 }
 
 export class ScriptEditor {
-  private constructor(private view: EditorView) {}
+  private constructor(
+    private view: EditorView,
+    private updatePlaceholder: (text: string) => void,
+  ) {}
 
   static async create(opts: CreateOpts): Promise<ScriptEditor> {
     const [state, view, lang, cmds, jsLang, hl] = await Promise.all([
@@ -38,12 +41,13 @@ export class ScriptEditor {
       import('@lezer/highlight'),
     ]);
 
-    const { EditorState } = state;
+    const { EditorState, Compartment } = state;
     const { EditorView, keymap, placeholder, highlightSpecialChars } = view;
     const { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching } = lang;
     const { defaultKeymap, history, historyKeymap, indentWithTab } = cmds;
     const t = hl.tags;
 
+    const placeholderConfig = new Compartment();
     const editor = new EditorView({
       parent: opts.host,
       state: EditorState.create({
@@ -56,7 +60,7 @@ export class ScriptEditor {
           bracketMatching(),
           jsLang.javascript(),
           EditorView.lineWrapping,
-          placeholder(opts.placeholder),
+          placeholderConfig.of(placeholder(opts.placeholder)),
           syntaxHighlighting(
             HighlightStyle.define([
               { tag: t.keyword, color: 'var(--c-boolean)' },
@@ -93,7 +97,9 @@ export class ScriptEditor {
       }),
     });
 
-    return new ScriptEditor(editor);
+    return new ScriptEditor(editor, (text) => {
+      editor.dispatch({ effects: placeholderConfig.reconfigure(placeholder(text)) });
+    });
   }
 
   getDoc(): string {
@@ -107,6 +113,10 @@ export class ScriptEditor {
       changes: { from: 0, to: this.view.state.doc.length, insert: code },
       selection: { anchor: code.length },
     });
+  }
+
+  setPlaceholder(text: string): void {
+    this.updatePlaceholder(text);
   }
 
   focus(): void {

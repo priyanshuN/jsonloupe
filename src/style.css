@@ -2200,6 +2200,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    out at the edge rather than glued to `run`. */
 #ask-box { max-width: 76ch; }
 #ask-key { margin-left: auto; }
+#ask-key-note {
+  margin: 0;
+  max-width: 92ch;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  line-height: 1.45;
+}
 #ask-status, #run-status { color: var(--text-dim); font-size: var(--fs-body); font-style: italic; }
 #ask-query-line {
   display: flex;
