@@ -18,6 +18,7 @@ import type { Row } from './protocol';
 export interface TreeCallbacks {
   fetchRows(start: number, count: number): Promise<Row[]>;
   onToggle(id: number, index: number): void;
+  onCopyKey?(key: string): void;
   onCopyPath(id: number): void;
   onCopyValue(id: number): void;
   onUnpack(id: number, index: number): void;
@@ -60,11 +61,16 @@ export class VirtualTree {
       if (!rowEl) return;
       const id = Number(rowEl.dataset.id);
       const index = Number(rowEl.dataset.index);
+      const keyButton = t.closest('.btn-key') as HTMLElement | null;
+      if (keyButton) return cbs.onCopyKey?.(keyButton.dataset.key ?? '');
       if (t.closest('.btn-path')) return cbs.onCopyPath(id);
       if (t.closest('.btn-copy')) return cbs.onCopyValue(id);
       if (t.closest('.btn-table')) return cbs.onTable?.(id);
       if (t.closest('.btn-unpack')) return cbs.onUnpack(id, index);
       this.select(index, { scroll: false });
+      // A property name is document content. Let pointer users select/copy it
+      // without the row collapsing and being replaced underneath the gesture.
+      if (t.closest('.key')) return;
       if (rowEl.dataset.children === '1') cbs.onToggle(id, index);
     });
     // Rows are focusable (they carry the actions, which used to be reachable
@@ -293,7 +299,11 @@ export class VirtualTree {
     if (r.key !== null) {
       const key = document.createElement('span');
       key.className = typeof r.key === 'number' ? 'key idx' : 'key';
-      key.textContent = `${r.key}:`;
+      key.textContent = String(r.key);
+      const separator = document.createElement('span');
+      separator.className = 'key-separator';
+      separator.textContent = ':';
+      key.appendChild(separator);
       el.appendChild(key);
     }
 
@@ -314,7 +324,7 @@ export class VirtualTree {
       const b = document.createElement('button');
       b.className = 'btn-unpack';
       b.textContent = '{…}';
-      b.title = 'Looks like embedded JSON — click to expand as a subtree';
+      b.title = 'Parse embedded JSON into this document (undoable)';
       el.appendChild(b);
     }
 
@@ -335,22 +345,27 @@ export class VirtualTree {
 
     // The gutter these sit in is reserved on EVERY row (style.css rule 20), so
     // arriving on a row cannot re-truncate the value already under the pointer.
-    // Two actions on most rows; `tbl` is the array-only third, and there is no
-    // per-row menu to move it into — it fades in with the other two.
+    // Object properties add `key`; arrays add `tbl`. There is no per-row menu
+    // to move them into, so they fade in with the common path/copy actions.
     const actions = document.createElement('span');
     actions.className = 'actions';
-    const btns: [string, string, string][] = [
+    const btns: [string, string, string, string?][] = [];
+    if (this.cbs.onCopyKey && typeof r.key === 'string') {
+      btns.push(['btn-key', 'key', 'Copy key', r.key]);
+    }
+    btns.push(
       ['btn-path', 'path', 'Copy path'],
       ['btn-copy', 'copy', 'Copy value as JSON'],
-    ];
+    );
     if (this.cbs.onTable && r.type === 'array' && r.hasChildren) {
       btns.push(['btn-table', 'tbl', 'View array as table']);
     }
-    for (const [cls, label, title] of btns) {
+    for (const [cls, label, title, key] of btns) {
       const b = document.createElement('button');
       b.className = cls;
       b.textContent = label;
       b.title = title;
+      if (key !== undefined) b.dataset.key = key;
       actions.appendChild(b);
     }
     el.appendChild(actions);

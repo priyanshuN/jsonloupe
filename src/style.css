@@ -2905,7 +2905,13 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   transition: transform var(--dur) var(--ease);
 }
 .caret.open { transform: rotate(90deg); }
-.key { color: var(--c-key); margin-right: var(--gap-2); }
+.key {
+  color: var(--c-key);
+  margin-right: var(--gap-2);
+  cursor: text;
+  user-select: text;
+}
+.key-separator { user-select: none; }
 .key.idx { color: var(--c-null); }
 .val { overflow: hidden; text-overflow: ellipsis; }
 .val.string { color: var(--c-string); }
@@ -2988,10 +2994,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 
 /* Rule 20: the gutter is reserved on EVERY row, so a value's truncation point
    is a property of the row and never of where the pointer happens to be. 112px
-   is the two-action set (path · copy) at the mini metrics; an array row's third
-   action grows its own gutter past that, which is fine — what must not change
-   is a single row's gutter, and it never does. The actions right-align inside
-   it, so the common rows line up. visibility, not display, because a
+   is the common path · copy set; optional key/table actions grow their own
+   gutter past that, which is fine — what must not change is a single row's
+   gutter, and it never does. The actions right-align inside it, so the common
+   rows line up. visibility, not display, because a
    display:none control cannot be tabbed to — and opacity alone would leave an
    invisible tab stop sitting in the order. */
 .actions {

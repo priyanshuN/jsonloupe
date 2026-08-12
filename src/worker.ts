@@ -211,8 +211,9 @@ function effChildCount(n: NodeRec): number {
 
 // ---------- document undo/redo ----------
 //
-// Two command kinds cover every doc mutation that reaches the worker:
+// Three command kinds cover every doc mutation that reaches the worker:
 //   setValue    — an inline tree leaf edit (PATH + before/after raw JSON literals)
+//   replaceValue — a tree action that deliberately changes a node's shape
 //   replaceDoc  — a whole-document swap via the code view's Apply (before/after text)
 // setValue stores the node's PATH SEGMENTS, not its id: a replaceDoc undo rebuilds
 // the tree and regenerates ids, so a stored id would dangle and the older inline
@@ -220,9 +221,10 @@ function effChildCount(n: NodeRec): number {
 // to a live node at undo/redo time; if the shape changed so it no longer resolves
 // to a leaf, the command is dropped and the UI is told the target is gone.
 // Raw values are stringified with llStringify so LosslessNumber digits round-trip
-// exactly on undo. View-only ops (expand/collapse, unpack, filter) are excluded.
+// exactly on undo. View-only ops (expand/collapse, preview-unpack, filter) are excluded.
 type Cmd =
   | { kind: 'setValue'; path: (string | number)[]; oldRaw: string; newRaw: string }
+  | { kind: 'replaceValue'; path: (string | number)[]; oldRaw: string; newRaw: string }
   | { kind: 'replaceDoc'; oldText: string; newText: string };
 
 let undoStack: Cmd[] = [];
@@ -231,7 +233,9 @@ const UNDO_CAP = 100;
 const UNDO_CHARS_CAP = 64_000_000;
 
 function cmdChars(c: Cmd): number {
-  return c.kind === 'setValue' ? c.oldRaw.length + c.newRaw.length : c.oldText.length + c.newText.length;
+  return c.kind === 'replaceDoc'
+    ? c.oldText.length + c.newText.length
+    : c.oldRaw.length + c.newRaw.length;
 }
 
 function trimUndo(): void {
@@ -1198,6 +1202,42 @@ function applySetValueRaw(id: number, raw: string): void {
   writeLeaf(n, parsed);
 }
 
+// Replace a node with a stored JSON value, including a leaf↔container shape
+// change. Descendant rows are discarded before rebuilding this node's children;
+// sibling ids stay stable and older path-based undo commands remain resolvable.
+function applyReplaceValueRaw(id: number, raw: string): void {
+  const n = nodes.get(id);
+  if (!n) return;
+  let parsed: unknown;
+  try {
+    parsed = lparse(raw);
+  } catch {
+    return;
+  }
+  const idx = visible.indexOf(id);
+  if (idx !== -1) {
+    let end = idx + 1;
+    while (end < visible.length && nodes.get(visible[end])!.depth > n.depth) end++;
+    visible.splice(idx + 1, end - idx - 1);
+  }
+  // Materialized descendants are no longer reachable after the shape swap.
+  // Remove their records too so repeated unpack/undo cycles do not retain an
+  // abandoned tree in the worker heap.
+  const stack = [...(children.get(id) ?? [])];
+  while (stack.length) {
+    const childId = stack.pop()!;
+    stack.push(...(children.get(childId) ?? []));
+    children.delete(childId);
+    keyCache.delete(childId);
+    expanded.delete(childId);
+    nodes.delete(childId);
+  }
+  expanded.delete(id);
+  children.delete(id);
+  keyCache.delete(id);
+  writeLeaf(n, parsed);
+}
+
 // Rebuild the whole document from text (undo/redo of a replaceDoc command). Node
 // ids and expansion reset — accepted, per the design. Does not touch the stacks.
 function replaceDocValue(text: string): void {
@@ -1233,6 +1273,13 @@ function doUndo(): { did: string | null; id?: number; reason?: string; totalRows
     applySetValueRaw(id, cmd.oldRaw);
     return { did: 'setValue', id, totalRows: visible.length };
   }
+  if (cmd.kind === 'replaceValue') {
+    const id = resolvePath(cmd.path);
+    if (id === -1) return { did: null, reason: 'gone', totalRows: visible.length };
+    redoStack.push(cmd);
+    applyReplaceValueRaw(id, cmd.oldRaw);
+    return { did: 'replaceValue', id, totalRows: visible.length };
+  }
   redoStack.push(cmd);
   replaceDocValue(cmd.oldText);
   return { did: 'replaceDoc', totalRows: visible.length };
@@ -1247,6 +1294,13 @@ function doRedo(): { did: string | null; id?: number; reason?: string; totalRows
     undoStack.push(cmd);
     applySetValueRaw(id, cmd.newRaw);
     return { did: 'setValue', id, totalRows: visible.length };
+  }
+  if (cmd.kind === 'replaceValue') {
+    const id = resolvePath(cmd.path);
+    if (id === -1) return { did: null, reason: 'gone', totalRows: visible.length };
+    undoStack.push(cmd);
+    applyReplaceValueRaw(id, cmd.newRaw);
+    return { did: 'replaceValue', id, totalRows: visible.length };
   }
   undoStack.push(cmd);
   replaceDocValue(cmd.newText);
@@ -1438,7 +1492,7 @@ function sameValue(id: number): { results: SearchHit[]; total: number; note?: st
   return { results, total };
 }
 
-function unpack(id: number, indexHint: number): { ok: boolean; totalRows: number; error?: string } {
+function unpack(id: number, indexHint: number, commit: boolean): { ok: boolean; totalRows: number; error?: string } {
   const n = nodes.get(id);
   if (!n) return { ok: false, totalRows: visible.length, error: 'unknown node' };
   if (n.unpacked === undefined) {
@@ -1450,7 +1504,17 @@ function unpack(id: number, indexHint: number): { ok: boolean; totalRows: number
       return { ok: false, totalRows: visible.length, error: 'string is not valid JSON' };
     }
     if (!isContainer(parsed)) return { ok: false, totalRows: visible.length, error: 'parses to a primitive' };
-    n.unpacked = parsed;
+    if (commit) {
+      const path = pathSegs(id);
+      const oldRaw = llStringify(n.value) ?? 'null';
+      const newRaw = llStringify(parsed) ?? 'null';
+      applyReplaceValueRaw(id, newRaw);
+      pushUndo({ kind: 'replaceValue', path, oldRaw, newRaw });
+    } else {
+      // Derived/run-result trees can still preview a nested payload without
+      // rewriting the result that their copy/download actions refer to.
+      n.unpacked = parsed;
+    }
     children.delete(id);
     sizeCache.clear();
   }
@@ -2194,7 +2258,7 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
     case 'revealPath':
       return revealByPath(msg.path as (string | number)[]);
     case 'unpack':
-      return unpack(msg.id as number, msg.index as number);
+      return unpack(msg.id as number, msg.index as number, msg.commit === true);
     case 'filter':
       return applyFilter(msg.query as string);
     case 'diff':

@@ -1231,6 +1231,11 @@ async function copyValueOf(id: number): Promise<void> {
   showToast('value copied');
 }
 
+async function copyKeyOf(key: string): Promise<void> {
+  await copyText(key);
+  showToast('key copied');
+}
+
 async function openNestedPayload(id: number, path: string): Promise<void> {
   const requestToken = beginOpenRequest();
   const parentDocumentToken = currentDocumentToken;
@@ -1372,12 +1377,21 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
     return r.rows;
   },
   onToggle: (id, index) => void doToggle(id, index),
+  onCopyKey: (key) => void copyKeyOf(key),
   onCopyPath: (id) => void copyPathOf(id),
   onCopyValue: (id) => void copyValueOf(id),
   onUnpack: async (id, index) => {
-    const r = await call<{ ok: boolean; totalRows: number; error?: string }>({ type: 'unpack', id, index });
+    const documentToken = currentDocumentToken;
+    const r = await call<{ ok: boolean; totalRows: number; error?: string }>({
+      type: 'unpack', id, index, commit: true,
+    });
+    if (documentToken !== currentDocumentToken) return;
     if (!r.ok) showToast(r.error ?? 'not valid JSON', 'bad');
-    else tree.setTotal(r.totalRows);
+    else {
+      tree.setTotal(r.totalRows);
+      await refreshAfterEdit(documentToken);
+      showToast('embedded JSON parsed');
+    }
   },
   onTable: (id) => void openTable(id),
   onSelect: () => {
@@ -4689,6 +4703,7 @@ const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'
       if (r) resultTree.setTotal(r.totalRows);
     });
   },
+  onCopyKey: (key) => void copyKeyOf(key),
   onCopyPath: (id) => {
     void resultCall<{ text: string }>({ type: 'nodePath', id }).then((r) => {
       if (r) void copyText(r.text).then(() => showToast(r.text));
