@@ -84,6 +84,10 @@ describe('VirtualTree property keys and row actions', () => {
     row.querySelector<HTMLButtonElement>('.btn-key')!.click();
     expect(callbacks.onCopyKey).toHaveBeenCalledWith('payload');
     expect(row.querySelector('.key')!.textContent).toBe('payload:');
+    expect(row.getAttribute('role')).toBe('treeitem');
+    expect(row.getAttribute('aria-level')).toBe('2');
+    expect(row.getAttribute('aria-expanded')).toBe('true');
+    expect(row.getAttribute('aria-label')).toBe('payload: { inner } · 1 key');
   });
 
   it('routes every row action without changing selection', () => {
@@ -146,10 +150,16 @@ describe('VirtualTree rendering and selection', () => {
     expect(fetchRows).toHaveBeenCalledWith(0, 3);
     expect(layer.children).toHaveLength(2);
     expect(layer.style.transform).toBe('translateY(0px)');
+    expect((layer.children[0] as HTMLElement).tabIndex).toBe(0);
+    expect((layer.children[1] as HTMLElement).tabIndex).toBe(-1);
     tree.select(2, { scroll: false });
     expect(tree.selectedIndex()).toBe(2);
     expect(tree.getSelected()).toEqual(leafRow);
     expect(layer.children[1]!.classList).toContain('sel');
+    expect(layer.children[0]!.getAttribute('aria-selected')).toBe('false');
+    expect(layer.children[1]!.getAttribute('aria-selected')).toBe('true');
+    expect((layer.children[0] as HTMLElement).tabIndex).toBe(-1);
+    expect((layer.children[1] as HTMLElement).tabIndex).toBe(0);
     expect(callbacks.onSelect).toHaveBeenCalledWith(2);
 
     tree.resetSelection();

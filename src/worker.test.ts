@@ -232,6 +232,21 @@ describe('repair', () => {
     expect(JSON.parse(stringify(0)).a).toBe(1);
   });
 
+  it('rejects repair when Code Apply requests strict parsing', () => {
+    parse('{"kept":true}');
+
+    const r = h<ParseRes>({
+      type: 'parse',
+      text: '{"a":',
+      apply: true,
+      repair: false,
+    });
+
+    expect(r.ok).toBe(false);
+    expect(stringify(0)).toBe('{"kept":true}');
+    expect(h<UndoRes>({ type: 'undo' }).did).toBeNull();
+  });
+
   it('repair preserves a 19-digit id (syntax-only, digits pass through)', () => {
     const r = parse("{'a':1, id: 1234567890123456789, x: None}");
     expect(r.repaired).toBe(true);
@@ -645,6 +660,24 @@ describe('schema', () => {
     expect(schema('$.tasks[?(').ok).toBe(false);
     expect(schema('$.nope').error).toBe('no match for $.nope');
     expect(schema('$.tasks | count').error).toContain('aggregate pipe');
+  });
+});
+
+describe('Run example', () => {
+  const example = (): string => h<{ code: string }>({ type: 'runExample' }).code;
+
+  it('matches the open document shape without copying document values', () => {
+    parse('{"orders":[{"secret":"do-not-copy"}],"users":[]}');
+    expect(example()).toBe('data.orders.length');
+
+    parse('{"order-items":[1,2]}');
+    expect(example()).toBe('data["order-items"].length');
+
+    parse('[1,2,3]');
+    expect(example()).toBe('data.length');
+
+    parse('{"name":"private"}');
+    expect(example()).toBe('Object.keys(data).length');
   });
 });
 
