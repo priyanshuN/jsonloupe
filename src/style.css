@@ -766,6 +766,21 @@ select {
   outline: none;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
+/* Native select arrows sit against the right border and vary by platform. Keep
+   the native popup and keyboard behaviour, but draw the resting chevron at the
+   same deliberate inset as the text so compact and full-size pickers align. */
+select {
+  appearance: none;
+  padding-right: calc(var(--gap-3) + var(--icon));
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 12px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+}
 /* The one variation the recipe allows: more than one line of text needs the
    vertical inset too. */
 textarea { padding: var(--gap-2) var(--gap-3); }
@@ -4172,7 +4187,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    which is what the 3px padding was standing in for. */
 .convert-col {
   display: grid;
-  grid-template-columns: auto minmax(110px, 0.8fr) 90px minmax(130px, 1fr) repeat(3, var(--ctl-h-mini));
+  grid-template-columns: auto minmax(104px, 0.8fr) 116px minmax(130px, 1fr) repeat(3, var(--ctl-h-mini));
   align-items: center;
   gap: var(--gap-2);
   min-height: var(--row-h);
