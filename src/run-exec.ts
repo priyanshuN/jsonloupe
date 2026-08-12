@@ -5,15 +5,17 @@
 //
 // The script is an EXPRESSION where it parses as one (`data.tasks.length`) and
 // the BODY of `(data) => { … }` where it does not (statements ending in a
-// `return`). `data` is a plain `JSON.parse` value, not the doc worker's boxed
-// tree: a script that says `data.orders.length` should mean the JavaScript it
-// looks like. The cost is that numbers past what a float holds arrive rounded,
-// which the producer strip says out loud (main.ts, `#run-lossy`) rather than
-// hiding.
+// `return`). In `js` number mode, `data` is a plain `JSON.parse` value. In
+// `exact-text` mode, only number literals JavaScript cannot represent exactly
+// become their original digit strings; ordinary arithmetic-sized values stay
+// numbers. The mode is explicit and travels with a saved function.
 //
 // The result comes back as ONE compact string and is not previewed here: run
 // mode feeds it to a doc worker of its own and reads it as a document, so there
 // is no size at which the reading surface gives up.
+
+import { isSafeNumber, parse as parseLossless } from 'lossless-json';
+import { runNumberMode, type RunNumberMode } from './run-number-mode';
 
 /** A runaway loop can log forever, so the capture is bounded on both axes. */
 const MAX_LOG_LINES = 200;
@@ -167,9 +169,9 @@ function compileScript(code: string): ((data: unknown) => unknown) | { error: st
 }
 
 // One script over an ALREADY-PARSED document: the part both the single run and
-// the batch do, extracted so a batch parses the document once no matter how
-// many functions are about to read it. Console capture belongs to the caller —
-// a batch keeps one log for the whole press.
+// the batch do, extracted so a batch parses once per number contract rather
+// than once per function. Console capture belongs to the caller — a batch keeps
+// one log for the whole press.
 interface OneOk { ok: true; value: unknown; ms: number; reads?: string[] }
 interface OneErr { ok: false; error: string }
 
@@ -206,15 +208,31 @@ function runOne(data: unknown, code: string, trace: boolean): OneOk | OneErr {
   };
 }
 
-/** The document as the scripts see it: plain `JSON.parse`, not the boxed tree. */
-function parsePlain(docText: string): { ok: true; data: unknown } | { ok: false; error: string } {
+/**
+ * The document as the script sees it. Exact-text mode is deliberately not a
+ * second numeric class scripts have to learn: unsafe literals are inert,
+ * serializable strings, while values JavaScript can hold remain numbers.
+ */
+function parseForRun(
+  docText: string,
+  mode: RunNumberMode,
+): { ok: true; data: unknown } | { ok: false; error: string } {
   try {
+    if (mode === 'exact-text') {
+      const numberParser = (literal: string): string | number => (
+        isSafeNumber(literal) ? Number(literal) : literal
+      );
+      return { ok: true, data: parseLossless(docText, undefined, numberParser as never) };
+    }
     return { ok: true, data: JSON.parse(docText) };
   } catch (error) {
-    // The doc worker repairs malformed input; this parser is the plain one, so
-    // a repaired document lands here and the message has to say which parser
-    // refused it.
-    return { ok: false, error: `the script sees plain JSON, and this document is not: ${errorText(error)}` };
+    // The doc worker repairs malformed input; Run's parsers remain strict, so
+    // a repaired document lands here and the message has to say which number
+    // contract refused it.
+    return {
+      ok: false,
+      error: `the script sees strict JSON in ${mode === 'exact-text' ? 'exact-text' : 'JavaScript-number'} mode, and this document is not: ${errorText(error)}`,
+    };
   }
 }
 
@@ -241,7 +259,12 @@ function serialize(value: unknown): { ok: true; text: string } | { ok: false; er
  * With `trace`, the script is handed the document through the recording Proxy
  * above and the result carries the paths it read.
  */
-export function executeUserCode(docText: string, code: string, trace = false): RunResult {
+export function executeUserCode(
+  docText: string,
+  code: string,
+  trace = false,
+  mode: RunNumberMode = 'js',
+): RunResult {
   const logs: string[] = [];
   let dropped = false;
   const record = (prefix: string) => (...args: unknown[]): void => {
@@ -259,7 +282,7 @@ export function executeUserCode(docText: string, code: string, trace = false): R
   const started = performance.now();
 
   let data: unknown;
-  const parsed = parsePlain(docText);
+  const parsed = parseForRun(docText, runNumberMode(mode));
   if (!parsed.ok) return { ok: false, error: parsed.error, logs };
 
   const saved = { log: console.log, warn: console.warn, error: console.error };
@@ -290,11 +313,12 @@ export function executeUserCode(docText: string, code: string, trace = false): R
 /**
  * Run several saved functions over ONE document, in one pass.
  *
- * The document is parsed once no matter how many functions read it — five
- * scripts used to mean five workers each re-parsing 40 MB. The answers come
- * back as a single object keyed by function name, which is what lets the result
- * pane, copy, download and open-as-document all keep working unchanged: a batch
- * result is a document like any other, and it IS the day's report.
+ * The document is parsed once per number contract no matter how many functions
+ * read it — normally once, twice only for a mixed JavaScript/exact-text batch.
+ * Five scripts used to mean five workers each re-parsing 40 MB. The answers
+ * come back as a single object keyed by function name, which is what lets the
+ * result pane, copy, download and open-as-document all keep working unchanged:
+ * a batch result is a document like any other, and it IS the day's report.
  *
  * A function that fails takes nothing else down: its key is present and `null`,
  * so the report has the same shape every day even when one of them breaks, and
@@ -303,7 +327,7 @@ export function executeUserCode(docText: string, code: string, trace = false): R
  */
 export function executeUserScripts(
   docText: string,
-  scripts: { name: string; code: string }[],
+  scripts: { name: string; code: string; numberMode?: RunNumberMode }[],
   trace = false,
 ): BatchResult {
   const logs: string[] = [];
@@ -319,8 +343,17 @@ export function executeUserScripts(
   };
 
   const started = performance.now();
-  const parsed = parsePlain(docText);
-  if (!parsed.ok) return { ok: false, error: parsed.error, logs };
+  // A mixed batch parses at most twice: once for the legacy JavaScript-number
+  // functions and once for exact-text functions. Same-mode batches keep the
+  // original one-parse property no matter how many functions are ticked.
+  const documents = new Map<RunNumberMode, unknown>();
+  for (const script of scripts) {
+    const mode = runNumberMode(script.numberMode);
+    if (documents.has(mode)) continue;
+    const parsed = parseForRun(docText, mode);
+    if (!parsed.ok) return { ok: false, error: parsed.error, logs };
+    documents.set(mode, parsed.data);
+  }
 
   const saved = { log: console.log, warn: console.warn, error: console.error };
   console.log = record('');
@@ -336,13 +369,13 @@ export function executeUserScripts(
   const report = new Map<string, unknown>();
   const entries: BatchEntry[] = [];
   try {
-    for (const { name, code } of scripts) {
+    for (const { name, code, numberMode } of scripts) {
       // A console line from a batch is useless without knowing which function
       // wrote it, and the prefix is the only place that can say so.
       console.log = record(`${name}: `);
       console.warn = record(`${name} warn: `);
       console.error = record(`${name} error: `);
-      const one = runOne(parsed.data, code, trace);
+      const one = runOne(documents.get(runNumberMode(numberMode)), code, trace);
       if (!one.ok) {
         report.set(name, null);
         entries.push({ name, ok: false, error: one.error, ms: 0 });

@@ -51,6 +51,7 @@ import type { ScriptEditor } from './run-editor';
 import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
 import type { SavedScript } from './db';
 import type { RunResult, BatchResult } from './run-exec';
+import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
 import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
@@ -3193,7 +3194,7 @@ async function applyCode(): Promise<void> {
   // The applied text is a different document to the one the script ran over —
   // markCurrentContentEdited above has already marked any result stale — and its
   // numbers may have gained or lost exactness.
-  setRunLossy(res.hasUnsafeNumbers);
+  setRunUnsafeNumbers(res.hasUnsafeNumbers);
   persistCurrentSnapshot(text, null);
   tree.setTotal(res.totalRows);
   tree.resetSelection();
@@ -4583,7 +4584,10 @@ const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
 const RUN_PLACEHOLDER_FALLBACK = 'data';
 
 const runPane = $('#run-pane');
-const runLossy = $('#run-lossy');
+const runNumberSetting = $('#run-number-setting');
+const runNumberSwitch = $('#run-number-switch');
+const runNumberWarn = $('#run-number-warn');
+const runNumberHelp = $('#run-number-help');
 const runEditorHost = $('#run-editor');
 const runExecBtn = $<HTMLButtonElement>('#run-exec');
 const runStatus = $('#run-status');
@@ -4642,7 +4646,15 @@ let runAuthoring = false;
 /** The library record the editor is bound to — what `save` writes back to. */
 let runLoadedId: string | null = null;
 /** What that record held when it was loaded, so `unsaved` means something. */
-let runLoadedSnapshot = { name: '', script: '' };
+let runLoadedSnapshot: { name: string; script: string; numberMode: RunNumberMode } = {
+  name: '',
+  script: '',
+  numberMode: 'js',
+};
+/** The number contract being edited or used by the loaded function. */
+let runNumberMode: RunNumberMode = 'js';
+/** Whether the open document contains a literal JavaScript would round. */
+let runHasUnsafeNumbers = false;
 /**
  * The row a click is asking to load while the editor has unsaved changes. The
  * first press refuses and says so, a second press on the SAME row goes through:
@@ -4868,7 +4880,7 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
   // about itself, and it is already the best one-liner available.
   const note = document.createElement('span');
   note.className = 'run-lib-note';
-  note.textContent = scriptChipLabel(rec.script);
+  note.textContent = `${rec.numberMode === 'exact-text' ? 'exact text · ' : ''}${scriptChipLabel(rec.script)}`;
   open.append(name, note);
 
   const meta = document.createElement('span');
@@ -4955,7 +4967,27 @@ function runIsDirty(): boolean {
   if (!runAuthoring) return false;
   const script = runEditor?.getDoc() ?? '';
   return script.trim() !== runLoadedSnapshot.script.trim()
-    || runNameInput.value.trim() !== runLoadedSnapshot.name.trim();
+    || runNameInput.value.trim() !== runLoadedSnapshot.name.trim()
+    || runNumberMode !== runLoadedSnapshot.numberMode;
+}
+
+function paintRunNumberSetting(): void {
+  for (const button of runNumberSwitch.querySelectorAll<HTMLButtonElement>('button[data-number-mode]')) {
+    const on = button.dataset.numberMode === runNumberMode;
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+    button.disabled = !runAuthoring;
+  }
+  const wouldRound = runHasUnsafeNumbers && runNumberMode === 'js';
+  runNumberSetting.classList.toggle('warn', wouldRound);
+  runNumberWarn.toggleAttribute('hidden', !wouldRound);
+  runNumberHelp.textContent = runNumberMode === 'exact-text'
+    ? runHasUnsafeNumbers
+      ? 'unsafe numbers stay exact strings'
+      : 'unsafe numbers will stay exact strings'
+    : runHasUnsafeNumbers
+      ? 'unsafe numbers will round'
+      : 'ordinary numbers';
 }
 
 // The head bar: the constant. Which function is loaded, whether it has drifted,
@@ -4971,6 +5003,7 @@ function paintRunHead(): void {
   runSaveBtn.hidden = !runAuthoring;
   runSaveAsBtn.hidden = !runAuthoring || !runLoadedId;
   runEditorHost.hidden = !runAuthoring;
+  paintRunNumberSetting();
   // One `run` button in two homes, moved rather than duplicated: docked in the
   // field while the field exists, on the head bar while it does not.
   (runAuthoring ? runEditorHost : runHead).appendChild(runExecBtn);
@@ -5025,7 +5058,12 @@ async function paintRunFit(): Promise<void> {
 function adoptScript(rec: SavedScript | null): void {
   runLoadedId = rec?.id ?? null;
   runLoadedReads = rec?.reads;
-  runLoadedSnapshot = { name: rec?.name ?? '', script: rec?.script ?? '' };
+  runNumberMode = normalizeRunNumberMode(rec?.numberMode);
+  runLoadedSnapshot = {
+    name: rec?.name ?? '',
+    script: rec?.script ?? '',
+    numberMode: runNumberMode,
+  };
   runNameInput.value = runLoadedSnapshot.name;
   runEditor?.setDoc(runLoadedSnapshot.script);
   runPendingLoadId = null;
@@ -5072,6 +5110,7 @@ async function saveCurrentScript(asNew: boolean): Promise<void> {
     rec = await store.updateScript(runLoadedId, {
       name: typed || undefined,
       script: code,
+      numberMode: runNumberMode,
       ...(codeChanged ? { reads: null } : {}),
     });
   }
@@ -5080,7 +5119,7 @@ async function saveCurrentScript(asNew: boolean): Promise<void> {
     // A fork never overwrites what it was forked from, so it takes the first
     // free name rather than asking for one.
     const name = asNew ? uniqueScriptName(base, existing.map((s) => s.name)) : base;
-    rec = await store.saveScript(name, code);
+    rec = await store.saveScript(name, code, undefined, runNumberMode);
   }
   adoptScript(rec);
   await renderLibrary();
@@ -5147,6 +5186,7 @@ async function exportPlaybook(): Promise<void> {
       name: s.name,
       script: s.script,
       ...(s.reads ? { reads: s.reads } : {}),
+      numberMode: s.numberMode,
     })),
   });
   downloadText(text, 'jsonloupe-playbook.json', 'application/json');
@@ -5173,7 +5213,7 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
     const name = uniqueScriptName(fn.name, taken);
     if (name !== fn.name) renamed++;
     taken.push(name);
-    await store.saveScript(name, fn.script, fn.reads);
+    await store.saveScript(name, fn.script, fn.reads, fn.numberMode);
   }
   await renderLibrary();
   const count = res.playbook.functions.length;
@@ -5198,10 +5238,22 @@ runSaveBtn.addEventListener('click', () => void saveCurrentScript(false));
 runSaveAsBtn.addEventListener('click', () => void saveCurrentScript(true));
 runNameInput.addEventListener('input', paintRunHead);
 
-// True for as long as the document is open (style.css rule 15, tier 1): the
-// script sees plain JS numbers, and this document has some it cannot hold.
-function setRunLossy(hasUnsafeNumbers: boolean): void {
-  runLossy.hidden = !hasUnsafeNumbers;
+runNumberSwitch.addEventListener('click', (event) => {
+  if (!runAuthoring) return;
+  const mode = (event.target as HTMLElement)
+    .closest<HTMLButtonElement>('button[data-number-mode]')?.dataset.numberMode;
+  if (mode !== 'js' && mode !== 'exact-text') return;
+  if (mode === runNumberMode) return;
+  runNumberMode = mode;
+  markRunResultStale();
+  paintRunHead();
+});
+
+// Keep the document-level exactness signal current; the selected number mode
+// decides whether it becomes a warning or a confirmation in Run.
+function setRunUnsafeNumbers(hasUnsafeNumbers: boolean): void {
+  runHasUnsafeNumbers = hasUnsafeNumbers;
+  paintRunNumberSetting();
 }
 
 // The result on screen is no longer about this document. NEVER re-run for them:
@@ -5231,7 +5283,7 @@ function clearRunResult(): void {
 // reason the ask panel's question does: it is the user's own input and is meant
 // to be re-run across documents.
 function resetRunState(hasUnsafeNumbers: boolean): void {
-  setRunLossy(hasUnsafeNumbers);
+  setRunUnsafeNumbers(hasUnsafeNumbers);
   runErrorEl.hidden = true;
   runConsole.hidden = true;
   runConsole.open = false;
@@ -5361,18 +5413,24 @@ runMobileSwitch.addEventListener('click', (event) => {
 });
 
 // One sandbox, two shapes of press: a single script, or a batch of named ones
-// over a single parse of the document. Same worker, same timeout, same
+// over one parse per number contract. Same worker, same timeout, same
 // termination — the batch is a different message, not a different mechanism.
-function executeInSandbox(docText: string, code: string, trace: boolean): Promise<RunResult>;
 function executeInSandbox(
   docText: string,
-  scripts: { name: string; code: string }[],
+  code: string,
+  trace: boolean,
+  numberMode?: RunNumberMode,
+): Promise<RunResult>;
+function executeInSandbox(
+  docText: string,
+  scripts: { name: string; code: string; numberMode: RunNumberMode }[],
   trace: boolean,
 ): Promise<BatchResult>;
 function executeInSandbox(
   docText: string,
-  work: string | { name: string; code: string }[],
+  work: string | { name: string; code: string; numberMode: RunNumberMode }[],
   trace: boolean,
+  numberMode: RunNumberMode = 'js',
 ): Promise<RunResult | BatchResult> {
   return new Promise((resolve) => {
     const sandbox = new Worker(new URL('./run-sandbox.ts', import.meta.url), { type: 'module' });
@@ -5398,7 +5456,9 @@ function executeInSandbox(
       logs: [],
     });
     sandbox.postMessage(
-      typeof work === 'string' ? { docText, code: work, trace } : { docText, scripts: work, trace },
+      typeof work === 'string'
+        ? { docText, code: work, trace, numberMode }
+        : { docText, scripts: work, trace },
     );
   });
 }
@@ -5500,7 +5560,7 @@ async function runScript(): Promise<void> {
   runResultKind = '';
   runBatchEl.hidden = true;
   setRunStatus('running…');
-  const res = await executeInSandbox(currentText, code, trace);
+  const res = await executeInSandbox(currentText, code, trace, runNumberMode);
   runInFlight = false;
   runExecBtn.disabled = false;
   if (documentRevision !== currentDocumentRevision) return;
@@ -5549,7 +5609,7 @@ async function runPickedScripts(): Promise<void> {
 
   const res = await executeInSandbox(
     currentText,
-    picked.map((s) => ({ name: s.name, code: s.script })),
+    picked.map((s) => ({ name: s.name, code: s.script, numberMode: s.numberMode })),
     trace,
   );
   runInFlight = false;

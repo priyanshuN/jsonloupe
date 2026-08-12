@@ -7,8 +7,13 @@ const FILE = serializePlaybook({
   playbookVersion: PLAYBOOK_VERSION,
   name: 'DHL dumps',
   functions: [
-    { name: 'slow orders', script: 'data.orders.filter(o => o.h > 48)', reads: ['orders', 'orders[].h'] },
-    { name: 'hub codes', script: 'data.orders.map(o => o.hub)' },
+    {
+      name: 'slow orders',
+      script: 'data.orders.filter(o => o.h > 48)',
+      reads: ['orders', 'orders[].h'],
+      numberMode: 'exact-text',
+    },
+    { name: 'hub codes', script: 'data.orders.map(o => o.hub)', numberMode: 'js' },
   ],
 });
 
@@ -18,14 +23,21 @@ describe('parsePlaybook', () => {
     if (!res.ok) throw new Error(res.error);
     expect(res.playbook.name).toBe('DHL dumps');
     expect(res.playbook.functions).toEqual([
-      { name: 'slow orders', script: 'data.orders.filter(o => o.h > 48)', reads: ['orders', 'orders[].h'] },
-      { name: 'hub codes', script: 'data.orders.map(o => o.hub)' },
+      {
+        name: 'slow orders',
+        script: 'data.orders.filter(o => o.h > 48)',
+        reads: ['orders', 'orders[].h'],
+        numberMode: 'exact-text',
+      },
+      { name: 'hub codes', script: 'data.orders.map(o => o.hub)', numberMode: 'js' },
     ]);
   });
 
-  it('takes a bare list — a playbook does not have to be named', () => {
+  it('imports a v1 bare list under its original JavaScript-number contract', () => {
     const res = parsePlaybook('{"playbookVersion":1,"functions":[{"name":"a","script":"data"}]}');
-    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.playbook.playbookVersion).toBe(PLAYBOOK_VERSION);
+    expect(res.playbook.functions[0].numberMode).toBe('js');
   });
 
   // FAIL LOUD. A file written by a newer jsonloupe must not import as a subset
@@ -38,6 +50,16 @@ describe('parsePlaybook', () => {
   it('refuses an unknown field inside a function, naming which one', () => {
     const res = parsePlaybook('{"playbookVersion":1,"functions":[{"name":"a","script":"data","pinned":true}]}');
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('`pinned`') });
+  });
+
+  it('refuses an unknown number contract rather than guessing', () => {
+    const res = parsePlaybook('{"playbookVersion":2,"functions":[{"name":"a","script":"data","numberMode":"bigint"}]}');
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('`numberMode`') });
+  });
+
+  it('requires v2 functions to say their number contract', () => {
+    const res = parsePlaybook('{"playbookVersion":2,"functions":[{"name":"a","script":"data"}]}');
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('no `numberMode`') });
   });
 
   it('refuses a version it cannot read, and says which it reads', () => {
@@ -54,17 +76,17 @@ describe('parsePlaybook', () => {
   });
 
   it('names the function that is malformed, by position and by name', () => {
-    const missingScript = parsePlaybook('{"playbookVersion":1,"functions":[{"name":"a","script":"data"},{"name":"b","script":"  "}]}');
+    const missingScript = parsePlaybook('{"playbookVersion":2,"functions":[{"name":"a","script":"data","numberMode":"js"},{"name":"b","script":"  ","numberMode":"js"}]}');
     if (missingScript.ok) throw new Error('expected a refusal');
     expect(missingScript.error).toContain('function 2');
     expect(missingScript.error).toContain('`b`');
 
-    const nameless = parsePlaybook('{"playbookVersion":1,"functions":[{"script":"data"}]}');
+    const nameless = parsePlaybook('{"playbookVersion":2,"functions":[{"script":"data","numberMode":"js"}]}');
     expect(nameless).toMatchObject({ ok: false, error: expect.stringContaining('function 1 has no name') });
   });
 
   it('refuses a reads that is not a list of paths', () => {
-    const res = parsePlaybook('{"playbookVersion":1,"functions":[{"name":"a","script":"data","reads":"orders"}]}');
+    const res = parsePlaybook('{"playbookVersion":2,"functions":[{"name":"a","script":"data","reads":"orders","numberMode":"js"}]}');
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('`reads`') });
   });
 });

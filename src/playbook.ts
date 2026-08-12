@@ -13,18 +13,23 @@
 //
 // `reads` travels with each function so an imported playbook can tell its new
 // owner "this reads `orders`, your file has none" before they run anything.
+// `numberMode` travels too: exact-number behavior is part of the function, not
+// a browser preference that may change under it after import.
 //
 // Pure and DOM-free on purpose: db.ts owns storage, main.ts owns the buttons,
 // and everything decidable about the format is decided and tested here.
 
-/** Bumped only for a change an older reader could not handle. */
-export const PLAYBOOK_VERSION = 1;
+import { runNumberMode, type RunNumberMode } from './run-number-mode';
+
+/** v2 adds each function's number contract; this reader still imports v1. */
+export const PLAYBOOK_VERSION = 2;
 
 export interface PlaybookFunction {
   name: string;
   script: string;
   /** Paths the function was seen to read, if it had been run when exported. */
   reads?: string[];
+  numberMode: RunNumberMode;
 }
 
 export interface Playbook {
@@ -35,7 +40,8 @@ export interface Playbook {
 }
 
 const TOP_KEYS = new Set(['playbookVersion', 'name', 'functions']);
-const FUNCTION_KEYS = new Set(['name', 'script', 'reads']);
+const FUNCTION_KEYS_V1 = new Set(['name', 'script', 'reads']);
+const FUNCTION_KEYS_V2 = new Set(['name', 'script', 'reads', 'numberMode']);
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -66,11 +72,11 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   const stray = unknownKey(raw, TOP_KEYS);
   if (stray) return { ok: false, error: `unknown field \`${stray}\` — this file is not a playbook, or was written by a newer jsonloupe` };
 
-  if (raw.playbookVersion !== PLAYBOOK_VERSION) {
+  if (raw.playbookVersion !== 1 && raw.playbookVersion !== PLAYBOOK_VERSION) {
     return {
       ok: false,
       error: typeof raw.playbookVersion === 'number'
-        ? `playbook version ${raw.playbookVersion}, and this jsonloupe reads version ${PLAYBOOK_VERSION}`
+        ? `playbook version ${raw.playbookVersion}, and this jsonloupe reads versions 1–${PLAYBOOK_VERSION}`
         : 'no `playbookVersion` — this file is not a playbook',
     };
   }
@@ -80,10 +86,11 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   if (!Array.isArray(raw.functions)) return { ok: false, error: '`functions` must be a list' };
 
   const functions: PlaybookFunction[] = [];
+  const functionKeys = raw.playbookVersion === 1 ? FUNCTION_KEYS_V1 : FUNCTION_KEYS_V2;
   for (const [i, entry] of raw.functions.entries()) {
     const at = `function ${i + 1}`;
     if (!isObject(entry)) return { ok: false, error: `${at} is not an object` };
-    const strayKey = unknownKey(entry, FUNCTION_KEYS);
+    const strayKey = unknownKey(entry, functionKeys);
     if (strayKey) return { ok: false, error: `${at} has an unknown field \`${strayKey}\`` };
     if (typeof entry.name !== 'string' || !entry.name.trim()) {
       return { ok: false, error: `${at} has no name` };
@@ -95,10 +102,17 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
       && (!Array.isArray(entry.reads) || entry.reads.some((p) => typeof p !== 'string'))) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has a \`reads\` that is not a list of paths` };
     }
+    if (raw.playbookVersion === PLAYBOOK_VERSION && entry.numberMode === undefined) {
+      return { ok: false, error: `${at} (\`${entry.name}\`) has no \`numberMode\`` };
+    }
+    if (entry.numberMode !== undefined && entry.numberMode !== 'js' && entry.numberMode !== 'exact-text') {
+      return { ok: false, error: `${at} (\`${entry.name}\`) has an unknown \`numberMode\`` };
+    }
     functions.push({
       name: entry.name.trim(),
       script: entry.script,
       ...(entry.reads ? { reads: entry.reads as string[] } : {}),
+      numberMode: runNumberMode(entry.numberMode),
     });
   }
   return { ok: true, playbook: { playbookVersion: PLAYBOOK_VERSION, ...(raw.name ? { name: raw.name } : {}), functions } };

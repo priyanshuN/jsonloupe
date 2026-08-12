@@ -650,8 +650,17 @@ SPDX-License-Identifier: MIT -->
                  not a failure because one of its functions was: the others
                  produced, and their keys are in the report. -->
             <div id="run-batch" class="run-remark" hidden></div>
-            <div id="run-lossy" hidden>
-              <svg class="ic" aria-hidden="true"><use href="#i-warn"></use></svg>this document has numbers plain JS cannot hold exactly — the script sees them rounded
+            <div id="run-number-setting">
+              <span class="standing-label">numbers</span>
+              <div class="mode-switch mode-switch-mini" id="run-number-switch" role="group"
+                aria-label="Numbers handed to this function" aria-describedby="run-number-help">
+                <button type="button" data-number-mode="js" class="on"
+                  title="Use ordinary JavaScript numbers; unsafe values may round">JavaScript</button>
+                <button type="button" data-number-mode="exact-text"
+                  title="Keep unsafe number literals as their original digit strings">exact text</button>
+              </div>
+              <svg id="run-number-warn" class="ic" aria-hidden="true" hidden><use href="#i-warn"></use></svg>
+              <span id="run-number-help">ordinary JavaScript numbers</span>
             </div>
             <div id="run-editor" hidden></div>
             <span id="run-status" hidden></span>
