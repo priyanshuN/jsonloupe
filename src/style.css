@@ -2393,17 +2393,25 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   font-size: var(--fs-body);
 }
 
-/* Rule 15 tier 1, INK ONLY: the script sees plain JS numbers, which is expected
-   and permanent rather than something to respond to. It reads --warn because
-   that is what --warn means, and it is a line rather than a toast because it is
-   true for as long as the document is open. */
-#run-lossy {
+/* A function's number contract is part of the function, beside its code rather
+   than in a browser-wide preference. The switch stays visible on safe files so
+   a reusable function can be prepared for tomorrow's file; the sentence says
+   the consequence for the document that is open now. */
+#run-number-setting {
   display: flex;
   align-items: center;
-  gap: var(--gap-1);
-  color: var(--warn);
+  gap: var(--gap-2);
+  min-width: 0;
+  color: var(--text-dim);
   font-size: var(--fs-body);
 }
+#run-number-setting > .mode-switch { flex-shrink: 0; }
+#run-number-help {
+  min-width: 0;
+  line-height: 1.35;
+}
+#run-number-setting.warn #run-number-help,
+#run-number-setting.warn #run-number-warn { color: var(--warn); }
 
 /* Rule 14's field recipe, on a CodeMirror host instead of a <textarea>: the
    editor inside goes bare (run-editor.ts sets no ground of its own) and this

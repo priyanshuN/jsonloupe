@@ -251,6 +251,10 @@ describe('the responsive workbench shell', () => {
     expect(mobile).toContain('data-mobile-run="workspace"');
     expect(html).toContain('id="run-src-switch"');
     expect(html).toContain('id="run-face-switch"');
+    const numbers = element(html, 'run-number-switch');
+    expect(numbers).toContain('aria-label="Numbers handed to this function"');
+    expect(numbers).toContain('data-number-mode="js"');
+    expect(numbers).toContain('data-number-mode="exact-text"');
   });
 });
 

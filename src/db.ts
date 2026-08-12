@@ -5,6 +5,7 @@
 
 import type { ConvertSpec } from './convert/spec';
 import { deriveScriptName } from './run-script';
+import { runNumberMode, type RunNumberMode } from './run-number-mode';
 
 export interface DocMeta {
   id: string;
@@ -364,6 +365,8 @@ export interface SavedScript {
   createdAt: number;
   updatedAt: number;
   uses: number;
+  /** How JSON number literals are handed to this function. */
+  numberMode: RunNumberMode;
   /**
    * The document paths this script was seen to read, learned from its first
    * traced run (run-exec.ts). ABSENT means not learned yet — never "reads
@@ -395,7 +398,11 @@ export async function listQueries(): Promise<SavedQuery[]> {
 // write would leave a script you never re-saved nameless forever.
 export async function listScripts(): Promise<SavedScript[]> {
   return (await listSaved()).filter(isScript).map((s) => (
-    s.name ? s : { ...s, name: deriveScriptName(s.script) }
+    {
+      ...s,
+      name: s.name || deriveScriptName(s.script),
+      numberMode: runNumberMode(s.numberMode),
+    }
   ));
 }
 
@@ -432,18 +439,32 @@ export async function saveQuery(question: string, query: string): Promise<SavedQ
 // names. Saving the same name again therefore overwrites that entry — which is
 // what `save` means once a thing has a name — while `save as new` asks its
 // caller for a free one (uniqueScriptName) before it gets here.
-export async function saveScript(name: string, script: string, reads?: string[]): Promise<SavedScript> {
+export async function saveScript(
+  name: string,
+  script: string,
+  reads?: string[],
+  numberMode: RunNumberMode = 'js',
+): Promise<SavedScript> {
   const all = await listScripts();
   const now = Date.now();
   const label = name.trim() || deriveScriptName(script);
   const dup = all.find((s) => s.name.trim().toLowerCase() === label.toLowerCase());
   const rec: SavedScript = dup
-    ? { ...dup, name: label, script, ...(reads ? { reads } : {}), updatedAt: now, uses: dup.uses + 1 }
+    ? {
+      ...dup,
+      name: label,
+      script,
+      numberMode: runNumberMode(numberMode),
+      ...(reads ? { reads } : {}),
+      updatedAt: now,
+      uses: dup.uses + 1,
+    }
     : {
       id: crypto.randomUUID(),
       kind: 'script',
       name: label,
       script,
+      numberMode: runNumberMode(numberMode),
       ...(reads ? { reads } : {}),
       createdAt: now,
       updatedAt: now,
@@ -461,7 +482,7 @@ export async function updateScript(
   id: string,
   // `reads: null` CLEARS what the script was seen to read — the caller edited
   // its code, so the old reading describes a function that no longer exists.
-  patch: { name?: string; script?: string; reads?: string[] | null },
+  patch: { name?: string; script?: string; reads?: string[] | null; numberMode?: RunNumberMode },
 ): Promise<SavedScript | null> {
   const all = await listScripts();
   const current = all.find((s) => s.id === id);
@@ -470,6 +491,7 @@ export async function updateScript(
     ...current,
     name: patch.name?.trim() || current.name,
     script: patch.script ?? current.script,
+    numberMode: runNumberMode(patch.numberMode ?? current.numberMode),
     reads: patch.reads === null ? undefined : patch.reads ?? current.reads,
     updatedAt: Date.now(),
   };

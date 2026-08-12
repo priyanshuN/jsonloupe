@@ -602,6 +602,7 @@ describe('saved scripts', () => {
 
     expect(script.kind).toBe('script');
     expect(script.name).toBe('slow orders');
+    expect(script.numberMode).toBe('js');
     expect(script.uses).toBe(1);
     expect(await db.listScripts()).toEqual([script]);
     // The two kinds share a store; neither list may show the other's records.
@@ -644,6 +645,16 @@ describe('saved scripts', () => {
     expect(await db.listScripts()).toEqual([edited]);
   });
 
+  it('keeps a function\'s exact-number contract with the saved record', async () => {
+    const first = await db.saveScript('exact ids', 'data.orders.map(o => o.id)', undefined, 'exact-text');
+    expect(first.numberMode).toBe('exact-text');
+
+    tick();
+    const edited = await db.updateScript(first.id, { numberMode: 'js' });
+    expect(edited?.numberMode).toBe('js');
+    expect((await db.listScripts())[0].numberMode).toBe('js');
+  });
+
   it('answers null when the record to update is gone', async () => {
     const rec = await db.saveScript('gone', 'data.a');
     await db.removeSaved(rec.id);
@@ -668,6 +679,7 @@ describe('saved scripts', () => {
 
     const listed = await db.listScripts();
     expect(listed.map((s) => s.name)).toEqual(['old one']);
+    expect(listed[0].numberMode).toBe('js');
   });
 
   it('lists the most recently used script first and removes by id', async () => {

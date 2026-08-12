@@ -99,15 +99,43 @@ describe('executeUserCode', () => {
 
   it('rejects a document the plain parser will not take', () => {
     const res = executeUserCode('{"a": 1,}', 'return data');
-    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('plain JSON') });
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('strict JSON') });
   });
 
-  // The documented cost of handing scripts plain JSON.parse values: an int64 id
-  // arrives rounded. The panel warns about exactly this (#run-lossy); the test
-  // pins the behaviour so it cannot change silently.
-  it('rounds numbers past 2^53, as plain JSON.parse does', () => {
+  // Existing functions keep JavaScript-number semantics until their author
+  // opts into exact text, so this compatibility behavior cannot change under
+  // a saved function silently.
+  it('rounds numbers past 2^53 in JavaScript-number mode', () => {
     const res = expectOk(executeUserCode('{"id": 9007199254740993}', 'return data.id'));
     expect(res.resultText).toBe('9007199254740992');
+  });
+
+  it('hands unsafe literals to exact-text functions as their original digit strings', () => {
+    const doc = '{"id":9007199254740993,"amount":1.234567890123456789,"count":3,"ratio":1.5}';
+    const res = expectOk(executeUserCode(
+      doc,
+      '({ id: data.id, amount: data.amount, count: data.count, doubled: data.count * 2, ratio: data.ratio })',
+      false,
+      'exact-text',
+    ));
+    expect(JSON.parse(res.resultText)).toEqual({
+      id: '9007199254740993',
+      amount: '1.234567890123456789',
+      count: 3,
+      doubled: 6,
+      ratio: 1.5,
+    });
+  });
+
+  it('keeps exact-text path tracing identical to JavaScript-number tracing', () => {
+    const res = expectOk(executeUserCode(
+      '{"orders":[{"id":9007199254740993}]}',
+      'data.orders.map(order => order.id)',
+      true,
+      'exact-text',
+    ));
+    expect(res.resultText).toBe('["9007199254740993"]');
+    expect(res.reads).toEqual(['orders', 'orders[].id']);
   });
 
   // No preview and no cap: the whole result comes back as one compact string,
@@ -173,7 +201,7 @@ describe('executeUserCode · trace', () => {
 
 // Several saved functions over ONE document — the day's answers as one report.
 describe('executeUserScripts', () => {
-  const batch = (scripts: { name: string; code: string }[], trace = false) =>
+  const batch = (scripts: { name: string; code: string; numberMode?: 'js' | 'exact-text' }[], trace = false) =>
     executeUserScripts(DOC, scripts, trace);
 
   it('keys every answer by its function name', () => {
@@ -230,7 +258,7 @@ describe('executeUserScripts', () => {
 
   it('fails as a whole only when the document itself cannot be read', () => {
     const res = executeUserScripts('{"a": 1,}', [{ name: 'any', code: 'data.a' }]);
-    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('plain JSON') });
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('strict JSON') });
   });
 
   it('names which function wrote which console line', () => {
@@ -250,5 +278,22 @@ describe('executeUserScripts', () => {
     if (!res.ok) throw new Error(res.error);
     expect(res.entries[0].reads).toEqual(['tasks', 'tasks[].status']);
     expect(res.entries[1].reads).toEqual(['tasks']);
+  });
+
+  it('runs a mixed batch with each saved function\'s number contract', () => {
+    const res = executeUserScripts(
+      '{"id":9007199254740993,"count":3}',
+      [
+        { name: 'legacy', code: 'data.id' },
+        { name: 'exact id', code: 'data.id', numberMode: 'exact-text' },
+        { name: 'safe arithmetic', code: 'data.count * 2', numberMode: 'exact-text' },
+      ],
+    );
+    if (!res.ok) throw new Error(res.error);
+    expect(JSON.parse(res.resultText)).toEqual({
+      legacy: 9007199254740992,
+      'exact id': '9007199254740993',
+      'safe arithmetic': 6,
+    });
   });
 });

@@ -10,6 +10,7 @@
 // can only receive messages from the page that constructed it.
 
 import { executeUserCode, executeUserScripts } from './run-exec';
+import { runNumberMode, type RunNumberMode } from './run-number-mode';
 
 const post = (d: unknown): void => (self as unknown as Worker).postMessage(d);
 
@@ -32,21 +33,25 @@ if (typeof self !== 'undefined' && typeof (self as unknown as Worker).postMessag
     // A dedicated worker only hears from the page that spawned it; there is no
     // origin to check. Shape-check instead so a malformed message is inert.
     const d = e.data as
-      | { docText?: unknown; code?: unknown; scripts?: unknown; trace?: unknown }
+      | { docText?: unknown; code?: unknown; scripts?: unknown; trace?: unknown; numberMode?: unknown }
       | null;
     if (!d || typeof d.docText !== 'string') return;
     const trace = d.trace === true;
-    // A batch: several saved functions over one parse of the document.
+    // A batch: several saved functions over one parse per number contract.
     if (Array.isArray(d.scripts)) {
       const scripts = d.scripts.filter(
-        (s): s is { name: string; code: string } =>
-          !!s && typeof s.name === 'string' && typeof s.code === 'string',
+        (s): s is { name: string; code: string; numberMode?: RunNumberMode } =>
+          !!s
+          && typeof s.name === 'string'
+          && typeof s.code === 'string'
+          && (s.numberMode === undefined || s.numberMode === 'js' || s.numberMode === 'exact-text'),
       );
       if (scripts.length !== d.scripts.length) return; // malformed stays inert
       post(executeUserScripts(d.docText, scripts, trace));
       return;
     }
     if (typeof d.code !== 'string') return;
-    post(executeUserCode(d.docText, d.code, trace));
+    if (d.numberMode !== undefined && d.numberMode !== 'js' && d.numberMode !== 'exact-text') return;
+    post(executeUserCode(d.docText, d.code, trace, runNumberMode(d.numberMode)));
   };
 }

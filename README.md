@@ -98,7 +98,10 @@ flagged, with the original bytes preserved.
   no query language should have to answer, keep it under a name, and press it
   over tomorrow's file. Scripts run in an ephemeral sandbox worker with `fetch`,
   storage and the network removed, and the result opens as a document of its
-  own. Tick several and one press answers all of them as a single report.
+  own. A function can keep JavaScript-number behavior or receive unsafe numeric
+  literals as exact digit strings; safe numbers stay numbers in either mode.
+  Tick several and one press answers all of them as a single report, honoring
+  each function's number contract.
   ([below](#playbooks-your-functions-as-a-file).)
 - **JSON → Excel / CSV converter** — rename and reorder columns, choose source
   fields, add constants, set date and coordinate handling, take the column names
@@ -220,13 +223,14 @@ A playbook is that library as a file — the questions, never the data:
 
 ```json
 {
-  "playbookVersion": 1,
+  "playbookVersion": 2,
   "name": "carrier dumps",
   "functions": [
     {
       "name": "slow orders",
       "script": "data.orders.filter(o => o.deliveredInHours > 48)",
-      "reads": ["orders", "orders[].deliveredInHours"]
+      "reads": ["orders", "orders[].deliveredInHours"],
+      "numberMode": "exact-text"
     }
   ]
 }
@@ -241,9 +245,13 @@ jsonloupe cannot import as a subset of itself and look like it worked.
 Scripts run in an ephemeral worker with `fetch`, `XMLHttpRequest`, WebSockets,
 IndexedDB and `importScripts` removed before any user code, terminated on its
 result or after ten seconds — a pasted script cannot reach the network or the
-documents you have opened. They see plain `JSON.parse` values, so an int64 id
-arrives rounded there; the panel says so out loud rather than hiding it, and the
-lossless path is everywhere else in the app.
+documents you have opened. `JavaScript` number mode preserves the behavior of
+existing functions and says when a document contains values it will round.
+`exact text` mode instead hands those unsafe literals to the function as their
+original digit strings (`"9007199254740993"`); ordinary values such as `3` and
+`1.5` remain numbers, so normal counting and arithmetic still work. The mode is
+saved and exported with the function rather than left as a browser preference.
+Version 1 playbooks still import under their original JavaScript-number mode.
 
 ## Use with AI agents
 
