@@ -22,6 +22,16 @@ const doc = {
   meta: { region: 'south', version: 4, nested: { deep: { eta: 999 } } },
 };
 
+// These are the three copy/paste examples in README's browser query cookbook.
+// Keeping them together makes the documentation's promised first steps an
+// executable contract rather than prose that can drift past the parser.
+const cookbookDoc = {
+  tasks: [
+    { id: new LosslessNumber('9007199254740992'), status: 'FAILED' },
+    { id: new LosslessNumber('9007199254740993'), status: 'READY' },
+  ],
+};
+
 function matches(r: QueryResult): { path: (string | number)[]; value: unknown }[] {
   if (!r.ok || r.kind !== 'matches') throw new Error('expected matches, got ' + JSON.stringify(r));
   return r.matches;
@@ -31,6 +41,22 @@ function value(r: QueryResult): number | string | null {
   if (!r.ok || r.kind !== 'value') throw new Error('expected value, got ' + JSON.stringify(r));
   return r.value;
 }
+
+describe('README browser query cookbook', () => {
+  it('filters rows, groups a field, and compares an int64 exactly', () => {
+    expect(matches(runQuery(cookbookDoc, "$.tasks[?(@.status == 'FAILED')]")).map((match) => match.path))
+      .toEqual([['tasks', 0]]);
+
+    const grouped = runQuery(cookbookDoc, '$.tasks[*] | group(@.status)');
+    if (!grouped.ok || grouped.kind !== 'groups') throw new Error('expected cookbook groups');
+    expect(grouped.groups).toEqual([
+      { key: 'FAILED', count: 1 },
+      { key: 'READY', count: 1 },
+    ]);
+
+    expect(value(runQuery(cookbookDoc, '$.tasks[?(@.id > 9007199254740992)] | count'))).toBe(1);
+  });
+});
 
 describe('paths', () => {
   it('matches the root and recursive wildcard descendants', () => {

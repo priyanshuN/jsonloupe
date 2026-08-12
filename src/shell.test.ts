@@ -333,3 +333,30 @@ describe('glyph-only controls (rule 10, revised)', () => {
     expect(naked, 'glyph-only buttons missing title and/or aria-label').toEqual([]);
   });
 });
+
+describe('every app-shell button has an accessible name', () => {
+  const buttons = [...withoutComments(html).matchAll(/<button\b[\s\S]*?<\/button>/g)]
+    .map((match, index) => ({ markup: match[0], index }));
+
+  it('finds the shell buttons before checking them', () => {
+    expect(buttons.length).toBeGreaterThanOrEqual(90);
+  });
+
+  it('accepts visible text or an explicit accessible-name relationship', () => {
+    const unnamed = buttons.flatMap(({ markup, index }) => {
+      const opening = markup.slice(0, markup.indexOf('>') + 1);
+      const inner = markup.slice(markup.indexOf('>') + 1, markup.lastIndexOf('</button>'));
+      // An SVG glyph is decoration, not a printed label. Text in ordinary
+      // descendants still counts (including a visually-hidden label).
+      const withoutGlyphs = inner.replace(/<svg\b[\s\S]*?<\/svg>/g, '');
+      const visibleText = textOutsideTags(withoutGlyphs).replace(/\s+/g, ' ').trim();
+      const ariaLabel = /\saria-label="([^"]+)"/.exec(opening)?.[1].trim() ?? '';
+      const labelledBy = /\saria-labelledby="([^"]+)"/.exec(opening)?.[1].trim() ?? '';
+      if (visibleText || ariaLabel || labelledBy) return [];
+      const id = /\sid="([^"]+)"/.exec(opening)?.[1];
+      return [id ? `#${id}` : `button ${index + 1}: ${opening.slice(0, 80)}`];
+    });
+
+    expect(unnamed, `buttons with no accessible name: ${unnamed.join(', ')}`).toEqual([]);
+  });
+});
