@@ -714,6 +714,35 @@ describe('saved scripts', () => {
   });
 });
 
+describe('saved checks', () => {
+  it('stores checks apart from questions and scripts', async () => {
+    await db.saveQuery('failed orders', "$.orders[?(@.status == 'FAILED')]");
+    await db.saveScript('count orders', 'data.orders.length');
+    const check = await db.saveCheck(
+      'No failed orders',
+      "$.orders[?(@.status == 'FAILED')]",
+      { type: 'no-matches' },
+    );
+
+    expect(check.kind).toBe('check');
+    expect(await db.listChecks()).toEqual([check]);
+    expect(await db.listQueries()).toHaveLength(1);
+    expect(await db.listScripts()).toHaveLength(1);
+  });
+
+  it('updates a case-insensitive name match without minting a duplicate', async () => {
+    const first = await db.saveCheck('No failed orders', '$.failed', { type: 'no-matches' });
+    tick();
+    const second = await db.saveCheck(' no FAILED orders ', '$.failed[*]', { type: 'exact-count', count: 2 });
+
+    expect(second.id).toBe(first.id);
+    expect(second.uses).toBe(2);
+    expect(second.query).toBe('$.failed[*]');
+    expect(second.expectation).toEqual({ type: 'exact-count', count: 2 });
+    expect(await db.listChecks()).toHaveLength(1);
+  });
+});
+
 describe('saved converter mappings', () => {
   const spec = {
     specVersion: 1 as const,

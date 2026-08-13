@@ -1,7 +1,13 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildSentPayload, setApiKey, translateToQuery, type SentPayload } from './nl';
+import {
+  buildSentPayload,
+  providerForApiKey,
+  setApiKey,
+  translateToQuery,
+  type SentPayload,
+} from './nl';
 
 // F2 transparency: the disclosure is rendered from the SAME object the request
 // is serialized from. These tests pin that invariant (the flat fields the UI
@@ -17,6 +23,10 @@ afterEach(() => {
 });
 
 describe('buildSentPayload', () => {
+  it('makes the provider implied by a key explicit for the UI', () => {
+    expect(providerForApiKey('sk-ant-example')).toBe('anthropic');
+    expect(providerForApiKey('sk-or-example')).toBe('openrouter');
+  });
   it('routes sk-ant- keys to Anthropic with system + user message', () => {
     const s = buildSentPayload('sk-ant-abc123', SCHEMA, QUESTION);
     expect(s.provider).toBe('anthropic');
@@ -180,9 +190,9 @@ describe('translateToQuery', () => {
   });
 
   it.each([
-    ['OpenRouter', 'sk-or-bad', 401, 'denied', 'OpenRouter key rejected (401)'],
+    ['OpenRouter', 'sk-or-bad', 401, 'denied', 'OpenRouter key rejected (401) — update the model key and try again'],
     ['OpenRouter', 'sk-or-bad', 429, 'slow down', 'OpenRouter 429: slow down'],
-    ['Anthropic', 'sk-ant-bad', 401, 'denied', 'Anthropic key rejected (401)'],
+    ['Anthropic', 'sk-ant-bad', 401, 'denied', 'Anthropic key rejected (401) — update the model key and try again'],
     ['Anthropic', 'sk-ant-bad', 500, 'unavailable', 'Anthropic API 500: unavailable'],
   ])('reports %s HTTP errors without parsing a response', async (_provider, key, status, body, message) => {
     const sent = buildSentPayload(key, SCHEMA, QUESTION);

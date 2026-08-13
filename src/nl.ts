@@ -72,11 +72,15 @@ export interface SentPayload {
   body: Record<string, unknown>;
 }
 
+export function providerForApiKey(apiKey: string): SentPayload['provider'] {
+  return apiKey.startsWith('sk-ant-') ? 'anthropic' : 'openrouter';
+}
+
 /** Build the one payload that is both sent and disclosed. Pure — no network. */
 export function buildSentPayload(apiKey: string, schema: string, question: string): SentPayload {
   const system = `${GRAMMAR}\n\nThe document's schema (shape only — you never see values):\n${schema}`;
   // sk-ant-… goes direct to Anthropic; anything else (sk-or-…) via OpenRouter.
-  if (apiKey.startsWith('sk-ant-')) {
+  if (providerForApiKey(apiKey) === 'anthropic') {
     return {
       provider: 'anthropic',
       endpoint: 'https://api.anthropic.com/v1/messages',
@@ -128,7 +132,7 @@ async function viaOpenRouter(
   });
   if (!resp.ok) {
     const body = (await resp.text()).slice(0, 200);
-    if (resp.status === 401) throw new Error('OpenRouter key rejected (401) — check the key file');
+    if (resp.status === 401) throw new Error('OpenRouter key rejected (401) — update the model key and try again');
     throw new Error(`OpenRouter ${resp.status}: ${body}`);
   }
   const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
@@ -153,7 +157,7 @@ async function viaAnthropic(
   });
   if (!resp.ok) {
     const body = (await resp.text()).slice(0, 200);
-    if (resp.status === 401) throw new Error('Anthropic key rejected (401) — check the key file');
+    if (resp.status === 401) throw new Error('Anthropic key rejected (401) — update the model key and try again');
     throw new Error(`Anthropic API ${resp.status}: ${body}`);
   }
   const data = (await resp.json()) as { content?: { type: string; text?: string }[] };

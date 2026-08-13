@@ -1,7 +1,13 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
-import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
+import {
+  scriptChipLabel,
+  deriveScriptName,
+  uniqueScriptName,
+  scriptEditorPlaceholder,
+  functionActionState,
+} from './run-script';
 
 describe('scriptChipLabel', () => {
   it('shows a short script whole', () => {
@@ -67,5 +73,28 @@ describe('uniqueScriptName', () => {
 
   it('names an unnamed fork rather than answering empty', () => {
     expect(uniqueScriptName('   ', [])).toBe('untitled');
+  });
+});
+
+describe('function editor guidance', () => {
+  it('makes an example unmistakably placeholder guidance', () => {
+    expect(scriptEditorPlaceholder('data.orders.length'))
+      .toBe('write JavaScript using data — e.g. data.orders.length');
+    expect(scriptEditorPlaceholder('data')).toBe('write JavaScript using data');
+  });
+
+  it('enables save and run only for a real draft', () => {
+    expect(functionActionState('', false, false)).toEqual({
+      hasCode: false,
+      canSave: false,
+      canRun: false,
+    });
+    expect(functionActionState('data.orders.length', true, false)).toEqual({
+      hasCode: true,
+      canSave: true,
+      canRun: true,
+    });
+    expect(functionActionState('data.orders.length', false, false).canSave).toBe(false);
+    expect(functionActionState('data.orders.length', true, true).canRun).toBe(false);
   });
 });

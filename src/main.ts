@@ -44,12 +44,26 @@ import {
   type TransportInspection,
   type TransportMeasure,
 } from './transport';
-import { getApiKey, setApiKey, translateToQuery, buildSentPayload, type SentPayload } from './nl';
+import {
+  getApiKey,
+  setApiKey,
+  translateToQuery,
+  buildSentPayload,
+  providerForApiKey,
+  type SentPayload,
+} from './nl';
 import { currentChoice, currentTheme, onThemeChange, setThemeChoice, type ThemeChoice } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
-import { scriptChipLabel, deriveScriptName, uniqueScriptName } from './run-script';
-import type { SavedScript } from './db';
+import {
+  scriptChipLabel,
+  deriveScriptName,
+  uniqueScriptName,
+  scriptEditorPlaceholder,
+  functionActionState,
+} from './run-script';
+import type { SavedCheck, SavedScript } from './db';
+import { evaluateCheck, expectationText, type CheckExpectation } from './check';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
 import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
@@ -74,9 +88,14 @@ window.addEventListener('vite:preloadError', (e) => {
 // spawns a SECOND instance for its result (`runResultChannel` below): the
 // mechanics are shared, this instance is the document's, and nothing a user
 // script does can reach it.
-const docChannel = createWorkerChannel('document');
+// The marketing landing does not need a parser worker. Creating it here used
+// to fetch and initialize the full worker before anyone pasted or opened JSON,
+// making a 147 KB application asset part of an otherwise static landing page.
+// The first real document operation creates it; all later calls reuse it.
+let docChannel: WorkerChannel | null = null;
 
 function call<T>(msg: Record<string, unknown>): Promise<T> {
+  docChannel ??= createWorkerChannel('document');
   return docChannel.call<T>(msg);
 }
 
@@ -1065,7 +1084,6 @@ for (const control of [
   control.addEventListener('input', scheduleTransportSettingsRun);
   control.addEventListener('change', scheduleTransportSettingsRun);
 }
-$('#transport-run').addEventListener('click', () => void runTransportInspector());
 transportIncludeBaseline.addEventListener('change', () => void runTransportInspector());
 transportBtn.addEventListener('click', () => {
   if (codeDirty && codeOnScreen()) {
@@ -1074,7 +1092,10 @@ transportBtn.addEventListener('click', () => {
   }
   transportBaselineWrap.hidden = diffBaselineText === null;
   transportIncludeBaseline.checked = activePane === 'semantic' && diffBaselineText !== null;
-  if (!transportDialog.open) transportDialog.showModal();
+  if (!transportDialog.open) {
+    transportDialog.showModal();
+    transportDialog.focus();
+  }
   void runTransportInspector();
 });
 transportDialog.addEventListener('close', () => {
@@ -2364,6 +2385,9 @@ const codecPane = $('#codec');
 // One pair, not two cards: the JSON side and the payload side, with the
 // direction living in the buttons between them.
 const codecJson = $<HTMLTextAreaElement>('#codec-json');
+const codecJsonSource = $('#codec-json-source');
+const codecJsonStatus = $('#codec-json-status');
+const codecPayloadStatus = $('#codec-payload-status');
 const codecFormatSwitch = $('#codec-format');
 /**
  * What the encode side produces, and what its copy copies. It follows a decode
@@ -2373,30 +2397,122 @@ const codecFormatSwitch = $('#codec-format');
  */
 let codecFormat: EncodeFormat = 'base64-zstd';
 const codecPayload = $<HTMLTextAreaElement>('#codec-payload');
-const codecTrace = $('#codec-trace');
 const codecFileInput = $<HTMLInputElement>('#codec-file-input');
-let codecDecodedText = '';
-let codecDecodedTitle = 'decoded payload.json';
-let codecDecodedProvenance: store.DocProvenance | null = null;
+const codecRunCompress = $<HTMLButtonElement>('#codec-run-c');
+const codecRunDecode = $<HTMLButtonElement>('#codec-run-d');
+const codecCopyJson = $<HTMLButtonElement>('#codec-copy-json');
+const codecCopyPayload = $<HTMLButtonElement>('#codec-copy-payload');
+const codecOpenJson = $<HTMLButtonElement>('#codec-open-json');
+const codecUseOpen = $<HTMLButtonElement>('#codec-use-open');
+const codecClose = $<HTMLButtonElement>('#codec-close');
+let codecHeldJson = '';
+let codecJsonTitle = 'pasted.json';
+let codecJsonProvenance: store.DocProvenance | null = null;
+let codecJsonKind: 'none' | 'typed' | 'open-document' | 'decoded' = 'none';
+let codecIntent: 'compress' | 'decode' = 'compress';
+let codecReturn: 'viewer' | 'landing' = 'landing';
+const codecUtf8Encoder = new TextEncoder();
+let codecOperationToken = 0;
+let codecBusy = false;
+
+function codecJsonText(): string {
+  return codecJson.value || codecHeldJson;
+}
+
+function setCodecSideStatus(
+  side: 'json' | 'payload',
+  text: string,
+  state: 'ok' | 'bad' | null,
+): void {
+  const el = side === 'json' ? codecJsonStatus : codecPayloadStatus;
+  el.textContent = text;
+  el.title = text;
+  el.hidden = !text;
+  el.classList.toggle('ok', state === 'ok');
+  el.classList.toggle('bad', state === 'bad');
+}
+
+function clearCodecStatuses(): void {
+  setCodecSideStatus('json', '', null);
+  setCodecSideStatus('payload', '', null);
+}
+
+function paintCodecActions(): void {
+  const hasJson = Boolean(codecJsonText().trim());
+  const hasPayload = Boolean(codecPayload.value.trim());
+  codecRunCompress.disabled = codecBusy || !hasJson;
+  codecRunDecode.disabled = codecBusy || !hasPayload;
+  codecCopyJson.disabled = !hasJson;
+  codecCopyPayload.disabled = !hasPayload;
+  codecOpenJson.disabled = !hasJson;
+  codecOpenJson.hidden = codecJsonKind === 'open-document';
+  codecUseOpen.hidden = !currentText || codecJsonKind === 'open-document';
+  codecUseOpen.disabled = codecBusy;
+  for (const button of codecFormatSwitch.querySelectorAll<HTMLButtonElement>('button')) {
+    button.disabled = codecBusy;
+  }
+  codecRunCompress.classList.toggle('primary', hasJson && codecIntent === 'compress');
+  codecRunDecode.classList.toggle('primary', hasPayload && codecIntent === 'decode');
+}
+
+function beginCodecOperation(): number {
+  const token = ++codecOperationToken;
+  codecBusy = true;
+  codecPane.setAttribute('aria-busy', 'true');
+  paintCodecActions();
+  return token;
+}
+
+function finishCodecOperation(token: number): boolean {
+  if (token !== codecOperationToken) return false;
+  codecBusy = false;
+  codecPane.removeAttribute('aria-busy');
+  paintCodecActions();
+  return true;
+}
+
+function cancelCodecOperation(): void {
+  codecOperationToken++;
+  codecBusy = false;
+  codecPane.removeAttribute('aria-busy');
+}
+
+function setCodecJsonContent(
+  text: string,
+  title: string,
+  provenance: store.DocProvenance | null,
+  kind: 'open-document' | 'decoded',
+): void {
+  codecHeldJson = text.length > PASTE_ECHO_MAX ? text : '';
+  codecJson.value = codecHeldJson ? '' : text;
+  codecJsonTitle = kind === 'decoded' ? decodedDocumentTitle(title) : title;
+  codecJsonProvenance = provenance;
+  codecJsonKind = kind;
+  codecJson.placeholder = codecHeldJson
+    ? `Complete ${fmtBytes(codecUtf8Encoder.encode(text).byteLength)} JSON held safely outside the editor`
+    : 'Paste JSON to compress';
+  const sourceBytes = codecUtf8Encoder.encode(text).byteLength;
+  codecJsonSource.textContent = kind === 'open-document'
+    ? `open document · ${title} · ${fmtBytes(sourceBytes)}`
+    : `decoded · ${title} · ${fmtBytes(sourceBytes)}`;
+  codecJsonSource.title = codecJsonSource.textContent;
+  codecJsonSource.hidden = false;
+  paintCodecActions();
+}
 
 function showCodec(): void {
   closeDocumentsDrawer(false);
   beginOpenRequest();
+  codecReturn = !viewer.hidden && currentText ? 'viewer' : 'landing';
+  codecClose.textContent = codecReturn === 'viewer' ? 'back to document' : 'back';
   landing.hidden = true;
   viewer.hidden = true;
   codecPane.hidden = false;
-  paintCodecJsonPlaceholder();
-}
-
-// What the last press did, under the pair it acted on: the trip and its sizes
-// for a success, the bytes and the reason for a failure. It is one line for
-// both directions because there is one conversation here, not two.
-function setCodecTrace(text: string, state: 'ok' | 'bad' | null): void {
-  codecTrace.textContent = text;
-  codecTrace.title = text;
-  codecTrace.hidden = !text;
-  codecTrace.classList.toggle('ok', state === 'ok');
-  codecTrace.classList.toggle('bad', state === 'bad');
+  if (!codecJsonText() && currentText) {
+    codecIntent = 'compress';
+    setCodecJsonContent(currentText, currentTitle, currentProvenance, 'open-document');
+  }
+  paintCodecActions();
 }
 
 function showDecodedPayload(
@@ -2404,23 +2520,13 @@ function showDecodedPayload(
   title: string,
   provenance: store.DocProvenance,
 ): void {
-  codecDecodedText = text;
-  codecDecodedTitle = decodedDocumentTitle(title);
-  codecDecodedProvenance = provenance;
-  // A decode fills the JSON side — the direction the button drew. A huge one
-  // still never reaches the textarea: `open as document` and `copy` work off
-  // the text itself, so the box says what is being held instead of rendering
-  // 40 MB into the DOM.
-  if (text.length <= PASTE_ECHO_MAX) {
-    codecJson.value = text;
-    codecJson.placeholder = '';
-  } else {
-    codecJson.value = '';
-    codecJson.placeholder = `decoded ${exactBytes(provenance.decodedBytes)} — kept out of the textarea so the page stays responsive`;
-  }
+  setCodecJsonContent(text, title, provenance, 'decoded');
+  codecIntent = 'decode';
   // What it was IN is what a re-encode should return to.
   adoptFormatFrom(provenance);
-  setCodecTrace(provenanceTrace(provenance), 'ok');
+  clearCodecStatuses();
+  setCodecSideStatus('json', provenanceTrace(provenance), 'ok');
+  paintCodecActions();
   showToast(`decoded ${exactBytes(provenance.decodedBytes)}`);
 }
 
@@ -2440,15 +2546,25 @@ async function decodeInPayloadTools(
   input: string | ArrayBuffer,
   sourceTitle: string,
 ): Promise<void> {
-  const decoded = await decodePayloadInWorker(input);
+  const token = beginCodecOperation();
+  setCodecSideStatus('payload', 'decoding locally…', null);
+  let decoded: WorkerPayloadDecodeResult;
+  try {
+    decoded = await decodePayloadInWorker(input);
+  } catch (error) {
+    if (!finishCodecOperation(token)) return;
+    const message = error instanceof Error ? error.message : String(error);
+    setCodecSideStatus('payload', `decode failed · ${message}`, 'bad');
+    showToast(`decode failed: ${message}`, 'bad');
+    return;
+  }
+  if (!finishCodecOperation(token)) return;
   if (!decoded.ok) {
-    codecDecodedText = '';
-    codecDecodedProvenance = null;
-    codecJson.value = '';
     const bytes = firstBytesHex(input);
     // Bytes lead, wordy message last: the trace ellipsizes at the label row's
     // right edge, and the clue must survive the cut — the prose can go.
-    setCodecTrace(
+    setCodecSideStatus(
+      'payload',
       `decode failed · ${bytes ? `first 4 bytes ${bytes} · ` : ''}${decoded.error.code} · ${decoded.error.message}`,
       'bad',
     );
@@ -2463,15 +2579,16 @@ async function decodeInPayloadTools(
 }
 
 $('#codec-btn').addEventListener('click', showCodec);
-$('#codec-close').addEventListener('click', () => {
+codecClose.addEventListener('click', () => {
+  cancelCodecOperation();
   codecPane.hidden = true;
-  if (currentText) viewer.hidden = false;
+  if (codecReturn === 'viewer' && currentText) viewer.hidden = false;
   else goLanding();
 });
 
-// Compressing the open document is the one act that skips the pair entirely:
-// the JSON side would have to hold a 40 MB string to show you what it already
-// knows. It fills the payload side and says what it did.
+// Normal open documents render in the JSON side; very large ones remain in the
+// backing value that copy/compress can use without pushing megabytes into a
+// textarea. Either way the source note names what produced the payload.
 async function compressOpenDocument(): Promise<void> {
   if (!currentText) {
     showToast('no document open');
@@ -2480,57 +2597,58 @@ async function compressOpenDocument(): Promise<void> {
   const documentRevision = currentDocumentRevision;
   const source = currentText;
   const format = codecFormat;
-  let out: string;
+  codecIntent = 'compress';
+  setCodecJsonContent(source, currentTitle, currentProvenance, 'open-document');
+  codecPayload.value = '';
+  setCodecSideStatus('payload', 'compressing locally…', null);
+  const token = beginCodecOperation();
   try {
-    out = (await compressInWorker(source, format)).b64;
+    const compressed = await compressInWorker(source, format);
+    if (!finishCodecOperation(token)) return;
+    if (documentRevision !== currentDocumentRevision) return;
+    codecPayload.value = compressed.b64;
+    clearCodecStatuses();
+    setCodecSideStatus(
+      'payload',
+      `${compressionTrace(compressed.sourceBytes, compressed.b64.length)} · ready to copy`,
+      'ok',
+    );
+    paintCodecActions();
   } catch (err) {
-    setCodecTrace(`compress failed · ${String(err)}`, 'bad');
-    showToast(`compress failed: ${String(err)}`, 'bad');
-    return;
+    if (!finishCodecOperation(token)) return;
+    const message = err instanceof Error ? err.message : String(err);
+    const feedback = message === 'enter valid JSON before compressing'
+      ? 'Valid JSON is required before compression.'
+      : `compress failed · ${message}`;
+    setCodecSideStatus('json', feedback, 'bad');
+    showToast(feedback, 'bad');
   }
-  if (documentRevision !== currentDocumentRevision) return;
-  codecJson.value = '';
-  codecJson.placeholder = `the open document (${fmtBytes(source.length)}) — not rendered here on purpose`;
-  codecPayload.value = out;
-  setCodecTrace(compressionTrace(source.length, out.length, format), 'ok');
 }
 
 // The toolbar's `compress`, and the only door into this page from a document:
-// it compresses what is open, copies it, and shows the result — where the chips
-// are, in case base64 zstd was not the destination. One control instead of a
-// menu entry that opened a page AND a page that had to be found.
+// it compresses what is open and shows the result where its explicit copy
+// action and format controls live. It deliberately does not mutate the system
+// clipboard: a button labelled `compress` must not silently replace what the
+// user copied before arriving here.
 $('#compress-btn').addEventListener('click', async () => {
   if (!currentText) return;
   showCodec();
   await compressOpenDocument();
-  if (!codecPayload.value) return;
-  try {
-    await copyText(codecPayload.value);
-    showToast(`copied · ${FORMAT_NAMES[codecFormat]} ${fmtBytes(codecPayload.value.length)}`);
-  } catch {
-    showToast('compressed — use copy on the payload side');
-  }
+  if (codecPayload.value) showToast('compressed · ready to copy');
 });
 
-const FORMAT_NAMES: Record<EncodeFormat, string> = {
-  'base64-zstd': 'base64 zstd',
-  'bytea-zstd': 'bytea',
-  base64: 'base64',
-};
-
-// The line under the pair: the trip, both ends of it, and what it cost. It
-// names the FORMAT because the three cost wildly different things — plain
-// base64 always grows the document by a third, and reading `→ 4.2 kB` without
-// knowing which trip produced it explains nothing.
-function compressionTrace(sourceBytes: number, outBytes: number, format: EncodeFormat): string {
+// The result line sits under the payload, whose selected format is immediately
+// above it, so it only needs the exact output size and its ratio to the JSON.
+function compressionTrace(sourceBytes: number, outBytes: number): string {
   const ratio = sourceBytes > 0 ? Math.round((outBytes / sourceBytes) * 1000) / 10 : 0;
-  const verb = format === 'base64' ? 'encoded' : 'compressed';
-  return `${verb} ${fmtBytes(sourceBytes)} → ${FORMAT_NAMES[format]} ${fmtBytes(outBytes)} · ${ratio}% of the original`;
+  return `${fmtBytes(outBytes)} · ${ratio}% of JSON`;
 }
 
 function paintCodecFormat(): void {
   for (const b of codecFormatSwitch.querySelectorAll<HTMLButtonElement>('button')) {
-    b.classList.toggle('on', b.dataset.format === codecFormat);
+    const on = b.dataset.format === codecFormat;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', String(on));
   }
 }
 
@@ -2547,94 +2665,133 @@ function adoptFormatFrom(metadata: store.DocProvenance | { format: string }): vo
 codecFormatSwitch.addEventListener('click', (e) => {
   const format = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-format]')?.dataset.format;
   if (!format || format === codecFormat) return;
+  cancelCodecOperation();
   codecFormat = format as EncodeFormat;
+  codecIntent = 'compress';
   paintCodecFormat();
+  paintCodecActions();
   // The box below now holds a form the chips no longer claim. Re-encoding is
   // the honest answer when there is something to re-encode; otherwise the chip
   // simply stands for the next press.
-  if (codecJson.value.trim() || currentText) void runCompress();
+  if (codecJsonText().trim()) void runCompress();
 });
 
 // LEFT TO RIGHT. Reads the JSON side, fills the payload side.
 async function runCompress(): Promise<void> {
-  const src = codecJson.value;
+  const src = codecJsonText();
   if (!src.trim()) {
-    // The one case where the empty box is not the whole story: the open
-    // document may be standing in for it (see compressOpenDocument).
-    if (currentText) return void compressOpenDocument();
-    showToast('paste JSON on the left to compress');
+    showToast('paste JSON on the left, or use the open document');
     return;
   }
+  codecIntent = 'compress';
+  setCodecSideStatus('payload', 'compressing locally…', null);
+  const token = beginCodecOperation();
   try {
     const format = codecFormat;
-    codecPayload.value = (await compressInWorker(src, format)).b64;
-    setCodecTrace(compressionTrace(src.length, codecPayload.value.length, format), 'ok');
+    const compressed = await compressInWorker(src, format);
+    if (!finishCodecOperation(token)) return;
+    codecPayload.value = compressed.b64;
+    clearCodecStatuses();
+    setCodecSideStatus(
+      'payload',
+      `${compressionTrace(compressed.sourceBytes, compressed.b64.length)} · ready to copy`,
+      'ok',
+    );
+    paintCodecActions();
   } catch (err) {
-    setCodecTrace(`compress failed · ${String(err)}`, 'bad');
-    showToast(`compress failed: ${String(err)}`, 'bad');
+    if (!finishCodecOperation(token)) return;
+    const message = err instanceof Error ? err.message : String(err);
+    const feedback = message === 'enter valid JSON before compressing'
+      ? 'Valid JSON is required before compression.'
+      : `compress failed · ${message}`;
+    setCodecSideStatus('json', feedback, 'bad');
+    showToast(feedback, 'bad');
   }
 }
 
-$('#codec-run-c').addEventListener('click', () => void runCompress());
+codecRunCompress.addEventListener('click', () => void runCompress());
 
 // RIGHT TO LEFT. Reads the payload side, fills the JSON side.
-$('#codec-run-d').addEventListener('click', async () => {
+codecRunDecode.addEventListener('click', async () => {
   const src = codecPayload.value;
   if (!src.trim()) {
     showToast('paste a payload on the right to decode');
     return;
   }
+  codecIntent = 'decode';
+  paintCodecActions();
   await decodeInPayloadTools(src, 'pasted payload');
 });
 
-// An empty left box is not a mistake while a document is open — it is the one
-// input this side cannot hold, since rendering 40 MB into a textarea wedges the
-// page. So the placeholder says it, where and exactly when it applies, instead
-// of a button whose label never could.
-function paintCodecJsonPlaceholder(): void {
-  codecJson.placeholder = currentText
-    ? `{"orders": […]} · or leave this empty to compress the open document (${fmtBytes(currentText.length)})`
-    : '{"orders": […]}';
-}
-
-// Emptying the box is what makes the hint true again, so that is when it comes
-// back. Without this the box keeps whatever note the last press left on it —
-// "the open document … not rendered here on purpose" long after the user has
-// typed over it and cleared it, which describes a state that no longer exists.
 codecJson.addEventListener('input', () => {
-  if (!codecJson.value) paintCodecJsonPlaceholder();
+  cancelCodecOperation();
+  codecHeldJson = '';
+  codecJsonTitle = 'pasted.json';
+  codecJsonProvenance = null;
+  codecJsonKind = codecJson.value ? 'typed' : 'none';
+  codecJsonSource.hidden = true;
+  codecJson.placeholder = 'Paste JSON to compress';
+  codecIntent = 'compress';
+  setCodecSideStatus('json', '', null);
+  codecPayload.value = '';
+  setCodecSideStatus('payload', '', null);
+  paintCodecActions();
+});
+
+codecPayload.addEventListener('input', () => {
+  cancelCodecOperation();
+  if (codecJsonKind === 'decoded') {
+    codecJson.value = '';
+    codecHeldJson = '';
+    codecJsonTitle = 'pasted.json';
+    codecJsonProvenance = null;
+    codecJsonKind = 'none';
+    codecJsonSource.hidden = true;
+    codecJson.placeholder = 'Paste JSON to compress';
+    setCodecSideStatus('json', '', null);
+  }
+  codecIntent = 'decode';
+  setCodecSideStatus('payload', '', null);
+  paintCodecActions();
+});
+
+codecUseOpen.addEventListener('click', () => {
+  if (!currentText) return;
+  cancelCodecOperation();
+  codecIntent = 'compress';
+  setCodecJsonContent(currentText, currentTitle, currentProvenance, 'open-document');
+  codecPayload.value = '';
+  clearCodecStatuses();
+  paintCodecActions();
 });
 
 // Copy on BOTH sides: whichever one just filled is the one you came for, and
 // having to leave the page to get at it was the whole complaint.
-$('#codec-copy-payload').addEventListener('click', async () => {
+codecCopyPayload.addEventListener('click', async () => {
   if (!codecPayload.value) return;
   await copyText(codecPayload.value);
   showToast('payload copied');
 });
 
-$('#codec-copy-json').addEventListener('click', async () => {
-  // A decode too large to render lives in codecDecodedText, not in the box.
-  const text = codecJson.value || codecDecodedText;
+codecCopyJson.addEventListener('click', async () => {
+  const text = codecJsonText();
   if (!text) return;
   await copyText(text);
   showToast('JSON copied');
 });
 
-$('#codec-open-json').addEventListener('click', async () => {
-  const text = codecJson.value || codecDecodedText;
+codecOpenJson.addEventListener('click', async () => {
+  const text = codecJsonText();
   if (!text) {
     showToast('decode a payload, or paste JSON, first');
     return;
   }
-  // Provenance belongs to a decode; JSON typed in by hand has none.
-  const decoded = text === codecDecodedText;
   await openText(
     text,
-    decoded ? codecDecodedTitle : 'pasted.json',
+    codecJsonTitle,
     null,
     null,
-    decoded ? codecDecodedProvenance : null,
+    codecJsonProvenance,
     true,
   );
 });
@@ -2644,30 +2801,35 @@ codecFileInput.addEventListener('change', async () => {
   const file = codecFileInput.files?.[0];
   codecFileInput.value = '';
   if (!file) return;
+  cancelCodecOperation();
+  codecIntent = 'decode';
+  codecPayload.value = '';
+  setCodecSideStatus('payload', '', null);
+  paintCodecActions();
   try {
     const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
     if (hasRawZstdMagic(head)) await decodeInPayloadTools(await file.arrayBuffer(), file.name);
     else await decodeInPayloadTools(await file.text(), file.name);
   } catch (error) {
-    setCodecTrace(error instanceof Error ? error.message : String(error), 'bad');
+    setCodecSideStatus('payload', error instanceof Error ? error.message : String(error), 'bad');
   }
 });
 
 payloadBadge.addEventListener('click', () => {
   if (!currentProvenance) return;
+  cancelCodecOperation();
   showCodec();
-  codecDecodedText = currentText;
-  codecDecodedTitle = currentTitle;
-  codecDecodedProvenance = currentProvenance;
-  // This document IS the decoded side, so the JSON box says so rather than
-  // rendering a document that is already open in the app behind it.
-  codecJson.value = '';
-  codecJson.placeholder = 'the document open behind this page — decoded from the payload below';
+  codecIntent = 'decode';
+  codecPayload.value = '';
+  setCodecJsonContent(currentText, currentTitle, currentProvenance, 'decoded');
   adoptFormatFrom(currentProvenance);
-  setCodecTrace(
+  clearCodecStatuses();
+  setCodecSideStatus(
+    'json',
     `${currentProvenance.sourceTitle}${currentProvenance.sourcePath ? ` · ${currentProvenance.sourcePath}` : ''} · ${provenanceTrace(currentProvenance)}`,
     'ok',
   );
+  paintCodecActions();
 });
 
 // A document derived from a selection remembers which record it came from, so
@@ -4048,7 +4210,11 @@ type QueryResp =
 
 const askPanel = $('#ask-panel');
 const askBox = $<HTMLInputElement>('#ask-box');
+const askMode = $<HTMLSelectElement>('#ask-mode');
 const askRunBtn = $<HTMLButtonElement>('#ask-run');
+const askCloseBtn = $<HTMLButtonElement>('#ask-close');
+const queryPrivacy = $('#query-privacy');
+const askKeyButton = $<HTMLButtonElement>('#ask-key');
 const askStatus = $('#ask-status');
 const askResult = $('#ask-result');
 const askQueryLine = $('#ask-query-line');
@@ -4058,6 +4224,19 @@ const askQueryCopy = $('#ask-query-copy');
 const askDisclosure = $<HTMLDetailsElement>('#ask-disclosure');
 const askDisclosureBody = $('#ask-disclosure-body');
 const askSaved = $('#ask-saved');
+const askSavedWrap = $('#ask-saved-wrap');
+const askChecks = $('#ask-checks');
+const askChecksWrap = $('#ask-checks-wrap');
+const askSaveActions = $('#ask-save-actions');
+const askSaveQuery = $<HTMLButtonElement>('#ask-save-query');
+const askSaveCheck = $<HTMLButtonElement>('#ask-save-check');
+const checkEditor = $('#check-editor');
+const checkName = $<HTMLInputElement>('#check-name');
+const checkExpectation = $<HTMLSelectElement>('#check-expectation');
+const checkCount = $<HTMLInputElement>('#check-count');
+const checkPreview = $('#check-preview');
+const checkSave = $<HTMLButtonElement>('#check-save');
+const checkCancel = $<HTMLButtonElement>('#check-cancel');
 const askKeyRow = $('#ask-key-row');
 const askKeyNote = $('#ask-key-note');
 const askKeyInput = $<HTMLInputElement>('#ask-key-input');
@@ -4078,8 +4257,43 @@ let askOrigin: { kind: 'english'; question: string } | { kind: 'direct' } | null
 let askGeneration = 0;
 let askAbort: AbortController | null = null;
 let askBusy = false;
+let lastCommittedQuery = '';
+let lastCommittedResult: QueryResp | null = null;
+let runningCheck: SavedCheck | null = null;
+const checkRuns = new Map<string, { pass: boolean; summary: string }>();
 
-const ASK_RUN_TITLE = askRunBtn.title;
+function paintQueryMode(): void {
+  const english = askMode.value === 'english';
+  askBox.placeholder = english
+    ? 'e.g. find failed orders placed today'
+    : "$.orders[?(@.status == 'FAILED')]";
+  askRunBtn.textContent = english ? 'translate' : 'run query';
+  askRunBtn.title = english ? 'Translate this question into a JSON query' : 'Run this query locally';
+  queryPrivacy.textContent = english ? 'shape only' : 'local';
+  queryPrivacy.title = english
+    ? 'Only field names, types and array lengths are sent; document values stay local'
+    : 'This query runs locally in the worker; nothing is sent';
+  askKeyRow.hidden = true;
+  askKeyNote.hidden = true;
+  askKeyButton.hidden = !english;
+  if (english) {
+    askKeyButton.textContent = 'model key';
+    void refreshAskKeyLabel();
+  }
+}
+
+async function refreshAskKeyLabel(): Promise<void> {
+  const key = await getApiKey();
+  if (askMode.value !== 'english') return;
+  if (!key) {
+    askKeyButton.textContent = 'model key';
+    askKeyButton.title = 'Add an OpenRouter or Anthropic API key (stored in this browser only)';
+    return;
+  }
+  const provider = providerForApiKey(key) === 'anthropic' ? 'Anthropic' : 'OpenRouter';
+  askKeyButton.textContent = `${provider} key`;
+  askKeyButton.title = `${provider} key loaded — click to replace it or manage the browser key`;
+}
 
 function setAskKeyOpen(open: boolean): void {
   askKeyRow.hidden = !open;
@@ -4091,8 +4305,10 @@ function setAskBusy(busy: boolean): void {
   askRunBtn.disabled = busy;
   askQueryEdit.disabled = busy;
   askQueryRun.disabled = busy;
-  askRunBtn.title = busy ? 'Asking…' : ASK_RUN_TITLE;
-  askRunBtn.setAttribute('aria-label', busy ? 'Asking this question' : 'Ask this question');
+  askMode.disabled = busy;
+  askBox.disabled = busy;
+  if (busy) askRunBtn.textContent = askMode.value === 'english' ? 'translating…' : 'running…';
+  else paintQueryMode();
   askPanel.setAttribute('aria-busy', String(busy));
 }
 
@@ -4118,19 +4334,37 @@ function resetAskPanel(): void {
   askResult.hidden = true;
   askDisclosure.hidden = true;
   askDisclosure.open = false;
+  askSaveActions.hidden = true;
+  checkEditor.hidden = true;
+  lastCommittedQuery = '';
+  lastCommittedResult = null;
+  runningCheck = null;
   setAskKeyOpen(false);
   setAskStatus(null);
 }
 
 $('#ask-btn').addEventListener('click', () => {
   askPanel.hidden = !askPanel.hidden;
+  $('#ask-btn').classList.toggle('on', !askPanel.hidden);
   if (!askPanel.hidden) {
     void renderSavedChips();
+    void refreshAskKeyLabel();
     askBox.focus();
   }
 });
 
-$('#ask-key').addEventListener('click', async () => {
+askCloseBtn.addEventListener('click', () => {
+  askPanel.hidden = true;
+  $('#ask-btn').classList.remove('on');
+});
+
+askMode.addEventListener('change', () => {
+  paintQueryMode();
+  askBox.focus();
+});
+paintQueryMode();
+
+askKeyButton.addEventListener('click', async () => {
   const shouldOpen = askKeyRow.hidden === true;
   setAskKeyOpen(shouldOpen);
   if (shouldOpen) {
@@ -4148,6 +4382,7 @@ askKeyRow.addEventListener('submit', (e) => {
   e.preventDefault();
   setApiKey(askKeyInput.value.trim());
   setAskKeyOpen(false);
+  void refreshAskKeyLabel();
   showToast(askKeyInput.value.trim() ? 'key saved (this browser only)' : 'key cleared');
 });
 
@@ -4170,6 +4405,51 @@ function queryCsvButton(): HTMLButtonElement {
   btn.append(icon('download'), 'CSV');
   btn.addEventListener('click', () => void exportCsv('query', 'query'));
   return btn;
+}
+
+function queryResultCount(res: QueryResp | null): number | null {
+  if (!res?.ok) return null;
+  if (res.kind === 'matches' || res.kind === 'rows') return res.total;
+  if (res.kind === 'groups') return res.groups.length;
+  if (res.kind === 'value' && typeof res.value === 'number' && Number.isSafeInteger(res.value) && res.value >= 0) {
+    return res.value;
+  }
+  return null;
+}
+
+function paintCheckPreview(): void {
+  const observed = lastCommittedResult ? queryResultCount(lastCommittedResult) : null;
+  const exact = Number.parseInt(checkCount.value, 10);
+  const expectation: CheckExpectation = checkExpectation.value === 'at-least-one'
+    ? { type: 'at-least-one' }
+    : checkExpectation.value === 'exact-count'
+      ? { type: 'exact-count', count: Number.isSafeInteger(exact) && exact >= 0 ? exact : 0 }
+      : { type: 'no-matches' };
+  checkCount.hidden = expectation.type !== 'exact-count';
+  checkSave.disabled = observed === null || !checkName.value.trim();
+  checkPreview.classList.remove('pass', 'fail');
+  if (observed === null) {
+    checkPreview.textContent = 'Run a query that returns a countable result first.';
+    return;
+  }
+  const evaluation = evaluateCheck(expectation, observed);
+  checkPreview.textContent = `Would ${evaluation.summary.toLowerCase()}`;
+  checkPreview.classList.add(evaluation.pass ? 'pass' : 'fail');
+}
+
+function commitQueryResult(query: string, res: QueryResp): void {
+  lastCommittedQuery = query;
+  lastCommittedResult = res;
+  renderAskResult(res, false);
+  const observed = queryResultCount(res);
+  askSaveActions.hidden = !res.ok;
+  askSaveCheck.disabled = observed === null;
+  if (runningCheck && observed !== null) {
+    const evaluation = evaluateCheck(runningCheck.expectation, observed);
+    checkRuns.set(runningCheck.id, { pass: evaluation.pass, summary: evaluation.summary });
+    setAskStatus(`${runningCheck.name}: ${evaluation.summary}`);
+  }
+  if (!checkEditor.hidden) paintCheckPreview();
 }
 
 // `preview` = live engine-only render while the user is editing the query
@@ -4300,7 +4580,11 @@ function renderAskResult(res: QueryResp, preview = false): void {
       el.className = 'hit';
       // Only committed results are navigable — a preview must not steal focus to
       // the tree on click while the user is still tuning the query.
-      if (!preview) el.dataset.qi = String(m.i);
+      if (!preview) {
+        el.dataset.qi = String(m.i);
+        el.setAttribute('role', 'button');
+        el.tabIndex = 0;
+      }
       const p = document.createElement('span');
       p.className = 'hit-path';
       p.textContent = m.pathText;
@@ -4323,12 +4607,22 @@ askResult.addEventListener('click', async (e) => {
   if (r.rowIndex >= 0) tree.scrollToIndex(r.rowIndex);
 });
 
+askResult.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const hit = (event.target as HTMLElement).closest<HTMLElement>('.hit[data-qi]');
+  if (!hit) return;
+  event.preventDefault();
+  hit.click();
+});
+
 // Render the "sent to model" disclosure straight off the SentPayload — the same
 // object nl.ts hands to fetch — so what's shown is provably what left the
 // browser. `sent === null` means no model was involved (direct/engine query).
 function renderDisclosure(sent: SentPayload | null, query: string | null): void {
   askDisclosureBody.replaceChildren();
   askDisclosure.hidden = false;
+  const summary = askDisclosure.querySelector('summary');
+  if (summary) summary.textContent = sent ? 'sent to model' : 'local · nothing sent';
 
   const row = (label: string, value: string, pre = false): void => {
     const r = document.createElement('div');
@@ -4410,7 +4704,7 @@ async function commitEditedQuery(): Promise<void> {
   try {
     const res = await call<QueryResp>({ type: 'query', q });
     if (!isCurrent()) return;
-    renderAskResult(res, false);
+    commitQueryResult(q, res);
     if (res.ok && askOrigin?.kind === 'english') {
       await store.saveQuery(askOrigin.question, q);
       if (!isCurrent()) return;
@@ -4437,6 +4731,12 @@ async function runAsk(presetQuery?: string): Promise<void> {
   const documentToken = currentDocumentToken;
   const controller = new AbortController();
   askAbort = controller;
+  askSaveActions.hidden = true;
+  checkEditor.hidden = true;
+  askResult.hidden = true;
+  askDisclosure.hidden = true;
+  lastCommittedQuery = '';
+  lastCommittedResult = null;
   setAskBusy(true);
   const isCurrent = (): boolean =>
     generation === askGeneration
@@ -4445,7 +4745,7 @@ async function runAsk(presetQuery?: string): Promise<void> {
 
   try {
     let query = input;
-    const isEnglish = !input.startsWith('$');
+    const isEnglish = !presetQuery && askMode.value === 'english';
     if (isEnglish && !presetQuery) {
       const key = await getApiKey();
       if (!isCurrent()) return;
@@ -4485,16 +4785,18 @@ async function runAsk(presetQuery?: string): Promise<void> {
     }
     if (!isCurrent()) return;
     setAskStatus(null);
-    askQueryLine.hidden = false;
+    // Direct JSON mode already has one authoritative query field. English mode
+    // reveals the generated query for review before later local re-runs.
+    askQueryLine.hidden = !isEnglish;
     askQueryEdit.value = query;
+    if (isEnglish) {
+      setAskStatus('query ready — review it, then run locally');
+      askQueryEdit.focus();
+      return;
+    }
     const res = await call<QueryResp>({ type: 'query', q: query });
     if (!isCurrent()) return;
-    renderAskResult(res, false);
-    if (res.ok && isEnglish && !presetQuery) {
-      await store.saveQuery(input, query);
-      if (!isCurrent()) return;
-      await renderSavedChips();
-    }
+    commitQueryResult(query, res);
   } finally {
     // A stale completion must not re-enable a newer run that now owns the UI.
     if (generation === askGeneration) {
@@ -4544,7 +4846,100 @@ async function renderSavedChips(): Promise<void> {
     chip.append(label, del);
     askSaved.appendChild(chip);
   }
+  askSavedWrap.hidden = saved.length === 0;
+  await renderSavedChecks();
 }
+
+async function renderSavedChecks(): Promise<void> {
+  const checks = await store.listChecks();
+  askChecks.replaceChildren();
+  for (const check of checks.slice(0, 12)) {
+    const chip = document.createElement('span');
+    chip.className = 'ask-chip check-chip';
+    chip.dataset.id = check.id;
+    chip.title = `${check.query} · expected ${expectationText(check.expectation)}`;
+    const latest = checkRuns.get(check.id);
+    if (latest) chip.classList.add(latest.pass ? 'pass' : 'fail');
+    const mark = document.createElement('span');
+    mark.className = 'check-mark';
+    mark.textContent = latest ? (latest.pass ? '✓' : '✕') : '◇';
+    const label = document.createElement('span');
+    label.textContent = check.name.length > 38 ? `${check.name.slice(0, 38)}…` : check.name;
+    const del = document.createElement('button');
+    del.className = 'chip-del';
+    del.textContent = '×';
+    del.setAttribute('aria-label', `Forget ${check.name}`);
+    chip.append(mark, label, del);
+    askChecks.appendChild(chip);
+  }
+  askChecksWrap.hidden = checks.length === 0;
+}
+
+function selectedCheckExpectation(): CheckExpectation {
+  if (checkExpectation.value === 'at-least-one') return { type: 'at-least-one' };
+  if (checkExpectation.value === 'exact-count') {
+    const count = Number.parseInt(checkCount.value, 10);
+    return { type: 'exact-count', count: Number.isSafeInteger(count) && count >= 0 ? count : 0 };
+  }
+  return { type: 'no-matches' };
+}
+
+askSaveQuery.addEventListener('click', async () => {
+  if (!lastCommittedQuery) return;
+  const label = askOrigin?.kind === 'english' ? askOrigin.question : lastCommittedQuery;
+  await store.saveQuery(label, lastCommittedQuery);
+  await renderSavedChips();
+  showToast('query saved');
+});
+
+askSaveCheck.addEventListener('click', () => {
+  if (!lastCommittedQuery || queryResultCount(lastCommittedResult) === null) return;
+  checkName.value = askOrigin?.kind === 'english' ? askOrigin.question : 'New check';
+  checkExpectation.value = 'no-matches';
+  const observed = queryResultCount(lastCommittedResult) ?? 0;
+  checkCount.value = String(observed);
+  checkEditor.hidden = false;
+  paintCheckPreview();
+  checkName.focus();
+  checkName.select();
+});
+
+checkExpectation.addEventListener('change', paintCheckPreview);
+checkCount.addEventListener('input', paintCheckPreview);
+checkName.addEventListener('input', paintCheckPreview);
+checkCancel.addEventListener('click', () => { checkEditor.hidden = true; });
+checkSave.addEventListener('click', async () => {
+  if (!lastCommittedQuery || !checkName.value.trim()) return;
+  await store.saveCheck(checkName.value, lastCommittedQuery, selectedCheckExpectation());
+  checkEditor.hidden = true;
+  await renderSavedChecks();
+  showToast('check saved');
+});
+
+askChecks.addEventListener('click', async (event) => {
+  const chip = (event.target as HTMLElement).closest<HTMLElement>('.check-chip');
+  if (!chip) return;
+  const id = chip.dataset.id!;
+  if ((event.target as HTMLElement).closest('.chip-del')) {
+    await store.removeSaved(id);
+    checkRuns.delete(id);
+    await renderSavedChecks();
+    return;
+  }
+  const check = (await store.listChecks()).find((item) => item.id === id);
+  if (!check) return;
+  askMode.value = 'query';
+  paintQueryMode();
+  askBox.value = check.query;
+  runningCheck = check;
+  try {
+    await runAsk(check.query);
+    await store.touchSaved(check.id);
+  } finally {
+    runningCheck = null;
+  }
+  await renderSavedChecks();
+});
 
 askSaved.addEventListener('click', async (e) => {
   const chip = (e.target as HTMLElement).closest('.ask-chip') as HTMLElement | null;
@@ -4557,7 +4952,9 @@ askSaved.addEventListener('click', async (e) => {
   }
   const saved = (await store.listQueries()).find((s) => s.id === id);
   if (!saved) return;
-  askBox.value = saved.question;
+  askMode.value = 'query';
+  paintQueryMode();
+  askBox.value = saved.query;
   void store.touchSaved(id);
   await runAsk(saved.query); // engine-only re-run: no API call
 });
@@ -4581,7 +4978,7 @@ askSaved.addEventListener('click', async (e) => {
 
 const RUN_TIMEOUT_MS = 10_000;
 const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
-const RUN_PLACEHOLDER_FALLBACK = 'data';
+const RUN_PLACEHOLDER_FALLBACK = scriptEditorPlaceholder('data');
 
 const runPane = $('#run-pane');
 const runNumberSetting = $('#run-number-setting');
@@ -4661,6 +5058,8 @@ let runHasUnsafeNumbers = false;
  * work is never lost by a stray click, and no dialog stands in the way either.
  */
 let runPendingLoadId: string | null = null;
+/** Two-press guard for replacing the current unsaved draft with a blank one. */
+let runPendingNew = false;
 /**
  * Whether the result on screen has been outlived by its document. It is state
  * rather than a `hidden` flag now that the library can cover the result bar:
@@ -4689,6 +5088,7 @@ const runPicked = new Set<string>();
 let runResultKind = '';
 /** How many functions the library holds, so the bar can hide what is moot. */
 let runLibraryCount = 0;
+let runCheckCount = 0;
 /** What the bar's count says when nothing is ticked — restored on the last untick. */
 let runLibCountResting = 'functions';
 
@@ -4827,10 +5227,10 @@ function setRunFace(face: 'functions' | 'result'): void {
   // nothing while it is not.
   for (const el of [runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = showing;
   runLibCount.hidden = !showing;
-  runNewBtn.hidden = !showing;
+  paintRunNewButton();
   runImportBtn.hidden = !showing;
   // Nothing to export until there is something in the library.
-  runExportBtn.hidden = !showing || runLibraryCount === 0;
+  runExportBtn.hidden = !showing || (runLibraryCount === 0 && runCheckCount === 0);
   runPickedBtn.hidden = !showing || runPicked.size === 0;
   runLibSearch.hidden = !showing || runLibSearchWanted === false;
   if (showing) runStaleBadge.hidden = true;
@@ -4838,6 +5238,11 @@ function setRunFace(face: 'functions' | 'result'): void {
   for (const b of runFaceSwitch.querySelectorAll<HTMLButtonElement>('button')) {
     b.classList.toggle('on', b.dataset.face === face);
   }
+}
+
+function paintRunNewButton(): void {
+  const alreadyEditingUntouchedNew = runAuthoring && runLoadedId === null && !runIsDirty();
+  runNewBtn.hidden = runFace !== 'functions' || alreadyEditingUntouchedNew;
 }
 
 // Rule 18's left edge: the row whose function is loaded is the selected one.
@@ -4928,14 +5333,15 @@ function paintPickState(total: number): void {
 }
 
 async function renderLibrary(): Promise<void> {
-  const all = await store.listScripts();
+  const [all, checks] = await Promise.all([store.listScripts(), store.listChecks()]);
   const term = runLibSearch.value.trim().toLowerCase();
   const shown = term
     ? all.filter((s) => `${s.name}\n${s.script}`.toLowerCase().includes(term))
     : all;
 
   runLibraryCount = all.length;
-  runExportBtn.hidden = runFace !== 'functions' || all.length === 0;
+  runCheckCount = checks.length;
+  runExportBtn.hidden = runFace !== 'functions' || (all.length === 0 && checks.length === 0);
   runLibSearchWanted = all.length >= LIBRARY_SEARCH_MIN;
   runLibSearch.hidden = !runLibSearchWanted || runFace !== 'functions';
   if (all.length === 0) runLibCountResting = 'functions';
@@ -4946,7 +5352,7 @@ async function renderLibrary(): Promise<void> {
   if (shown.length === 0) {
     runLibList.replaceChildren(
       all.length === 0
-        ? emptyState('no functions yet', 'Press `+ new`, write one, and save it — it will be here for the next document.')
+        ? emptyState('no functions yet', 'Write code above, then save it — it will be here for the next document.')
         : emptyState('nothing matches', 'Clear the search to see the whole library.'),
     );
     return;
@@ -4995,6 +5401,7 @@ function paintRunNumberSetting(): void {
 // are picking, `save` while you are writing.
 function paintRunHead(): void {
   const dirty = runIsDirty();
+  const actions = functionActionState(runEditor?.getDoc() ?? '', dirty, runInFlight);
   runNameEl.hidden = runAuthoring;
   runNameInput.hidden = !runAuthoring;
   runNameEl.textContent = runLoadedSnapshot.name || 'untitled';
@@ -5002,11 +5409,15 @@ function paintRunHead(): void {
   runEditBtn.hidden = runAuthoring;
   runSaveBtn.hidden = !runAuthoring;
   runSaveAsBtn.hidden = !runAuthoring || !runLoadedId;
+  runSaveBtn.disabled = !actions.canSave;
+  runSaveAsBtn.disabled = !actions.hasCode || runInFlight;
+  runExecBtn.disabled = !actions.canRun;
   runEditorHost.hidden = !runAuthoring;
   paintRunNumberSetting();
-  // One `run` button in two homes, moved rather than duplicated: docked in the
-  // field while the field exists, on the head bar while it does not.
-  (runAuthoring ? runEditorHost : runHead).appendChild(runExecBtn);
+  paintRunNewButton();
+  // Run belongs to the function, not to the text field: one stable header
+  // position in both reading and authoring states.
+  runHead.appendChild(runExecBtn);
 }
 
 function setAuthoring(on: boolean): void {
@@ -5067,6 +5478,7 @@ function adoptScript(rec: SavedScript | null): void {
   runNameInput.value = runLoadedSnapshot.name;
   runEditor?.setDoc(runLoadedSnapshot.script);
   runPendingLoadId = null;
+  runPendingNew = false;
   paintRunHead();
   void paintRunFit();
 }
@@ -5165,6 +5577,13 @@ runLibList.addEventListener('click', async (e) => {
 });
 
 runNewBtn.addEventListener('click', () => {
+  if (runIsDirty() && !runPendingNew) {
+    runPendingNew = true;
+    setRunStatus('unsaved changes — press New function again to discard them');
+    return;
+  }
+  runPendingNew = false;
+  setRunStatus('');
   adoptScript(null);
   setRunFace('result');
   setAuthoring(true);
@@ -5178,8 +5597,8 @@ runNewBtn.addEventListener('click', () => {
 // nothing else — never the document (playbook.ts says why).
 
 async function exportPlaybook(): Promise<void> {
-  const all = await store.listScripts();
-  if (all.length === 0) return;
+  const [all, checks] = await Promise.all([store.listScripts(), store.listChecks()]);
+  if (all.length === 0 && checks.length === 0) return;
   const text = serializePlaybook({
     playbookVersion: PLAYBOOK_VERSION,
     functions: all.map((s) => ({
@@ -5188,9 +5607,14 @@ async function exportPlaybook(): Promise<void> {
       ...(s.reads ? { reads: s.reads } : {}),
       numberMode: s.numberMode,
     })),
+    checks: checks.map((check) => ({
+      name: check.name,
+      query: check.query,
+      expectation: check.expectation,
+    })),
   });
   downloadText(text, 'jsonloupe-playbook.json', 'application/json');
-  showToast(`exported ${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`);
+  showToast(`exported ${fmtNumber(all.length + checks.length)} playbook item${all.length + checks.length === 1 ? '' : 's'}`);
 }
 
 /**
@@ -5215,10 +5639,18 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
     taken.push(name);
     await store.saveScript(name, fn.script, fn.reads, fn.numberMode);
   }
+  const takenChecks = (await store.listChecks()).map((check) => check.name);
+  for (const check of res.playbook.checks) {
+    const name = uniqueScriptName(check.name, takenChecks);
+    if (name !== check.name) renamed++;
+    takenChecks.push(name);
+    await store.saveCheck(name, check.query, check.expectation);
+  }
   await renderLibrary();
-  const count = res.playbook.functions.length;
+  await renderSavedChips();
+  const count = res.playbook.functions.length + res.playbook.checks.length;
   showToast(
-    `imported ${fmtNumber(count)} function${count === 1 ? '' : 's'}${renamed ? ` · ${fmtNumber(renamed)} renamed to keep yours` : ''}`,
+    `imported ${fmtNumber(count)} playbook item${count === 1 ? '' : 's'}${renamed ? ` · ${fmtNumber(renamed)} renamed to keep yours` : ''}`,
   );
   return true;
 }
@@ -5236,7 +5668,11 @@ runImportInput.addEventListener('change', async () => {
 runEditBtn.addEventListener('click', () => setAuthoring(true));
 runSaveBtn.addEventListener('click', () => void saveCurrentScript(false));
 runSaveAsBtn.addEventListener('click', () => void saveCurrentScript(true));
-runNameInput.addEventListener('input', paintRunHead);
+runNameInput.addEventListener('input', () => {
+  runPendingNew = false;
+  setRunStatus('');
+  paintRunHead();
+});
 
 runNumberSwitch.addEventListener('click', (event) => {
   if (!runAuthoring) return;
@@ -5245,6 +5681,8 @@ runNumberSwitch.addEventListener('click', (event) => {
   if (mode !== 'js' && mode !== 'exact-text') return;
   if (mode === runNumberMode) return;
   runNumberMode = mode;
+  runPendingNew = false;
+  setRunStatus('');
   markRunResultStale();
   paintRunHead();
 });
@@ -5333,6 +5771,8 @@ async function ensureRunEditor(): Promise<void> {
     // only honest if it is recomputed here.
     onChange: (code) => {
       saveLastScript(code);
+      runPendingNew = false;
+      setRunStatus('');
       paintRunHead();
     },
   });
@@ -5344,7 +5784,7 @@ async function loadRunPlaceholder(): Promise<string> {
   try {
     const example = await call<{ code: string }>({ type: 'runExample' });
     if (documentRevision !== currentDocumentRevision) return runPlaceholder;
-    runPlaceholder = example.code || RUN_PLACEHOLDER_FALLBACK;
+    runPlaceholder = scriptEditorPlaceholder(example.code);
     runPlaceholderRevision = documentRevision;
     runEditor?.setPlaceholder(runPlaceholder);
   } catch {
@@ -5553,7 +5993,7 @@ async function runScript(): Promise<void> {
   // (saving new code clears what the old code was seen to read).
   const trace = runLoadedId !== null && runLoadedReads === undefined;
   runInFlight = true;
-  runExecBtn.disabled = true;
+  paintRunHead();
   runErrorEl.hidden = true;
   // One script answers for itself, so the label goes back to describing the
   // value rather than the press that made it.
@@ -5562,7 +6002,7 @@ async function runScript(): Promise<void> {
   setRunStatus('running…');
   const res = await executeInSandbox(currentText, code, trace, runNumberMode);
   runInFlight = false;
-  runExecBtn.disabled = false;
+  paintRunHead();
   if (documentRevision !== currentDocumentRevision) return;
   if (res.ok && res.reads && runLoadedId) await learnReads(runLoadedId, res.reads);
   await renderRunResult(res);
@@ -5602,7 +6042,7 @@ async function runPickedScripts(): Promise<void> {
   const trace = picked.some((s) => s.reads === undefined);
   runInFlight = true;
   runPickedBtn.disabled = true;
-  runExecBtn.disabled = true;
+  paintRunHead();
   runErrorEl.hidden = true;
   runBatchEl.hidden = true;
   setRunStatus(`running ${fmtNumber(picked.length)}…`);
@@ -5614,7 +6054,7 @@ async function runPickedScripts(): Promise<void> {
   );
   runInFlight = false;
   runPickedBtn.disabled = false;
-  runExecBtn.disabled = false;
+  paintRunHead();
   if (documentRevision !== currentDocumentRevision) return;
 
   if (!res.ok) {

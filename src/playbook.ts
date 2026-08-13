@@ -20,9 +20,10 @@
 // and everything decidable about the format is decided and tested here.
 
 import { runNumberMode, type RunNumberMode } from './run-number-mode';
+import { validExpectation, type CheckExpectation } from './check';
 
-/** v2 adds each function's number contract; this reader still imports v1. */
-export const PLAYBOOK_VERSION = 2;
+/** v2 added function number contracts; v3 adds deterministic saved Checks. */
+export const PLAYBOOK_VERSION = 3;
 
 export interface PlaybookFunction {
   name: string;
@@ -37,11 +38,20 @@ export interface Playbook {
   /** What this set of functions is for. Optional — a bare list is legal. */
   name?: string;
   functions: PlaybookFunction[];
+  checks: PlaybookCheck[];
 }
 
-const TOP_KEYS = new Set(['playbookVersion', 'name', 'functions']);
+export interface PlaybookCheck {
+  name: string;
+  query: string;
+  expectation: CheckExpectation;
+}
+
+const TOP_KEYS_V1_V2 = new Set(['playbookVersion', 'name', 'functions']);
+const TOP_KEYS_V3 = new Set(['playbookVersion', 'name', 'functions', 'checks']);
 const FUNCTION_KEYS_V1 = new Set(['name', 'script', 'reads']);
 const FUNCTION_KEYS_V2 = new Set(['name', 'script', 'reads', 'numberMode']);
+const CHECK_KEYS = new Set(['name', 'query', 'expectation']);
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -69,10 +79,7 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   }
   if (!isObject(raw)) return { ok: false, error: 'a playbook is an object, and this is not' };
 
-  const stray = unknownKey(raw, TOP_KEYS);
-  if (stray) return { ok: false, error: `unknown field \`${stray}\` — this file is not a playbook, or was written by a newer jsonloupe` };
-
-  if (raw.playbookVersion !== 1 && raw.playbookVersion !== PLAYBOOK_VERSION) {
+  if (raw.playbookVersion !== 1 && raw.playbookVersion !== 2 && raw.playbookVersion !== PLAYBOOK_VERSION) {
     return {
       ok: false,
       error: typeof raw.playbookVersion === 'number'
@@ -80,6 +87,9 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
         : 'no `playbookVersion` — this file is not a playbook',
     };
   }
+  const topKeys = raw.playbookVersion === PLAYBOOK_VERSION ? TOP_KEYS_V3 : TOP_KEYS_V1_V2;
+  const stray = unknownKey(raw, topKeys);
+  if (stray) return { ok: false, error: `unknown field \`${stray}\` — this file is not a playbook, or was written by a newer jsonloupe` };
   if (raw.name !== undefined && typeof raw.name !== 'string') {
     return { ok: false, error: '`name` must be text' };
   }
@@ -102,7 +112,7 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
       && (!Array.isArray(entry.reads) || entry.reads.some((p) => typeof p !== 'string'))) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has a \`reads\` that is not a list of paths` };
     }
-    if (raw.playbookVersion === PLAYBOOK_VERSION && entry.numberMode === undefined) {
+    if (raw.playbookVersion !== 1 && entry.numberMode === undefined) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has no \`numberMode\`` };
     }
     if (entry.numberMode !== undefined && entry.numberMode !== 'js' && entry.numberMode !== 'exact-text') {
@@ -115,7 +125,32 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
       numberMode: runNumberMode(entry.numberMode),
     });
   }
-  return { ok: true, playbook: { playbookVersion: PLAYBOOK_VERSION, ...(raw.name ? { name: raw.name } : {}), functions } };
+  const checks: PlaybookCheck[] = [];
+  const rawChecks = raw.playbookVersion === PLAYBOOK_VERSION ? raw.checks ?? [] : [];
+  if (!Array.isArray(rawChecks)) return { ok: false, error: '`checks` must be a list' };
+  for (const [i, entry] of rawChecks.entries()) {
+    const at = `check ${i + 1}`;
+    if (!isObject(entry)) return { ok: false, error: `${at} is not an object` };
+    const strayKey = unknownKey(entry, CHECK_KEYS);
+    if (strayKey) return { ok: false, error: `${at} has an unknown field \`${strayKey}\`` };
+    if (typeof entry.name !== 'string' || !entry.name.trim()) return { ok: false, error: `${at} has no name` };
+    if (typeof entry.query !== 'string' || !entry.query.trim()) {
+      return { ok: false, error: `${at} (\`${entry.name}\`) has no query` };
+    }
+    if (!validExpectation(entry.expectation)) {
+      return { ok: false, error: `${at} (\`${entry.name}\`) has an invalid \`expectation\`` };
+    }
+    checks.push({ name: entry.name.trim(), query: entry.query, expectation: entry.expectation });
+  }
+  return {
+    ok: true,
+    playbook: {
+      playbookVersion: PLAYBOOK_VERSION,
+      ...(raw.name ? { name: raw.name } : {}),
+      functions,
+      checks,
+    },
+  };
 }
 
 /** The file, pretty-printed — a playbook is meant to be read and diffed. */
