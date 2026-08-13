@@ -1188,6 +1188,7 @@ export class ConvertView {
     chk.type = 'checkbox';
     chk.checked = !this.offCols.has(key);
     chk.title = 'Include this column';
+    chk.setAttribute('aria-label', `Include ${c.name} in the output`);
     chk.addEventListener('change', () => {
       if (chk.checked) this.offCols.delete(key);
       else this.offCols.add(key);
@@ -1199,6 +1200,7 @@ export class ConvertView {
     name.value = c.name;
     name.spellcheck = false;
     name.title = 'Column heading in the output';
+    name.setAttribute('aria-label', `Output column name for ${c.name}`);
     name.addEventListener('change', () => {
       const to = name.value.trim();
       if (!to || to === c.name) {
@@ -1224,11 +1226,16 @@ export class ConvertView {
       mode.append(option);
     }
     mode.value = columnMode(c);
+    mode.setAttribute('aria-label', `Conversion for ${c.name}`);
 
     const source = el('input', 'convert-source') as HTMLInputElement;
     source.spellcheck = false;
     source.placeholder = mode.value === 'constant' ? 'constant value' : 'source field';
     source.value = mode.value === 'constant' ? (c.const ?? '') : (c.from ?? '');
+    source.setAttribute(
+      'aria-label',
+      mode.value === 'constant' ? `Constant value for ${c.name}` : `Source field for ${c.name}`,
+    );
     // A field is picked by looking at what is in it, not by reading its name and
     // hoping. Detection already counted how often each one is filled and kept a
     // few real values; the picker is where those belong.

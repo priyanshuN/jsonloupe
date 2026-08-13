@@ -46,7 +46,7 @@ a non-secret level, then mark the criterion Met in BadgeApp.
 | `documentation_quick_start` | Ready: Met | [README quick start](../README.md#quick-start) |
 | `documentation_current` | Ready: Met | Documentation changes are required with behavior changes; [CHANGELOG](../CHANGELOG.md) records shipped behavior. |
 | `documentation_achievements` | Ready: Met | The repository front page links the live Best Practices and Scorecard badges. |
-| `accessibility_best_practices` | Ready: Unmet with justification | Contrast, reduced motion, focus, and token checks exist in [DESIGN-AUDIT.md](../DESIGN-AUDIT.md), but a complete assistive-technology audit is not yet available; it is a roadmap item. |
+| `accessibility_best_practices` | Ready: Unmet with justification | Contrast, reduced motion, focus, and token checks exist in [DESIGN-AUDIT.md](../DESIGN-AUDIT.md), and required [real-browser axe plus keyboard checks](accessibility-browser-audit.md) cover the highest-use workflows. A complete manual assistive-technology audit is not yet recorded, so this remains Unmet. |
 | `internationalization` | Ready: Unmet with justification | The early-stage UI is English-only and has no localization framework; document keys and values are preserved without locale coercion. Localization remains deferred rather than being claimed. |
 | `sites_password_security` | Ready: N/A | The static site, GitHub repository, and npm download channel do not store project-user passwords. |
 

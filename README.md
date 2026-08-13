@@ -355,6 +355,7 @@ npm test           # vitest — query engine, worker, MCP dispatch, NL translati
 npm run lint:security  # FLOSS security analysis + checked TypeScript style
 npm run coverage   # same suite with enforced 90% statement / 80% branch floors
 npm run build      # tsc --noEmit + vite build + the MCP bundle
+npm run test:a11y  # real Chromium axe + keyboard/focus checks (run after build)
 npm run check:site-headers # verify the live OpenSSF hardening headers
 npm run check:reproducible-build  # clean locked installs must produce identical bytes
 npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture

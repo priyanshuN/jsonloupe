@@ -263,7 +263,19 @@ function openDocumentsDrawer(): void {
     : sidebarOpenBtn;
   documentsDrawerOpen = true;
   paintDocumentsDrawer();
-  requestAnimationFrame(() => sidebarCloseBtn.focus());
+  // Flush the new drawer layout before focusing: the close button was
+  // display:none one line ago, and focus() correctly refuses a target whose
+  // previous computed layout is still non-rendered.
+  void sidebarCloseBtn.offsetWidth;
+  sidebarCloseBtn.focus({ preventScroll: true });
+  // Chromium can keep the invoking button focused until the translated drawer
+  // has entered its first painted frame. Retry only while focus is still
+  // outside the modal, so this never steals focus back from a fast Tab press.
+  setTimeout(() => {
+    if (documentsDrawerOpen && !sidebar.contains(document.activeElement)) {
+      sidebarCloseBtn.focus({ preventScroll: true });
+    }
+  }, 150);
 }
 
 function closeDocumentsDrawer(returnFocus = true): void {
@@ -272,7 +284,13 @@ function closeDocumentsDrawer(returnFocus = true): void {
   paintDocumentsDrawer();
   if (!returnFocus || !wasOpen) return;
   const target = documentsReturnFocus?.isConnected ? documentsReturnFocus : sidebarOpenBtn;
-  requestAnimationFrame(() => target.focus());
+  void target.offsetWidth;
+  target.focus({ preventScroll: true });
+  setTimeout(() => {
+    if (!documentsDrawerOpen && document.activeElement === document.body) {
+      target.focus({ preventScroll: true });
+    }
+  }, 150);
 }
 
 function drawerFocusable(): HTMLElement[] {

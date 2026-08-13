@@ -9,8 +9,10 @@ evening, whether a change is likely to be merged and what it needs to look like.
 git clone https://github.com/priyanshuN/jsonloupe && cd jsonloupe
 npm ci            # development and CI use Node 24
 npm run dev       # Vite on :5199
-npm test          # 550+ tests, well under a minute
+npm test          # unit and DOM tests, well under a minute
 npm run build     # tsc --noEmit, then the production bundle
+npx playwright install chromium # once per machine
+npm run test:a11y # axe plus keyboard/focus journeys against the build
 ```
 
 There is no backend to stand up and nothing to configure — `npm test` should
@@ -97,6 +99,8 @@ The enforceable parts run in CI:
 - `npm run coverage` runs the FLOSS test suite and fails below 90% statement or
   80% branch coverage; this assertion-rich execution is also the project's
   dynamic analysis and runs again for every proposed release;
+- `npm run test:a11y` runs required WCAG A/AA axe checks and keyboard/focus
+  journeys in a production Chromium build under both light and dark themes;
 - `npm run check:reproducible-build` performs two clean locked dependency
   installs in different paths, then requires every built and packed byte to
   match; [REPRODUCIBLE-BUILD.md](REPRODUCIBLE-BUILD.md) pins the toolchain and

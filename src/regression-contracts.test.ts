@@ -160,8 +160,8 @@ describe('interactive UI regression contracts', () => {
     expect(paint).toContain("sidebar.setAttribute('aria-hidden', String(!open))");
     expect(paint).toContain("sidebar.setAttribute('aria-modal', 'true')");
     expect(open).toContain('documentsReturnFocus = document.activeElement');
-    expect(open).toContain('sidebarCloseBtn.focus()');
-    expect(close).toContain('target.focus()');
+    expect(open).toContain("sidebarCloseBtn.focus({ preventScroll: true })");
+    expect(close).toContain("target.focus({ preventScroll: true })");
     expect(mainSource).toContain("if (event.key === 'Escape')");
     expect(mainSource).toContain("sidebarScrim.addEventListener('click', () => closeDocumentsDrawer())");
   });
