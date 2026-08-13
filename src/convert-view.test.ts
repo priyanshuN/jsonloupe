@@ -48,15 +48,15 @@ describe('converter mapping helpers', () => {
 
 describe('the line the panel opens with', () => {
   // The panel arrives with the mapping drafted and the download live, so its
-  // first line has to be an outcome. A bare table count reads as a form.
-  it('names what comes out, how big it is, and that nothing else is required', () => {
+  // first line names a ready outcome without repeating the adjacent controls.
+  it('names what comes out and how big it is', () => {
     expect(outcomeLine({ tables: 2, rows: 1204, format: 'xlsx', problems: 0 }))
-      .toBe('Ready — 2 sheets, 1,204 rows. Download, or change anything below.');
+      .toBe('Ready · 2 sheets · 1,204 rows');
   });
 
   it('calls the outputs files rather than sheets once CSV is chosen', () => {
     expect(outcomeLine({ tables: 1, rows: 1, format: 'csv', problems: 0 }))
-      .toBe('Ready — 1 file, 1 row. Download, or change anything below.');
+      .toBe('Ready · 1 file · 1 row');
   });
 
   // Saying "ready" over a mapping the engine has already refused would be the

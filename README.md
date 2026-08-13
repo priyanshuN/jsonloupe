@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/priyanshuN/jsonloupe/main/.github/assets/demo.gif">
-    <img src=".github/assets/demo.gif" width="820" alt="Demo: pasting JSON with int64 IDs and exact decimals — every digit survives — then a 5-million-element, 28 MB array parsing in ~420 ms, then a Base64-Zstd blob pasted straight in and decoded to JSON automatically. Click to view full size." />
+    <img src=".github/assets/demo.gif" width="820" alt="Demo: inspecting nested exact-number JSON, running a local query, previewing linked spreadsheet tables, and encoding the document as Base64-Zstd. Click to view full size." />
   </a>
 </p>
 
@@ -94,33 +94,33 @@ flagged, with the original bytes preserved.
   weight on collapsed containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
-- **Run — a library of your own functions** — write JavaScript for the questions
-  no query language should have to answer, keep it under a name, and press it
+- **Functions — a library of your own scripts** — write JavaScript for the
+  questions no query language should have to answer, keep it under a name, and press it
   over tomorrow's file. Scripts run in an ephemeral sandbox worker with `fetch`,
   storage and the network removed, and the result opens as a document of its
   own. A function can keep JavaScript-number behavior or receive unsafe numeric
   literals as exact digit strings; safe numbers stay numbers in either mode.
   Tick several and one press answers all of them as a single report, honoring
   each function's number contract.
-  ([below](#playbooks-your-functions-as-a-file).)
+  ([below](#playbooks-your-functions-and-checks-as-a-file).)
 - **JSON → Excel / CSV converter** — rename and reorder columns, choose source
   fields, add constants, set date and coordinate handling, take the column names
   from a target CSV header, and save or share the mapping for the next file.
   ([below](#nested-json-to-linked-tables).)
 - **File handles** — drop `.json`/`.jsonl`/`.zst` files; reload re-reads from
   disk and shows what changed since the version you were looking at.
-- **Ask (optional, off by default)** — type an English question and it's
-  translated to a query by an LLM using **only the document's shape (field
-  names/types — never values)**, then executed locally. Bring your own
-  Anthropic or OpenRouter key; with no key configured the feature is inert and
-  the page makes zero network requests. A disclosure panel shows exactly what
-  would be sent. See [SECURITY.md](SECURITY.md).
+- **Query** — run JSON queries locally, save useful ones, or turn a result into
+  a reusable pass/fail Check. Optional **English → query** mode translates a question using
+  **only the document's shape (field names/types — never values)**, then stops
+  so you can review the generated query before running it locally. Bring your
+  own Anthropic or OpenRouter key; with no key configured the feature is inert
+  and the page makes zero network requests. A disclosure panel records exactly
+  what was sent. See [SECURITY.md](SECURITY.md).
 
 ### Browser query cookbook
 
-Open a document, press **ask**, and paste a query into the question field.
-Queries beginning with `$` run directly in this tab: they need no API key and
-send nothing to a model.
+Open a document, press **query**, leave **JSON query** selected, and paste a
+query. It runs directly in this tab: no API key and nothing sent to a model.
 
 Given this small document:
 
@@ -201,10 +201,10 @@ looks numeric stays text, so `"1.10"` keeps its trailing zero and an int64 id
 keeps every digit instead of being rounded. Excel's limits and values a column
 cannot read are reported or refused, never quietly written wrong.
 
-## Playbooks: your functions as a file
+## Playbooks: your functions and checks as a file
 
 The document changes daily; the handful of questions you ask of it does not. So
-**run** opens on your library rather than an empty editor — named functions,
+**functions** opens on your library rather than an empty editor — named functions,
 newest first — and pressing one runs it over whatever is open. Tick several and
 one press answers all of them, as a single object keyed by function name: today's
 report, which downloads and reopens as a document like any other.
@@ -219,11 +219,12 @@ with it. That is what lets the panel say
 today". It is always a remark and never a gate: the reading knows only the branch
 that last run took, so the run button still works.
 
-A playbook is that library as a file — the questions, never the data:
+A playbook is that reusable work as a file — the questions and expectations,
+never the data:
 
 ```json
 {
-  "playbookVersion": 2,
+  "playbookVersion": 3,
   "name": "carrier dumps",
   "functions": [
     {
@@ -231,6 +232,13 @@ A playbook is that library as a file — the questions, never the data:
       "script": "data.orders.filter(o => o.deliveredInHours > 48)",
       "reads": ["orders", "orders[].deliveredInHours"],
       "numberMode": "exact-text"
+    }
+  ],
+  "checks": [
+    {
+      "name": "no failed orders",
+      "query": "$.orders[?(@.status == 'FAILED')]",
+      "expectation": { "type": "no-matches" }
     }
   ]
 }
@@ -251,7 +259,8 @@ existing functions and says when a document contains values it will round.
 original digit strings (`"9007199254740993"`); ordinary values such as `3` and
 `1.5` remain numbers, so normal counting and arithmetic still work. The mode is
 saved and exported with the function rather than left as a browser preference.
-Version 1 playbooks still import under their original JavaScript-number mode.
+Version 1 and 2 playbooks still import; version 1 functions keep their original
+JavaScript-number mode.
 
 ## Use with AI agents
 
@@ -321,7 +330,7 @@ this routing rule in its project instructions (for example `AGENTS.md` or
 ## Privacy & security
 
 Documents never leave your machine. The complete network-call inventory (three
-`fetch` calls, all in the opt-in Ask feature), the shape-only LLM contract, and
+`fetch` calls, all in opt-in English query translation), the shape-only LLM contract, and
 the XSS posture are documented in [SECURITY.md](SECURITY.md). The corresponding
 threat model, trust boundaries, and assurance argument are in
 [SECURITY-ASSURANCE.md](SECURITY-ASSURANCE.md).
@@ -336,7 +345,7 @@ npm run build      # dist/
 
 Serve `dist/` from any static host (GitHub Pages, Cloudflare Pages, Netlify…).
 There is nothing to configure server-side; the dev-only `/__api-key` convenience
-endpoint simply doesn't exist in production, and Ask activates only when a
+endpoint simply doesn't exist in production, and English translation activates only when a
 visitor adds their own key.
 
 ## Development

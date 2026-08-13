@@ -72,6 +72,13 @@ describe('first-paint and navigation regression contracts', () => {
     const module = appHtml.indexOf('<script type="module" src="/src/main.ts"></script>');
     expect(stylesheet).toBeGreaterThan(-1);
     expect(module).toBeGreaterThan(stylesheet);
+    expect(appHtml).toContain('rel="preload" href="/fonts/space-grotesk-latin.woff2" as="font"');
+  });
+
+  it('does not start the document worker on the static landing page', () => {
+    expect(mainSource).toContain("let docChannel: WorkerChannel | null = null");
+    expect(mainSource).toContain("docChannel ??= createWorkerChannel('document')");
+    expect(mainSource).not.toContain("const docChannel = createWorkerChannel('document')");
   });
 
   it('applies the theme and returning-user gate before paint, with an about escape', () => {
@@ -199,6 +206,23 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toMatch(/askKeyRow\.addEventListener\('submit',[\s\S]*?preventDefault\(\)/);
   });
 
+  it('keeps payload conversion explicit, JSON-only, and free of stale derived output', () => {
+    const toolbarCompress = mainSource.match(/\$\('#compress-btn'\)\.addEventListener[\s\S]*?^\}\);/m)?.[0] ?? '';
+    const jsonEdit = mainSource.match(/codecJson\.addEventListener\('input'[\s\S]*?^\}\);/m)?.[0] ?? '';
+    const payloadEdit = mainSource.match(/codecPayload\.addEventListener\('input'[\s\S]*?^\}\);/m)?.[0] ?? '';
+
+    expect(appHtml).toContain('<label class="standing-label" for="codec-json">JSON</label>');
+    expect(appHtml).toContain('<label class="standing-label" for="codec-payload">payload</label>');
+    expect(appHtml).not.toContain('JSON or text');
+    expect(appHtml).toContain('id="codec-copy-payload"');
+    expect(toolbarCompress).not.toContain('copyText(');
+    expect(toolbarCompress).toContain("showToast('compressed · ready to copy')");
+    expect(jsonEdit).toContain("codecJsonProvenance = null");
+    expect(jsonEdit).toContain("codecPayload.value = ''");
+    expect(payloadEdit).toContain("if (codecJsonKind === 'decoded')");
+    expect(payloadEdit).toContain("codecHeldJson = ''");
+  });
+
   it('discloses Ask data handling before the API-key field accepts input', () => {
     expect(appHtml).toContain('document values stay in this tab');
     expect(appHtml).toContain('field names, types and array lengths — never values');
@@ -291,8 +315,8 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).not.toContain('Object.fromEntries(res.cols');
   });
 
-  it('describes the Ask disclosure at the time it actually appears', () => {
-    expect(appHtml).toContain('After you press Ask, “sent to model” records the exact request.');
+  it('describes the English-query disclosure at the time it actually appears', () => {
+    expect(appHtml).toContain('After you press Translate, “sent to model” records the exact request.');
     expect(security).toContain('disclosure records the exact payload sent after you press Ask.');
     expect(appHtml).not.toMatch(/shown to you in full before anything is sent/i);
     expect(security).not.toMatch(/disclosure shows the exact payload before anything is sent/i);

@@ -37,3 +37,25 @@ export function uniqueScriptName(name: string, taken: readonly string[]): string
     if (!used.has(candidate.toLowerCase())) return candidate;
   }
 }
+
+/** An example in a placeholder must still read as an instruction, not saved code. */
+export function scriptEditorPlaceholder(example: string): string {
+  const code = example.trim();
+  return code && code !== 'data'
+    ? `write JavaScript using data — e.g. ${code}`
+    : 'write JavaScript using data';
+}
+
+/** The editor's commit actions agree on what counts as a real draft. */
+export function functionActionState(script: string, dirty: boolean, inFlight: boolean): {
+  hasCode: boolean;
+  canSave: boolean;
+  canRun: boolean;
+} {
+  const hasCode = script.trim().length > 0;
+  return {
+    hasCode,
+    canSave: hasCode && dirty && !inFlight,
+    canRun: hasCode && !inFlight,
+  };
+}

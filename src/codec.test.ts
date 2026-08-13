@@ -341,6 +341,13 @@ describe('decodePayload worker route', () => {
       .rejects.toThrow('compressPayload requires text');
   });
 
+  it('refuses to create a payload that the JSON decoder cannot round-trip', async () => {
+    await expect(handleAsync({ type: 'compressPayload', text: 'hello' })).resolves.toEqual({
+      ok: false,
+      error: 'enter valid JSON before compressing',
+    });
+  });
+
   it('decodes a wrapped Base64 string and preserves wrapper metadata', async () => {
     const base64 = await compressToB64(exactJson);
     const result = await handleAsync({

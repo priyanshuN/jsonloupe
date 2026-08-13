@@ -297,7 +297,7 @@ export function warningSummary(warnings: readonly Warning[], limit = 2): string[
   return said;
 }
 
-/** The outcome, named: what comes out, how big, and that nothing else is required. */
+/** The outcome, named compactly enough to stay beside the conversion controls. */
 export function outcomeLine(out: {
   tables: number;
   rows: number;
@@ -308,9 +308,8 @@ export function outcomeLine(out: {
     return `Not ready — ${out.problems} problem${out.problems === 1 ? '' : 's'} to fix, marked below.`;
   }
   const unit = out.format === 'csv' ? 'file' : 'sheet';
-  return `Ready — ${out.tables} ${unit}${out.tables === 1 ? '' : 's'},`
-    + ` ${out.rows.toLocaleString()} row${out.rows === 1 ? '' : 's'}.`
-    + ' Download, or change anything below.';
+  return `Ready · ${out.tables} ${unit}${out.tables === 1 ? '' : 's'}`
+    + ` · ${out.rows.toLocaleString()} row${out.rows === 1 ? '' : 's'}`;
 }
 
 // What a spreadsheet app re-reads when it opens plain text: a long run of digits
@@ -693,6 +692,17 @@ export class ConvertView {
       return;
     }
     const format = this.full.output.format;
+    const downloadLabel = format === 'csv' ? 'download CSV' : 'download Excel';
+    this.downloadRest = {
+      label: downloadLabel,
+      title: format === 'csv'
+        ? 'Convert and download CSV tables'
+        : 'Convert and download an Excel workbook',
+    };
+    if (!this.converting && this.els.download.lastChild?.nodeType === Node.TEXT_NODE) {
+      this.els.download.lastChild.textContent = downloadLabel;
+      this.els.download.title = this.downloadRest.title;
+    }
     const text = outcomeLine({
       tables: effective.tables.length,
       rows: this.rowTotal(effective),
@@ -740,7 +750,10 @@ export class ConvertView {
   private showMappingTools(open: boolean): void {
     const strip = document.getElementById('convert-mappings');
     const button = document.getElementById('convert-mappings-btn');
+    const view = document.getElementById('convert-view');
     if (strip) strip.hidden = !open;
+    view?.classList.toggle('customizing', open);
+    if (button) button.textContent = open ? 'done' : 'customize';
     button?.setAttribute('aria-expanded', String(open));
   }
 

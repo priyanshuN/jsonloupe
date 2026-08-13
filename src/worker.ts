@@ -38,6 +38,7 @@ import {
 } from './transport';
 import {
   encodePayload,
+  isValidJsonText,
   type EncodeFormat,
   decodeJsonPayload,
   type DecodeJsonPayloadOptions,
@@ -2445,6 +2446,12 @@ export async function handleAsync(
   // which is why decoding always worked and compressing never did.
   if (msg.type === 'compressPayload') {
     if (typeof msg.text !== 'string') throw new TypeError('compressPayload requires text');
+    if (!isValidJsonText(msg.text)) {
+      return {
+        ok: false,
+        error: 'enter valid JSON before compressing',
+      } satisfies CompressPayloadWorkerResult;
+    }
     const level = typeof msg.level === 'number' ? msg.level : undefined;
     try {
       const format = (msg.format as EncodeFormat | undefined) ?? 'base64-zstd';

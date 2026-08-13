@@ -4,6 +4,7 @@
 // so listing recents never loads document bodies.
 
 import type { ConvertSpec } from './convert/spec';
+import { validExpectation, type CheckExpectation } from './check';
 import { deriveScriptName } from './run-script';
 import { runNumberMode, type RunNumberMode } from './run-number-mode';
 
@@ -375,12 +376,28 @@ export interface SavedScript {
   reads?: string[];
 }
 
-type SavedRecord = SavedQuery | SavedScript;
+/** A query whose result count carries a pass/fail expectation. */
+export interface SavedCheck {
+  id: string;
+  kind: 'check';
+  name: string;
+  query: string;
+  expectation: CheckExpectation;
+  createdAt: number;
+  updatedAt: number;
+  uses: number;
+}
+
+type SavedRecord = SavedQuery | SavedScript | SavedCheck;
 
 const KEEP_SAVED = 100;
 
 function isScript(rec: SavedRecord): rec is SavedScript {
   return (rec as SavedScript).kind === 'script';
+}
+
+function isCheck(rec: SavedRecord): rec is SavedCheck {
+  return (rec as SavedCheck).kind === 'check';
 }
 
 async function listSaved(): Promise<SavedRecord[]> {
@@ -390,7 +407,7 @@ async function listSaved(): Promise<SavedRecord[]> {
 }
 
 export async function listQueries(): Promise<SavedQuery[]> {
-  return (await listSaved()).filter((rec): rec is SavedQuery => !isScript(rec));
+  return (await listSaved()).filter((rec): rec is SavedQuery => !isScript(rec) && !isCheck(rec));
 }
 
 // Every read hands back a NAMED script, whether or not the stored record has a
@@ -406,7 +423,11 @@ export async function listScripts(): Promise<SavedScript[]> {
   ));
 }
 
-// The one put + cull, for both kinds. `siblings` predates the put: a new record
+export async function listChecks(): Promise<SavedCheck[]> {
+  return (await listSaved()).filter(isCheck);
+}
+
+// The one put + cull, for all three kinds. `siblings` predates the put: a new record
 // grows its kind's list by one, so cull from KEEP_SAVED - 1; a replacement
 // replaces in place. Never cull the record just put.
 async function putSaved(
@@ -430,6 +451,34 @@ export async function saveQuery(question: string, query: string): Promise<SavedQ
   const rec: SavedQuery = dup
     ? { ...dup, query, updatedAt: now, uses: dup.uses + 1 }
     : { id: crypto.randomUUID(), question, query, createdAt: now, updatedAt: now, uses: 1 };
+  await putSaved(rec, all, !!dup);
+  return rec;
+}
+
+export async function saveCheck(
+  name: string,
+  query: string,
+  expectation: CheckExpectation,
+): Promise<SavedCheck> {
+  const all = await listChecks();
+  const now = Date.now();
+  const label = name.trim();
+  if (!label) throw new Error('check name is required');
+  if (!query.trim()) throw new Error('check query is required');
+  if (!validExpectation(expectation)) throw new Error('check expectation is invalid');
+  const dup = all.find((check) => check.name.trim().toLowerCase() === label.toLowerCase());
+  const rec: SavedCheck = dup
+    ? { ...dup, name: label, query, expectation, updatedAt: now, uses: dup.uses + 1 }
+    : {
+      id: crypto.randomUUID(),
+      kind: 'check',
+      name: label,
+      query,
+      expectation,
+      createdAt: now,
+      updatedAt: now,
+      uses: 1,
+    };
   await putSaved(rec, all, !!dup);
   return rec;
 }

@@ -15,6 +15,9 @@ const FILE = serializePlaybook({
     },
     { name: 'hub codes', script: 'data.orders.map(o => o.hub)', numberMode: 'js' },
   ],
+  checks: [
+    { name: 'No failed orders', query: "$.orders[?(@.status == 'FAILED')]", expectation: { type: 'no-matches' } },
+  ],
 });
 
 describe('parsePlaybook', () => {
@@ -31,6 +34,9 @@ describe('parsePlaybook', () => {
       },
       { name: 'hub codes', script: 'data.orders.map(o => o.hub)', numberMode: 'js' },
     ]);
+    expect(res.playbook.checks).toEqual([
+      { name: 'No failed orders', query: "$.orders[?(@.status == 'FAILED')]", expectation: { type: 'no-matches' } },
+    ]);
   });
 
   it('imports a v1 bare list under its original JavaScript-number contract', () => {
@@ -38,6 +44,7 @@ describe('parsePlaybook', () => {
     if (!res.ok) throw new Error(res.error);
     expect(res.playbook.playbookVersion).toBe(PLAYBOOK_VERSION);
     expect(res.playbook.functions[0].numberMode).toBe('js');
+    expect(res.playbook.checks).toEqual([]);
   });
 
   // FAIL LOUD. A file written by a newer jsonloupe must not import as a subset
@@ -60,6 +67,20 @@ describe('parsePlaybook', () => {
   it('requires v2 functions to say their number contract', () => {
     const res = parsePlaybook('{"playbookVersion":2,"functions":[{"name":"a","script":"data"}]}');
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('no `numberMode`') });
+  });
+
+  it('reads v3 checks and refuses malformed expectations', () => {
+    const good = parsePlaybook('{"playbookVersion":3,"functions":[],"checks":[{"name":"none failed","query":"$.failed[*]","expectation":{"type":"no-matches"}}]}');
+    if (!good.ok) throw new Error(good.error);
+    expect(good.playbook.checks[0].name).toBe('none failed');
+
+    const bad = parsePlaybook('{"playbookVersion":3,"functions":[],"checks":[{"name":"bad","query":"$.x","expectation":{"type":"exact-count","count":-1}}]}');
+    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('`expectation`') });
+  });
+
+  it('does not silently import v3 checks under an older format', () => {
+    const res = parsePlaybook('{"playbookVersion":2,"functions":[],"checks":[]}');
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('`checks`') });
   });
 
   it('refuses a version it cannot read, and says which it reads', () => {

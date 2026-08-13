@@ -258,7 +258,7 @@ function stripOneBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-function isValidJsonText(text: string): boolean {
+export function isValidJsonText(text: string): boolean {
   try {
     JSON.parse(stripOneBom(text));
     return true;

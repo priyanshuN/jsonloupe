@@ -15,8 +15,11 @@ SPDX-License-Identifier: MIT -->
   <title>jsonloupe — a loupe for large JSON, and a JSON to Excel converter</title>
   <meta name="description" content="Turn nested JSON into a spreadsheet — each array becomes its own sheet, joined by id, never items/0/sku columns — and read JSON that is too big and too precise for your viewer. Excel or CSV, in your browser, nothing uploaded." />
   <meta property="og:title" content="jsonloupe — a loupe for large JSON, and a JSON to Excel converter" />
-  <meta property="og:description" content="Local-first JSON viewer, differ and query tool — and a converter that turns nested JSON into linked Excel or CSV tables. Lossless int64, five-million-element arrays, all in your browser tab." />
+  <meta property="og:description" content="Local-first JSON viewer, diff and query tool — and a converter that turns nested JSON into linked Excel or CSV tables. Lossless int64, five-million-element arrays, all in your browser tab." />
   <meta property="og:type" content="website" />
+  <!-- The landing headline is the LCP element and uses Space Grotesk. Discover
+       the font from HTML instead of waiting for the stylesheet to reveal it. -->
+  <link rel="preload" href="/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
   <!-- Pre-paint gate: theme and the returning-user flag must apply before first
        paint, or the page flashes the wrong theme / the marketing landing before
        main.ts loads and boots. The `returning` class only bridges the gap until
@@ -181,7 +184,7 @@ SPDX-License-Identifier: MIT -->
                  is called inside the app: `convert` means nothing to someone
                  who arrived wanting a spreadsheet. -->
             <a href="#convert">json to excel</a>
-            <a href="#query">query language</a>
+            <a href="#query">query &amp; functions</a>
             <a href="#agents">agents</a>
             <a href="#privacy">privacy</a>
             <a href="./spec.html">spec</a>
@@ -197,7 +200,7 @@ SPDX-License-Identifier: MIT -->
             <span class="lp-pill">local-first <span class="lp-pill-sep">·</span> no backend, no telemetry</span>
             <h1>A loupe for JSON that is too big — and too precise — for your viewer.</h1>
             <p class="lp-lede">Five-million-element arrays open instantly. Int64 IDs and exact decimals survive paste → edit → copy without a single rounded digit. Diff, query, and turn the nesting into linked spreadsheet tables — all inside your browser tab.</p>
-            <p class="lp-wedge">Paste a Zstd, Base64 or PostgreSQL bytea blob straight in and it opens as JSON — the viewer and the decode page you keep in a second tab, in one paste.</p>
+            <p class="lp-wedge">Paste a Zstd, Base64 or PostgreSQL bytea blob and it opens as JSON with a transformation trace. Compress JSON the other way from the same app — no upload or separate converter.</p>
             <p class="lp-trust">0 bytes uploaded · no account · MIT</p>
           </div>
           <div class="lp-paste">
@@ -245,8 +248,8 @@ SPDX-License-Identifier: MIT -->
             </article>
             <article class="lp-cell">
               <span class="lp-tag lp-tag-warn">payloads</span>
-              <h3>Compressed input is first-class</h3>
-              <p>Raw <code>.zst</code>, Base64-Zstd, or PostgreSQL <code>\x…</code> bytea is detected, decoded in the worker, and opened with a transformation trace.</p>
+              <h3>Decode and encode transport payloads</h3>
+              <p>Raw <code>.zst</code>, Base64-Zstd, or PostgreSQL <code>\x…</code> bytea opens with a transformation trace. Compress JSON the other way, choose its payload format, and inspect exact UTF-8, Zstd, Base64, and envelope sizes against editable budgets.</p>
             </article>
             <!-- The converter, standing where the EXPORT card used to. That card
                  described the single-table CSV download and was being read as
@@ -262,7 +265,7 @@ SPDX-License-Identifier: MIT -->
             <article class="lp-cell" id="convert">
               <span class="lp-tag lp-tag-ok">json to excel</span>
               <h3>Nested JSON becomes linked tables</h3>
-              <p>Every list inside the file gets a sheet of its own, joined back to its parent by id — never <code>items/0/sku</code> columns. You read the real rows before you commit, then take one Excel file or one CSV per table.</p>
+              <p>Every list gets a sheet of its own, joined back to its parent by id — never <code>items/0/sku</code> columns. Preview real rows, customize columns and missing values, then export Excel or CSV. Save the mapping to replay it on the next file or hand it to an agent.</p>
             </article>
             <article class="lp-cell">
               <span class="lp-tag lp-tag-boolean">diff</span>
@@ -279,22 +282,21 @@ SPDX-License-Identifier: MIT -->
 
         <div class="lp-split" id="query">
           <section class="lp-split-cell">
-            <h2 class="lp-h2 lp-h2-sm">A query language, not a search box</h2>
+            <h2 class="lp-h2 lp-h2-sm">Query locally — or translate English</h2>
             <!-- The one-table CSV download the removed EXPORT card named: it
                  belongs with the result it acts on, not in a card a
                  spreadsheet-shaped reader mistakes for the converter. -->
-            <p class="lp-body">Filter, pluck, group and count across the whole document — evaluated in the worker, never on the main thread. Any array opens as a sortable table, and the table or the result downloads as exact-digit CSV.</p>
+            <p class="lp-body">Filter, pluck, group and count in the worker; direct queries never leave your browser. Any array opens as a sortable table, and a table or result downloads as exact-digit CSV. Optional English → query sends your question and only the document shape — field names, types, and array lengths — to your chosen model, then shows the generated query for review before it runs locally. Save a useful query or turn it into a reusable pass/fail check.</p>
             <pre class="lp-code">$.tasks[?(@.status == <span class="lp-str">'FAILED'</span>)]
   | group(@.failureReason)</pre>
           </section>
           <section class="lp-split-cell">
-            <h2 class="lp-h2 lp-h2-sm">Diff that understands identity</h2>
-            <p class="lp-body">Align arrays by <code class="lp-code-id">id</code>, a composite key, or automatic detection — then read what actually changed instead of a wall of index shifts.</p>
+            <h2 class="lp-h2 lp-h2-sm">Functions and checks you can keep</h2>
+            <p class="lp-body">Name sandboxed JavaScript for questions a query language should not answer, batch-run functions, and keep important queries as checks. Export both as a playbook file for tomorrow's document or a teammate; unsafe numeric literals can arrive as exact digit strings.</p>
             <div class="lp-chips">
-              <span class="lp-chip lp-chip-changed">~ changed 37</span>
-              <span class="lp-chip lp-chip-added">+ added 12</span>
-              <span class="lp-chip lp-chip-removed">− removed 4</span>
-              <span class="lp-chip lp-chip-reordered">⇅ reordered 5</span>
+              <span class="lp-chip lp-chip-changed">named functions</span>
+              <span class="lp-chip lp-chip-added">pass / fail checks</span>
+              <span class="lp-chip lp-chip-reordered">portable playbook</span>
             </div>
           </section>
         </div>
@@ -302,11 +304,11 @@ SPDX-License-Identifier: MIT -->
         <section class="lp-band lp-agents" id="agents">
           <div>
             <h2 class="lp-h2 lp-h2-sm">Your AI agent can use it too</h2>
-            <p class="lp-body lp-body-wide">The same engine runs as an MCP server. An agent loads a document once — a file, or a compressed blob — and works from schemas, queries and samples while the document itself stays in the server process. Every response is capped, so a huge payload costs the model kilobytes, and int64 digits stay exact all the way to an exported CSV.</p>
+            <p class="lp-body lp-body-wide">The same engine runs as an 11-tool MCP server. An agent loads a file or compressed blob once, then inspects its shape, profiles fields, queries and samples bounded slices, compares documents, exports exact results, or drafts a spreadsheet mapping while the document stays in the server process.</p>
             <pre class="lp-code">claude mcp add jsonloupe -- npx -y -p jsonloupe jsonloupe-mcp</pre>
           </div>
           <div class="lp-facts">
-            <div class="lp-fact"><span>tools</span><span class="lp-fact-accent">load · schema · query · sample · diff · csv</span></div>
+            <div class="lp-fact"><span>11 tools</span><span class="lp-fact-accent">load · inspect · spec · convert · schema · query · profile · sample · diff · csv · result</span></div>
             <div class="lp-fact"><span>document in model context</span><span class="lp-fact-ok">never</span></div>
             <div class="lp-fact"><span>network calls</span><span class="lp-fact-ok">none</span></div>
           </div>
@@ -315,10 +317,10 @@ SPDX-License-Identifier: MIT -->
         <section class="lp-band lp-privacy" id="privacy">
           <div>
             <h2 class="lp-h2 lp-h2-sm">Your documents never leave your machine</h2>
-            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>Ask</strong> — the optional English-to-query feature — stays off until you add your own API key, and even then it sends only the document's shape: field names and types, never values. After you press Ask, “sent to model” records the exact request.</p>
+            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>English query translation</strong> stays off until you add your own API key, and even then it sends your question plus document shape — field names, types, and array lengths — never values. After you press Translate, “sent to model” records the exact request.</p>
           </div>
           <div class="lp-facts">
-            <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">3 · all opt-in Ask</span></div>
+            <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">3 · all opt-in translation</span></div>
             <div class="lp-fact"><span>telemetry</span><span class="lp-fact-ok">none</span></div>
             <div class="lp-fact"><span>license</span><span class="lp-fact-accent">MIT</span></div>
             <div class="lp-fact"><span>typescript</span><span class="lp-fact-accent">strict</span></div>
@@ -338,8 +340,8 @@ SPDX-License-Identifier: MIT -->
       <section id="codec" hidden>
         <div class="codec-head">
           <h1>Compress &amp; decode</h1>
-          <span class="codec-sub">JSON, raw Zstd, PostgreSQL bytea, SQL cells, and standard or URL-safe Base64</span>
-          <button id="codec-close">back</button>
+          <span class="codec-sub">Encode JSON as a transport payload, or decode a payload back to JSON.</span>
+          <button id="codec-close" class="btn-quiet">back</button>
         </div>
         <!-- ONE conversion with two directions, not two tools. It used to be
              two cards of input + output — four boxes for a pair of
@@ -355,25 +357,24 @@ SPDX-License-Identifier: MIT -->
         <div class="codec-pair">
           <div class="codec-side">
             <div class="codec-box-head">
-              <label class="standing-label" for="codec-json">JSON or text</label>
+              <label class="standing-label" for="codec-json">JSON</label>
+              <span id="codec-json-source" class="codec-source-note" hidden></span>
               <span class="spacer"></span>
-              <button id="codec-copy-json" class="btn-icon btn-quiet" type="button" title="Copy this JSON" aria-label="Copy this JSON"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
-              <button id="codec-open-json" class="btn-quiet" type="button" title="Parse this JSON as a document">open as document</button>
+              <button id="codec-use-open" class="btn-quiet" type="button" hidden>use open document</button>
+              <button id="codec-copy-json" class="btn-icon btn-quiet" type="button" title="Copy this JSON" aria-label="Copy this JSON" disabled><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+              <button id="codec-open-json" class="btn-quiet" type="button" title="Open this JSON in the document viewer" disabled>open as document</button>
             </div>
-            <!-- main.ts extends this placeholder while a document is open:
-                 leaving the box empty compresses THAT, which is the one input
-                 this side cannot hold (a 40 MB document rendered into a
-                 textarea wedges the page). It used to be a `use open doc`
-                 button, but the menu entry already arrives compressed and the
-                 arrow already falls back — three doors to one room, and the
-                 button's label was the only one that did not say so. -->
-            <textarea id="codec-json" spellcheck="false" placeholder="{&quot;orders&quot;: […]}"></textarea>
+            <!-- Normal documents render here. Very large documents stay in a
+                 backing value so the page remains responsive; the source note
+                 and placeholder both say so explicitly. -->
+            <textarea id="codec-json" spellcheck="false" placeholder="Paste JSON to compress"></textarea>
+            <div id="codec-json-status" class="codec-side-status" aria-live="polite" hidden></div>
           </div>
 
           <!-- The two directions, between the two sides they act on. -->
           <div class="codec-run">
-            <button id="codec-run-c" class="primary" title="Compress the JSON on the left to base64 zstd">compress <svg class="ic" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button>
-            <button id="codec-run-d" title="Decode the payload on the right back to JSON"><svg class="ic" aria-hidden="true"><use href="#i-arrow-left"></use></svg> decode</button>
+            <button id="codec-run-c" title="Compress the JSON on the left">compress <svg class="ic" aria-hidden="true"><use href="#i-arrow-right"></use></svg></button>
+            <button id="codec-run-d" title="Decode the payload on the right back to JSON" disabled><svg class="ic" aria-hidden="true"><use href="#i-arrow-left"></use></svg> decode</button>
           </div>
 
           <div class="codec-side">
@@ -385,28 +386,26 @@ SPDX-License-Identifier: MIT -->
                  copies, and a decode moves them to the form it just read, so
                  the round trip closes without anyone choosing. -->
             <div class="codec-box-head">
-              <label class="standing-label" for="codec-payload">encode as</label>
+              <label class="standing-label" for="codec-payload">payload</label>
+              <span class="codec-format-caption">encode as</span>
               <div class="mode-switch mode-switch-mini" id="codec-format" role="group" aria-label="Payload format">
-                <button type="button" data-format="base64-zstd" class="on" title="Zstd, then Base64 — a Kafka message or a JSON string cell">base64 zstd</button>
-                <button type="button" data-format="bytea-zstd" title="Zstd, then PostgreSQL \x hex — a bytea column">bytea</button>
-                <button type="button" data-format="base64" title="Base64 with no compression — when the other end cannot inflate">base64</button>
+                <button type="button" data-format="base64-zstd" class="on" aria-pressed="true" title="Zstd, then Base64 — a Kafka message or a JSON string cell">base64 zstd</button>
+                <button type="button" data-format="bytea-zstd" aria-pressed="false" title="Zstd, then PostgreSQL \x hex — a bytea column">bytea</button>
+                <button type="button" data-format="base64" aria-pressed="false" title="Base64 with no compression — when the other end cannot inflate">base64</button>
               </div>
               <span class="spacer"></span>
-              <button id="codec-copy-payload" class="btn-icon btn-quiet" type="button" title="Copy the payload" aria-label="Copy the payload"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+              <button id="codec-copy-payload" class="btn-icon btn-quiet" type="button" title="Copy the payload" aria-label="Copy the payload" disabled><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             </div>
             <textarea id="codec-payload" spellcheck="false"
               placeholder="KLUv/SAsxQAe… · \x28b52ffd… · 'quoted cell'"></textarea>
+            <div id="codec-payload-status" class="codec-side-status" aria-live="polite" hidden></div>
             <div class="codec-actions">
-              <button id="codec-file-d">choose file…</button>
+              <button id="codec-file-d">open payload file…</button>
               <input type="file" id="codec-file-input"
                 accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
             </div>
           </div>
         </div>
-        <!-- What the last press did, where it happened: the trip and its sizes.
-             Given how rarely the separate size report is opened, this is the
-             number people actually want — beside the thing that produced it. -->
-        <div id="codec-trace" hidden></div>
       </section>
       <!-- data-pane is the layout's own state, written by showPane in main.ts
            and read by style.css to decide which strips a layout is allowed. It
@@ -422,14 +421,14 @@ SPDX-License-Identifier: MIT -->
             <button id="original-btn" class="btn-quiet" title="reopen the document this was decoded from" hidden><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>original</button>
             <button id="reload-btn" class="btn-quiet" title="Re-read this file from disk" hidden><svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>reload</button>
           </div>
-          <!-- Four layouts of the SAME document, so `run` is a view here rather
+          <!-- Four layouts of the SAME document, so `functions` is a view here rather
                than a button of its own: it composes the source pane with a
                derived one, exactly as split composes tree with code. -->
           <div class="mode-switch" id="mode-switch">
             <button data-mode="tree" class="on">tree</button>
             <button data-mode="code">code</button>
             <button data-mode="split" title="Tree and code side by side">split</button>
-            <button data-mode="run" title="Run JavaScript over this document and read the result as a document">run</button>
+            <button data-mode="run" title="Write, save, and run JavaScript functions over this document">functions</button>
           </div>
           <!-- Filter is a mode of search, not a sibling feature: the chip lives
                inside the search field. Regex / syntax hints ride the tooltip
@@ -450,7 +449,8 @@ SPDX-License-Identifier: MIT -->
             <button id="filter-btn" class="tb-chip" aria-pressed="false"
               title="Prune the tree to branches matching the search text" aria-label="Filter the tree to matches"><svg class="ic" aria-hidden="true"><use href="#i-filter"></use></svg></button>
           </div>
-          <button id="ask-btn" title="Ask a question about this document in English">ask</button>
+          <button id="ask-btn" class="btn-quiet tb-named-action"
+            title="Run a local JSON query or translate an English question">query</button>
           <!-- Rule 21: the name popover renders to the top layer rather than
                hanging off whichever bar #dl-btn is standing in — main.ts moves
                that button between the toolbar and the split strip. A <form> so
@@ -461,8 +461,8 @@ SPDX-License-Identifier: MIT -->
           </form>
           <!-- Rule 10's third group — WHAT CAN I DO with this document — behind
                one hairline. Everything here is the same species and therefore
-               the same tier (quiet) and the same shape (a glyph square); the
-               bar spends its one accent on `ask` and nothing else.
+               the same quiet tier; named specialist actions keep their words,
+               while universal document operations remain glyph squares.
                Order is not arbitrary. .tb-tree first, because those four act on
                the document IN PLACE and migrate away together when a pane bar
                exists to scope them to; then the two that hand you a NEW surface
@@ -486,16 +486,16 @@ SPDX-License-Identifier: MIT -->
                    you are reading — so it rides with them, including down into
                    the pane bar in split and run. Out of the ⋯ deliberately:
                    getting the blob back out is not once-per-document residue. -->
-              <button id="compress-btn" class="btn-icon btn-quiet" type="button"
-                title="Compress this document to base64 zstd, copy it, and open compress &amp; decode"
-                aria-label="Compress this document and open compress and decode"><svg class="ic" aria-hidden="true"><use href="#i-compress"></use></svg></button>
+              <button id="compress-btn" class="btn-quiet tb-named-action" type="button"
+                title="Compress this document and open the payload result"
+                aria-label="Compress this document and open compress and decode"><svg class="ic" aria-hidden="true"><use href="#i-compress"></use></svg>compress</button>
             </div>
-            <button id="compare-btn" class="btn-icon btn-quiet" type="button"
+            <button id="compare-btn" class="btn-quiet tb-named-action" type="button"
               title="Choose a baseline and open semantic side-by-side comparison"
-              aria-label="Compare this document with a baseline"><svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg></button>
-            <button id="convert-btn" class="btn-icon btn-quiet" type="button"
+              aria-label="Compare this document with a baseline"><svg class="ic" aria-hidden="true"><use href="#i-compare"></use></svg>compare</button>
+            <button id="convert-btn" class="btn-quiet tb-named-action" type="button"
               title="Turn this document into flat tables you can open in Excel"
-              aria-label="Convert this document to tables"><svg class="ic" aria-hidden="true"><use href="#i-table"></use></svg></button>
+              aria-label="Convert this document to tables"><svg class="ic" aria-hidden="true"><use href="#i-table"></use></svg>convert</button>
             <!-- Overflow: once-per-document-or-less. Anything you do while
                  READING a document lives on the pane it acts on when there is a
                  pane to scope it to (code-bar / the split strip). -->
@@ -520,14 +520,20 @@ SPDX-License-Identifier: MIT -->
           <button type="button" data-mobile-run="workspace" class="on" aria-pressed="true">workspace</button>
         </div>
         <div id="ask-panel" aria-busy="false" hidden>
-          <div class="ask-row">
-            <input id="ask-box" placeholder="ask in English — or type a $.query directly" spellcheck="false">
-            <button id="ask-run" class="btn-icon primary" title="Ask this question"
-              aria-label="Ask this question"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
+          <div class="ask-row ask-command-row">
+            <strong class="ask-command-title">Query</strong>
+            <select id="ask-mode" aria-label="Query input mode">
+              <option value="query">JSON query</option>
+              <option value="english">English → query</option>
+            </select>
+            <input id="ask-box" placeholder="$.orders[?(@.status == 'FAILED')]" spellcheck="false">
+            <button id="ask-run" class="primary" title="Run this query locally">run query</button>
+            <span id="query-privacy" title="This query runs locally in the worker; nothing is sent">local</span>
             <button id="ask-key" class="btn-quiet" title="Set an OpenRouter or Anthropic API key (stored in this browser only)"
-              aria-describedby="ask-key-note">key</button>
+              aria-describedby="ask-key-note" hidden>model key</button>
+            <button id="ask-close" class="btn-icon btn-quiet" type="button" title="Close Query" aria-label="Close Query">×</button>
           </div>
-          <p id="ask-key-note" hidden>English Ask sends your question and document shape (field names, types and array lengths — never values) to OpenRouter or Anthropic. Direct $.queries stay local. Your key stays in this browser.</p>
+          <p id="ask-key-note" hidden>English → query sends your question and document shape (field names, types and array lengths — never values) to OpenRouter or Anthropic. Direct $.queries stay local. Your key stays in this browser; save an empty field to remove the browser key.</p>
           <!-- A real form: satisfies Chrome's password-field containment warning
                and makes Enter save. autocomplete=off because this is an API key,
                not a login — password managers must not offer to save/autofill. -->
@@ -537,13 +543,13 @@ SPDX-License-Identifier: MIT -->
             <button id="ask-key-save" type="submit" class="primary">save key</button>
           </form>
           <div id="ask-query-line" hidden>
+            <span class="standing-label">generated query</span>
             <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
             <!-- btn-mini on both: this row is rule 1's mini tier, but .btn-icon
                  sets width AND height from --ctl-h, which the row's min-height
                  could never override — so the copy glyph had been standing a
                  full regular-size square in a mini row all along. -->
-            <button id="ask-query-run" class="btn-icon btn-mini primary" title="Run this query as a saved query"
-              aria-label="Run this query"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
+            <button id="ask-query-run" class="primary" title="Run this generated query locally">run locally</button>
             <button id="ask-query-copy" class="btn-icon btn-mini btn-quiet" title="Copy this query" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
           </div>
           <details id="ask-disclosure" hidden>
@@ -552,7 +558,30 @@ SPDX-License-Identifier: MIT -->
           </details>
           <div id="ask-status" aria-live="polite" hidden></div>
           <div id="ask-result" hidden></div>
-          <div id="ask-saved"></div>
+          <div id="ask-save-actions" class="ask-actions" hidden>
+            <button id="ask-save-query" type="button">save query</button>
+            <button id="ask-save-check" type="button">save as check</button>
+          </div>
+          <div id="check-editor" hidden>
+            <input id="check-name" type="text" placeholder="check name" aria-label="Check name">
+            <select id="check-expectation" aria-label="Pass condition">
+              <option value="no-matches">pass when no matches are found</option>
+              <option value="at-least-one">pass when at least one match is found</option>
+              <option value="exact-count">pass when exactly this many matches are found</option>
+            </select>
+            <input id="check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count" hidden>
+            <span id="check-preview" aria-live="polite"></span>
+            <button id="check-save" type="button" class="primary">save check</button>
+            <button id="check-cancel" type="button" class="btn-quiet">cancel</button>
+          </div>
+          <div class="ask-kept" id="ask-saved-wrap" hidden>
+            <span class="standing-label">saved queries</span>
+            <div id="ask-saved"></div>
+          </div>
+          <div class="ask-kept" id="ask-checks-wrap" hidden>
+            <span class="standing-label">checks</span>
+            <div id="ask-checks"></div>
+          </div>
         </div>
         <div id="search-panel" hidden></div>
         <div id="pane-area">
@@ -633,13 +662,12 @@ SPDX-License-Identifier: MIT -->
                 title="Keep this script — the library survives across documents">save</button>
               <button id="run-save-as" class="btn-quiet" type="button" hidden
                 title="Keep this as a second function, leaving the original alone">save as new</button>
-              <!-- Docks INSIDE the field frame while the editor is open (the
-                   script and the act of running it are one control); main.ts
-                   moves this same element up here when the editor collapses,
-                   the way the tree ops move between bars. -->
-              <button id="run-exec" type="button" class="btn-icon primary"
+              <!-- Run stays in the function header. Putting it inside the code
+                   editor made it look like an Enter/submit affordance and took
+                   a third of the width from short scripts. -->
+              <button id="run-exec" type="button" class="primary"
                 title="Run this script over the document (Ctrl/Cmd+Enter)"
-                aria-label="Run this script over the document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
+                aria-label="Run this function over the document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg>run</button>
             </div>
             <!-- What this function was seen to read, against what the open
                  document actually has. A remark about the script, never a gate
@@ -691,26 +719,26 @@ SPDX-License-Identifier: MIT -->
             <button id="run-picked" class="primary" type="button" hidden
               title="Run every ticked function over this document"
               aria-label="Run every ticked function over this document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg><span id="run-picked-n"></span></button>
-            <!-- A playbook: your functions as a file, so the library survives a
+            <!-- A playbook: reusable functions and checks as a file, so the library survives a
                  cleared browser and can be handed to someone. It never carries
                  the document — you export the questions, not the data. -->
             <button id="run-export" class="btn-quiet" type="button" hidden
-              title="Save these functions as a playbook file">export</button>
+              title="Save these functions and checks as a playbook file">export</button>
             <button id="run-import" class="btn-quiet" type="button" hidden
-              title="Add the functions from a playbook file">import</button>
+              title="Add functions and checks from a playbook file">import</button>
             <input id="run-import-file" type="file" accept="application/json,.json" hidden />
-            <button id="run-new" class="btn-icon btn-quiet" type="button" hidden
-              title="Write a new function" aria-label="Write a new function"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+            <button id="run-new" class="btn-quiet" type="button" hidden
+              title="Start a new function" aria-label="Start a new function"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>new function</button>
             <button id="run-copy" class="btn-icon btn-quiet" type="button" title="Copy the whole result" aria-label="Copy the whole result"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts
                  remembers which button opened it and downloads accordingly. -->
             <button id="run-dl" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
               aria-label="Name and download the result" title="Name and download the result"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
-            <button id="run-open" class="btn-quiet" type="button" title="Open this result as a document of its own">open as document</button>
+              <button id="run-open" class="btn-quiet" type="button" title="Open this result as a document of its own">open result</button>
           </div>
           <!-- The functions face: the library, a reading surface like any other
                pane. It gets NO bar of its own — the bar above serves whichever
-               face is up (count and `+ new` here, the result's ops there), so
+               face is up (count and `new function` here, the result's ops there), so
                the column never stacks a second strip to say the same thing. -->
           <div id="run-library" hidden>
             <div id="run-lib-list"></div>
@@ -740,7 +768,7 @@ SPDX-License-Identifier: MIT -->
             </span>
             <button id="diff-rerun">re-run</button>
             <button id="diff-semantic" class="primary" title="Open an aligned, schema-free side-by-side comparison">side by side</button>
-            <button id="diff-close">back to tree</button>
+            <button id="diff-close" class="btn-quiet">back to tree</button>
           </div>
           <div id="diff-body"></div>
         </div>
@@ -752,7 +780,7 @@ SPDX-License-Identifier: MIT -->
             </div>
             <span class="spacer"></span>
             <button id="sem-summary">structural summary</button>
-            <button id="sem-close">back to tree</button>
+              <button id="sem-close" class="btn-quiet">back to tree</button>
           </div>
           <div class="sem-toolbar">
             <div id="sem-filters" class="sem-filters" role="toolbar" aria-label="Comparison filters">
@@ -805,7 +833,7 @@ SPDX-License-Identifier: MIT -->
               <strong>Convert</strong>
               <!-- The descriptor says what this view DOES to the document, not
                    what was found in it — the finding is the lead's job now. -->
-              <span id="convert-title">this document into spreadsheet tables</span>
+              <span id="convert-title">to spreadsheet tables</span>
             </div>
             <!-- The bar's lead, and it is a sentence about the FILE you are
                  about to get, not a tally of what the detector found: someone
@@ -823,20 +851,13 @@ SPDX-License-Identifier: MIT -->
                  revealed from here — the ask panel's idiom, not a floating
                  panel: you type in it, and nothing in it is a menu item. -->
             <button id="convert-mappings-btn" type="button" aria-expanded="false" aria-controls="convert-mappings"
-              title="Name this mapping, reopen one you saved, or bring one in from a file">mappings</button>
-            <!-- Rule 10: these two write the whole mapping's output rather than
-                 the selected table's, so they stand beside the format switch —
-                 the other output-wide decision — and not in a table's head.
-                 The label stands inside the field (rule 14) so the placeholder
-                 is free to carry the example. -->
-            <label class="field convert-inline-field"><span class="field-prefix">missing</span><input id="convert-missing" aria-label="Default missing value"></label>
-            <label class="field convert-inline-field"><span class="field-prefix">arrays</span><input id="convert-array-join" value="; " aria-label="Array join separator"></label>
+              title="Change output defaults, name this mapping, or bring one in from a file">customize</button>
             <div class="mode-switch" id="convert-format" role="group" aria-label="Output format">
               <button type="button" data-fmt="xlsx" class="on" title="One spreadsheet, one sheet per table, already linked by id">Excel</button>
               <button type="button" data-fmt="csv" title="One CSV file per table">CSV</button>
             </div>
-            <button id="convert-dl" class="primary" type="button" title="Convert and download"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>download</button>
-            <button id="convert-close" type="button">back to tree</button>
+            <button id="convert-dl" class="primary" type="button" title="Convert and download an Excel workbook"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>download Excel</button>
+            <button id="convert-close" class="btn-quiet" type="button">back to tree</button>
           </div>
           <!-- The mapping strip: hidden until `mappings` reveals it, and a bar
                stacked under a bar (rule 11's second chrome step) rather than a
@@ -846,6 +867,8 @@ SPDX-License-Identifier: MIT -->
                and beside `download` it was a second control wearing the same
                ⇩ for a completely different file. -->
           <div id="convert-mappings" hidden>
+            <label class="field convert-inline-field"><span class="field-prefix">missing values</span><input id="convert-missing" aria-label="Default missing value"></label>
+            <label class="field convert-inline-field"><span class="field-prefix">join arrays with</span><input id="convert-array-join" value="; " aria-label="Array join separator"></label>
             <label class="standing-label" for="convert-saved">saved</label>
             <select id="convert-saved">
               <option value="">starter mapping</option>
@@ -895,7 +918,7 @@ SPDX-License-Identifier: MIT -->
             <span id="table-count"></span>
             <span class="spacer"></span>
             <button id="table-csv" title="Download the whole table as CSV (RFC 4180, current sort order)"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>CSV</button>
-            <button id="table-close">back to tree</button>
+            <button id="table-close" class="btn-quiet">back to tree</button>
           </div>
           <div id="table-outer">
             <div id="table-header"></div>
@@ -936,18 +959,18 @@ SPDX-License-Identifier: MIT -->
     <input type="file" id="baseline-file-input"
       accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
   </dialog>
-  <dialog id="transport-dialog" aria-labelledby="transport-dialog-title">
+  <dialog id="transport-dialog" aria-labelledby="transport-dialog-title" tabindex="-1">
     <form method="dialog" class="transport-dialog">
       <div class="transport-head">
         <div>
-          <h2 id="transport-dialog-title">Transport size inspector</h2>
-          <p>Exact UTF-8 → Zstd → Base64 → envelope sizes. Recompression runs in the worker; captured Zstd bytes are shown separately when available.</p>
+          <h2 id="transport-dialog-title">Payload size report</h2>
+          <p>Compare exact JSON, compressed, Base64, and envelope sizes. Recompression runs locally.</p>
         </div>
         <button class="transport-x btn-icon" value="cancel" title="Close" aria-label="Close">×</button>
       </div>
       <div class="transport-settings">
         <label>
-          <span>recompression level</span>
+          <span>Zstd level</span>
           <input id="transport-level" type="number" min="1" max="22" value="3">
         </label>
         <label>
@@ -969,8 +992,8 @@ SPDX-License-Identifier: MIT -->
       </div>
       <div class="transport-budget-settings">
         <div class="transport-budget-heading">
-          <strong>editable budget examples</strong>
-          <span>choose the exact stage each limit measures</span>
+          <strong>Delivery budgets</strong>
+          <span>Edit each limit and choose which stage it measures.</span>
         </div>
         <!-- Three columns and ONE header row: the unit belongs to the column,
              not to the gap between two controls. `Kafka [800] KiB at [envelope]`
@@ -979,8 +1002,8 @@ SPDX-License-Identifier: MIT -->
              select it names. The two budgets now read as a pair, and a third is
              one more row rather than one more sentence. -->
         <div class="budget-grid">
-          <span class="standing-label">budget</span>
-          <span class="standing-label">KiB</span>
+          <span class="standing-label">service</span>
+          <span class="standing-label">limit · KiB</span>
           <span class="standing-label">measured at</span>
 
           <label class="budget-name" for="transport-kafka-limit">Kafka</label>
@@ -1011,9 +1034,8 @@ SPDX-License-Identifier: MIT -->
       <div id="transport-error" class="transport-error" hidden></div>
       <div id="transport-results" class="transport-results" aria-live="polite"></div>
       <div class="transport-actions">
-        <span>Thresholds are local presets, not universal platform limits.</span>
+        <span>Updates automatically. Thresholds are local presets, not universal platform limits.</span>
         <span class="spacer"></span>
-        <button id="transport-run" type="button" class="primary">recalculate</button>
         <button value="cancel">close</button>
       </div>
     </form>

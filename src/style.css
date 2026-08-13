@@ -46,8 +46,8 @@
     6. Three tiers, and the accent does one job in each. FILL is the LANDING's
        alone — #parse-btn and .lp-cta, where a marketing page may shout once.
        Inside the workbench there is no fill: every accent button, whether it
-       reveals (`ask`, `compare`, `choose a file…`) or commits (`apply changes`,
-       `ask run`, `recalculate`), wears the OUTLINE — neutral --btn-bg, accent
+       reveals (`choose a file…`, `side by side`) or commits (`apply`, `run`,
+       `translate`, `recalculate`), wears the OUTLINE — neutral --btn-bg, accent
        hairline, accent ink at the base weight — defined once on button.primary
        and never restated. TINT (--accent-soft) means exactly one thing: this
        toggle is currently ON (.tb-chip.on, #code-raw.on, .sem-filters .on,
@@ -394,45 +394,39 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg: #eef1f6;
-  /* Rule 11: white, not the #eef1f6 chrome tint — a long read wants the least
-     tinted ground, and the code pane has always been white here. */
+  --bg: #edf1f5;
+  /* Rule 11: white, not the chrome tint — a long read wants the least tinted
+     ground, and the code pane has always been white here. */
   --bg-canvas: #ffffff;
-  /* Rule 11: chrome goes DOWN here, because the canvas is already white and
-     there is no headroom above it. Same #eef1f6 the page has always used —
-     until now the sidebar was --bg-elevated, i.e. white on white, separated
-     from the document by a single hairline and nothing else. */
-  --bg-chrome: #eef1f6;
-  /* His call: a real step, not flat. Light goes DOWN from chrome (no headroom
-     above white), which is why this cannot be one shared offset with dark. */
-  --bg-chrome-2: #e5e9f1;
-  /* App mode put the paste card's ground and the sidebar on the same #eef1f6,
-     so the only thing dividing them was the sidebar's 1px border. The well
-     sinks below chrome and gives the white card something to lift off. */
-  --bg-well: #e7ebf3;
+  /* Light chrome is deliberately cooler and visibly darker than the reading
+     canvas. The former palette differed by too little once several toolbars,
+     rails and fields were stacked, making the workbench look disabled. */
+  --bg-chrome: #edf1f5;
+  --bg-chrome-2: #e2e8ef;
+  /* The well sinks below chrome and gives a white card something to lift off. */
+  --bg-well: #e5eaf0;
   --bg-elevated: #ffffff;
-  --bg-elevated-2: #f1f4f9;
-  --bg-inset: #f7f9fc;
-  --bg-hover: #e8ecf3;
-  --bg-sel: rgba(47, 123, 214, 0.1);
+  --bg-elevated-2: #f5f7fa;
+  --bg-inset: #f5f7fa;
+  --bg-hover: #e2e8ef;
+  --bg-sel: rgba(55, 113, 138, 0.15);
 
-  --border: #e0e4ec;
-  --border-strong: #cdd4df;
-  --border-soft: rgba(120, 132, 152, 0.25);
+  --border: #cbd3dd;
+  --border-strong: #adb8c6;
+  --border-soft: rgba(94, 108, 127, 0.24);
 
-  --text: #1e2632;
-  --text-dim: #5c6675;
-  /* #808896, darkened from #949dac (2.74:1 on white — under even the 3.0
-     placeholder floor). This value holds ≥3.0 on both canvas and chrome; the
-     lint-contract contrast gate now enforces it. */
-  --text-faint: #808896;
+  --text: #1b2531;
+  --text-dim: #526071;
+  /* Captions stay subordinate without taking on the low-contrast, disabled
+     appearance that the old light palette gave most supporting copy. */
+  --text-faint: #707c8c;
 
   --brand: #3f7d90;
   /* Accent = the brand's loupe teal (nudged darker so white button text keeps
      AA contrast), matching the dark theme where accent and brand already agree. */
   --accent: #37718a;
   --accent-contrast: #ffffff;
-  --accent-soft: rgba(63, 125, 144, 0.12);
+  --accent-soft: rgba(63, 125, 144, 0.14);
   --accent-line: rgba(55, 113, 138, 0.55);
   /* Same fill pair as dark (identical pairs stop the accent behaving
      differently per theme) — see the dark block for why white ink won. */
@@ -457,17 +451,16 @@
   --c-null: #848d9d;
   --c-punct: #848d9d;
 
-  /* Light-mode elevation runs DOWNWARD: a control with a body sits one step
-     darker than its surface (white-on-white buttons were ten 1px outlines). */
-  --btn-bg: #f1f4f9;
-  --btn-bg-hover: #e8ecf3;
-  --btn-bg-active: #dde3ec;
-  --btn-border: #d4dae3;
-  --btn-border-hover: #b9c2d0;
+  /* Controls need a visible body without becoming a second canvas. */
+  --btn-bg: #f7f9fb;
+  --btn-bg-hover: #e8edf2;
+  --btn-bg-active: #dce3ea;
+  --btn-border: #c5ced9;
+  --btn-border-hover: #9eabba;
 
   --shadow-sm: 0 1px 2px rgba(23, 40, 70, 0.08);
   --shadow: 0 12px 32px rgba(23, 40, 70, 0.12);
-  --gutter-bg: #f4f6fa;
+  --gutter-bg: #f1f4f7;
   /* Same wash, lower alpha: on a light ground the dark-theme value reads as haze. */
   --hero-wash: rgba(47, 123, 214, 0.07);
 }
@@ -701,7 +694,6 @@ button:has(> .ic) {
    utilities beside them comes from the accent hairline and ink; nothing in the
    workbench needs to shout twice. */
 button.primary,
-#ask-btn,
 #baseline-file-btn {
   background: var(--btn-bg);
   border-color: var(--accent-line);
@@ -737,7 +729,6 @@ button.primary,
 }
 .mode-switch button:active { border: none; }
 button.primary:hover,
-#ask-btn:hover,
 #baseline-file-btn:hover { background: var(--btn-bg-hover); border-color: var(--accent); }
 #parse-btn {
   background: var(--accent-fill);
@@ -762,7 +753,7 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--text);
-  font: var(--fs-body) var(--mono);
+  font: var(--fs-body) var(--sans);
   outline: none;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
@@ -1204,7 +1195,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   transition: color var(--dur) var(--ease);
 }
 .lp-nav a:hover { color: var(--text); }
-.lp-meta { font: 400 var(--fs-chip) var(--mono); color: var(--text-faint); white-space: nowrap; }
+.lp-meta { font: 400 var(--fs-chip) var(--mono); color: var(--text-dim); white-space: nowrap; }
 /* Rule 6: the landing may shout ONCE, and `parse` is what it shouts — pasting
    is the page's whole job. This CTA goes to the same place and was wearing the
    identical solid fill 350px away in the same viewport, so the hero had two
@@ -1298,7 +1289,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .lp-paste-status {
   font: var(--fs-chip) var(--mono);
-  color: var(--text-faint);
+  /* Instructional copy at 12.5px is ordinary text, not placeholder ink. */
+  color: var(--text-dim);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -1334,7 +1326,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-paste-actions button { padding: 0 var(--gap-4); border-radius: var(--r-sm); }
 .lp-note {
   font: var(--fs-chip) var(--mono);
-  color: var(--text-faint);
+  color: var(--text-dim);
   max-width: 230px;
   white-space: nowrap;
   overflow: hidden;
@@ -1387,7 +1379,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-cell p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.6; text-wrap: pretty; }
 .lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
 
-/* query / diff split */
+/* query / reusable-workflow split */
 .lp-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1604,7 +1596,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
      which is what lets the arrows centre on the boxes rather than on the column
      (see .codec-run) and keeps the two labels on one baseline even when one
      side's label wraps and the other's does not. */
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
   gap: var(--gap-4);
   min-height: 0;
 }
@@ -1623,7 +1615,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    each other. Six cells, six coordinates. */
 .codec-side > .codec-box-head { grid-row: 1; }
 .codec-side > textarea { grid-row: 2; }
-.codec-side > .codec-actions { grid-row: 3; }
+.codec-side > .codec-side-status { grid-row: 3; }
+.codec-side > .codec-actions { grid-row: 4; }
 /* THE ARROWS SIT ON THE BOXES, not on the column. Centred against the whole
    height they would drift by half the difference between the label row above
    and the actions row below — which is a different amount on each side, so the
@@ -1648,6 +1641,19 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   gap: var(--gap-2);
   min-height: var(--ctl-h-mini);
 }
+.codec-source-note {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codec-format-caption {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+}
 /* Rule 14 supplies ground, border, inset, type and the focus ring; only the
    box's own facts live here. Both sides are WRITABLE now — you paste into
    whichever one you have and press the arrow pointing away from it — so the
@@ -1656,12 +1662,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: 160px;
   resize: none;
   border-radius: var(--r);
+  font-family: var(--mono);
   line-height: 1.5;
 }
 .codec-actions { display: flex; gap: var(--gap-2); flex-wrap: wrap; }
-/* The transformation trace reads as part of the output's label — what came
-   back, and how. It was a band of its own between the buttons and the box. */
-#codec-trace {
+/* Transformation feedback belongs directly below the side that changed. A
+   single page-wide trace made a decode failure look unrelated to the payload
+   that caused it and left successful size feedback stranded at the far left. */
+.codec-side-status {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -1673,8 +1681,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    A decode that failed is something you have to act on before anything else in
    this card is useful — tier 3, the strongest device in the app. They used to
    be the same device at the same strength, separated by hue alone. */
-#codec-trace.ok { color: var(--ok); }
-#codec-trace.bad {
+.codec-side-status.ok { color: var(--ok); }
+.codec-side-status.bad {
   padding: 1px var(--gap-2);
   color: var(--danger);
   background: var(--danger-soft);
@@ -1875,6 +1883,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: calc(var(--r) + var(--r-xs));
   box-shadow: var(--shadow);
 }
+#transport-dialog:focus { outline: none; }
 #transport-dialog::backdrop {
   background: color-mix(in srgb, var(--bg) 58%, transparent);
   backdrop-filter: blur(2px);
@@ -1901,8 +1910,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .transport-settings {
   display: grid;
-  grid-template-columns: 110px minmax(170px, 220px) minmax(180px, 1fr);
+  grid-template-columns: 120px minmax(190px, 240px) minmax(180px, 1fr);
   gap: 10px;
+  justify-content: start;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated-2);
@@ -2000,7 +2010,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: var(--gap-3);
-  padding: 14px 20px 18px;
+  padding: 16px 20px 20px;
+  background: var(--bg-inset);
 }
 /* Rule 17 supplies the type and padding; only the grid span is local. */
 .transport-loading,
@@ -2010,14 +2021,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r);
-  background: var(--bg);
+  background: var(--bg-canvas);
 }
 .transport-report h3 {
   margin: 0;
   padding: 10px var(--gap-3);
   overflow: hidden;
   color: var(--text);
-  background: var(--bg-elevated-2);
+  background: var(--bg-chrome-2);
   border-bottom: 1px solid var(--border);
   font: 700 var(--fs-body) var(--mono);
   text-overflow: ellipsis;
@@ -2053,6 +2064,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   display: grid;
   gap: 7px;
   padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-chrome);
 }
 .transport-verdict {
   display: grid;
@@ -2061,7 +2074,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   padding: var(--gap-2) 9px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--bg-elevated-2);
+  background: var(--bg-canvas);
 }
 .transport-verdict strong { font-size: var(--fs-chip); }
 .transport-verdict > span {
@@ -2132,14 +2145,23 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-color: var(--accent-line);
 }
 
-/* `ask` is the ONE outline-tier control in the toolbar, defined once with
-   button.primary near the top of this file — nothing to restate here. `compare`
-   used to share it and `convert` was the bar's only plain bordered button, so
-   three neighbours doing the same kind of job wore three tiers; both are quiet
-   glyphs in .tb-tools now (rule 10, revised), which is what finally rations the
-   accent to one shape per view the way rule 6 always said. Open IS a toggle
-   state, so the tint here means exactly what it means everywhere else. */
-#ask-btn.on { background: var(--accent-soft); border-color: var(--accent); }
+/* Query is the same species as Compare / Convert / Compress. While its panel
+   is open it gets the standard selected tint, without turning into the only
+   primary-looking tool in the toolbar. */
+#ask-btn.on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+/* Specialist document actions keep their words on desktop. Copy/download and
+   collapse remain glyphs; compare/convert/compress are product concepts rather
+   than universal symbols, so making a reader decode them saves no real space. */
+.tb-named-action {
+  min-height: var(--ctl-h);
+  padding: 0 var(--gap-2);
+  font-size: var(--fs-chip);
+}
 
 /* Quiet utilities — toolbar, code bar, split strip, ask row, codec label rows,
    run result bar — all wear .btn-quiet declared on the element (the tier block
@@ -2203,6 +2225,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    contract does not have. The input is pinned to --ctl-h and the row centres,
    so 28px holds even if the font changes. */
 .ask-row { display: flex; align-items: center; gap: var(--gap-2); }
+.ask-command-row { flex-wrap: nowrap; }
+.ask-command-title {
+  flex-shrink: 0;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+#ask-mode { flex: 0 0 auto; width: 18ch; font-family: var(--sans); }
 /* Rule 14 gives these the ground, border, inset, type and ring; the comment
    that used to live here — "a field on chrome takes the canvas" — is now the
    rule itself, and it holds on every surface rather than only this one. */
@@ -2213,8 +2242,14 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    chrome while more than half the box stays empty. Capped, the row's leftover
    width goes to the controls instead of to the field, which is why `key` sits
    out at the edge rather than glued to `run`. */
-#ask-box { max-width: 76ch; }
-#ask-key { margin-left: auto; }
+#ask-box { min-width: 22ch; max-width: none; }
+#query-privacy {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: var(--fs-chip);
+}
+#ask-key { flex-shrink: 0; }
 #ask-key-note {
   margin: 0;
   max-width: 92ch;
@@ -2236,6 +2271,42 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--c-number);
 }
 #ask-query-line button { flex-shrink: 0; }
+
+#ask-save-actions { margin: 0; }
+#check-editor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  padding: var(--gap-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--bg-canvas);
+}
+#check-editor[hidden],
+.ask-kept[hidden] { display: none; }
+#check-name { flex: 1 1 22ch; }
+#check-expectation { flex: 0 1 34ch; font-family: var(--sans); }
+#check-count { width: 12ch; }
+#check-preview {
+  flex: 1 1 100%;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+}
+#check-preview.pass { color: var(--ok); }
+#check-preview.fail { color: var(--danger); }
+.ask-kept {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-2);
+}
+.ask-kept > .standing-label { padding-top: 5px; }
+#ask-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.check-chip.pass { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.check-chip.fail { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.check-chip .check-mark { font-weight: 700; }
+.check-chip.pass .check-mark { color: var(--ok); }
+.check-chip.fail .check-mark { color: var(--danger); }
 
 /* live preview: same layout, marked provisional */
 #ask-result.preview {
@@ -2449,22 +2520,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    scroller, not the shell, is what scrolls. */
 #run-editor .cm-editor { flex: 1 1 auto; min-height: 0; max-height: 100%; }
 #run-editor .cm-scroller { font: inherit; overflow-y: auto; }
-/* The run button docks in the bottom-right corner of the field (chat-input
-   style) instead of standing on a row of its own: the script and the act of
-   running it are one control. The content keeps a matching right inset so a
-   wrapped line never runs underneath it. It is a ▶ square at the REGULAR size
-   now (it was rule 1's mini, alone among the controls on its own row) — the
-   inset below is --ctl-h plus the two --gap-2 it sits between. */
-#run-exec {
-  position: absolute;
-  right: var(--gap-2);
-  bottom: var(--gap-2);
-  z-index: 1;
-}
-#run-editor .cm-content { padding-right: 46px; }
-/* Its other home. main.ts moves this same button to the head bar when the
-   editor collapses, where it is an ordinary control on an ordinary row. */
-.run-head > #run-exec { position: static; }
+/* Run is a compact commit in the stable function header. The editor keeps its
+   full width and no longer resembles a chat/search field with a submit button
+   embedded in its corner. */
+#run-exec { flex-shrink: 0; padding-inline: var(--gap-2); }
 
 /* The head row: the one thing in this column that never moves. It names the
    function that is loaded and carries the single action the current state has
@@ -3075,7 +3134,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   border-top: 1px solid var(--border);
   background: var(--bg-chrome);
   padding: 5px var(--gap-3);
-  font: var(--fs-body) var(--mono);
+  font: var(--fs-body) var(--sans);
   color: var(--text-dim);
   min-height: 32px;
   display: flex;
@@ -3093,7 +3152,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   min-width: 40px;
   font-variant-numeric: tabular-nums;
 }
-.status-lead.is-path { color: var(--c-key); }
+.status-lead.is-path { color: var(--c-key); font-family: var(--mono); }
 /* Everything the view wants to say ABOUT the lead, at the far edge: one
    margin-left:auto for the whole group, so no tenant has to grow its own. */
 .status-trail {
@@ -4046,8 +4105,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 /* Rule 11: the column editor and the preview under it are the document being
    shaped, so this whole column is CANVAS — the bars inside it are the chrome. */
 #convert-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg-canvas); }
-/* The outcome line is the most important sentence on this screen: it is what
-   tells someone the work is already done and names what they are about to get.
+/* The outcome line tells someone the work is ready and names what they get.
    It reuses #convert-count, which used to hold the words "3 tables" and was
    dressed as a trailing figure — faint, chip-sized. Restated here at the body
    rank so the sentence reads as the answer rather than as a caption, and the id
@@ -4190,6 +4248,13 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 
 #convert-cols { overflow-y: auto; padding: var(--gap-2) var(--gap-3); max-height: 48%; }
+/* The common path is inspect, choose a format and download. Column plumbing is
+   useful, but it no longer occupies half the view until Customize is opened. */
+#convert-view:not(.customizing) #convert-cols-head,
+#convert-view:not(.customizing) #convert-cols {
+  display: none;
+}
+#convert-view:not(.customizing) #convert-preview-head { border-top: 0; }
 /* Rule 1: the action cluster is three MINI controls — 24px was a third size the
    app does not have. Rule 8b: one --row-h across every scrolling list of rows,
    which is what the 3px padding was standing in for. */
@@ -4327,6 +4392,28 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 /* Rule 8b's banding, from .trow — what lets the per-cell bottom rule go. */
 .convert-grid tbody tr:nth-child(even) td { background: var(--bg-inset); }
 .convert-grid tbody tr:hover td { background: var(--bg-hover); }
+
+/* Dark surfaces already establish their edges through luminance. In light,
+   white fields used to dissolve into both the mapping rows and the preview, so
+   the converter gets a compact ruled editor and a distinct table header. */
+:root[data-theme='light'] #convert-tables {
+  border-right-color: var(--border-strong);
+}
+:root[data-theme='light'] #convert-cols {
+  padding: 0;
+  background: var(--bg-inset);
+}
+:root[data-theme='light'] .convert-col {
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-canvas);
+}
+:root[data-theme='light'] #convert-preview-head {
+  border-top-color: var(--border-strong);
+}
+:root[data-theme='light'] .convert-grid th {
+  background: var(--bg-elevated-2);
+}
 
 @media (max-width: 900px) {
   #convert-body { grid-template-columns: 180px 1fr; }

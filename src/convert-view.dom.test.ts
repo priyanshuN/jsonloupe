@@ -586,7 +586,7 @@ describe('converter view workflow', () => {
     await running;
     expect(h.els.download.disabled).toBe(false);
     expect(h.els.download.getAttribute('aria-busy')).toBe('false');
-    expect(h.els.download.lastChild?.textContent).toBe('download');
+    expect(h.els.download.lastChild?.textContent).toBe('download Excel');
     expect(h.els.previewNote.textContent).not.toContain('writing the file');
 
     vi.mocked(h.callbacks.run).mockRejectedValue(new Error('worker died'));

@@ -9,7 +9,7 @@
 // app reasons about. This is a field you type an expression into — two rows
 // when that is all it is, six at most before it scrolls, which is the
 // stylesheet's job — so it wears rule 14's field recipe and carries no chrome
-// of its own beyond the run button docked in its corner. Its palette is
+// of its own. Its palette is
 // read straight from the stylesheet's tokens rather than copied here, which
 // means a theme switch needs no reconfigure at all (style.css rule 11's lesson:
 // a second copy of a colour is how the two surfaces drifted apart).
