@@ -342,7 +342,11 @@ export class CodeEditor {
           flashField,
           searchCount,
           caretReporter,
-          EditorView.contentAttributes.of({ spellcheck: 'false', 'aria-label': 'JSON code editor' }),
+          EditorView.contentAttributes.of({
+            spellcheck: 'false',
+            tabindex: '0',
+            'aria-label': 'JSON code editor',
+          }),
         ],
       }),
     });

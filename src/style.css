@@ -343,8 +343,10 @@
   --border-soft: rgba(76, 86, 106, 0.35);
 
   --text: #e7ecf3;
-  --text-dim: #9aa5b6;
-  --text-faint: #6b7484;
+  --text-dim: #aeb8c8;
+  /* Captions remain below --text-dim in the hierarchy while meeting the same
+     AA text floor on dark chrome, canvas, and the selected-row tint. */
+  --text-faint: #9da7b7;
 
   --brand: #88c0d0;
   --accent: #86c8dc;
@@ -372,11 +374,10 @@
   --c-string: #a3be8c;
   --c-number: #ecc384;
   --c-boolean: #c69ac2;
-  --c-null: #79839a;
-  /* #7c869a, not #6b7484: the editor rendered this value all along (code.ts
-     carried its own copy until 2026-08-08); the token adopts what was actually
-     on screen. */
-  --c-punct: #7c869a;
+  --c-null: #98a2b2;
+  /* Null and punctuation are still subordinate by role; their ink now meets
+     the same AA floor when a row is hovered or selected. */
+  --c-punct: #98a2b2;
 
   --btn-bg: #262c36;
   --btn-bg-hover: #2f3743;
@@ -419,12 +420,15 @@
   --text-dim: #526071;
   /* Captions stay subordinate without taking on the low-contrast, disabled
      appearance that the old light palette gave most supporting copy. */
-  --text-faint: #707c8c;
+  /* Supporting copy is still subordinate by role and size, but it is real
+     text, not disabled decoration. #556170 keeps even the active-document
+     tint above 4.5:1; the former #707c8c fell to 3.21:1 there. */
+  --text-faint: #556170;
 
-  --brand: #3f7d90;
+  --brand: #2f687a;
   /* Accent = the brand's loupe teal (nudged darker so white button text keeps
      AA contrast), matching the dark theme where accent and brand already agree. */
-  --accent: #37718a;
+  --accent: #2f687a;
   --accent-contrast: #ffffff;
   --accent-soft: rgba(63, 125, 144, 0.14);
   --accent-line: rgba(55, 113, 138, 0.55);
@@ -440,16 +444,16 @@
   --ok: #227a4b;
   --warn: #a56a00;
 
-  --c-key: #2f6fb0;
-  --c-string: #217a49;
-  /* #ab6100: the old #b06400 measured 4.498:1 on white — a hair under the 4.5
-     text floor the linter holds syntax inks to. */
-  --c-number: #ab6100;
+  --c-key: #2867a5;
+  --c-string: #196f40;
+  /* The number ink also has to keep its floor on a hovered tree row, not only
+     on the white editor canvas. */
+  --c-number: #995400;
   --c-boolean: #8148b5;
-  /* #848d9d, darkened from #97a0af (2.64:1 on white — under the 3.0 faint
-     floor), same treatment --text-faint got. */
-  --c-null: #848d9d;
-  --c-punct: #848d9d;
+  /* Null and punctuation use the supporting-ink tier rather than dropping
+     below ordinary-text contrast. */
+  --c-null: #586473;
+  --c-punct: #586473;
 
   /* Controls need a visible body without becoming a second canvas. */
   --btn-bg: #f7f9fb;

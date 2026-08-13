@@ -139,8 +139,12 @@ const FLOORS = [
   ['text', 'bg-chrome', 4.5],
   ['text-dim', 'bg-canvas', 4.5],
   ['text-dim', 'bg-chrome', 4.5],
-  ['text-faint', 'bg-canvas', 3.0],
-  ['text-faint', 'bg-chrome', 3.0],
+  // Faint is a hierarchy role, not a license for low-contrast text. Browser
+  // accessibility checks caught captions below AA on light chrome and selected
+  // rows; hold its two base grounds to the ordinary-text floor here too.
+  ['text-faint', 'bg-canvas', 4.5],
+  ['text-faint', 'bg-chrome', 4.5],
+  ['brand', 'bg-chrome', 4.5],
   ['accent', 'bg-canvas', 4.5],
   ['accent', 'bg-chrome', 4.5],
   ['warn', 'bg-canvas', 4.5],
@@ -151,9 +155,15 @@ const FLOORS = [
   ['c-string', 'bg-canvas', 4.5],
   ['c-number', 'bg-canvas', 4.5],
   ['c-boolean', 'bg-canvas', 4.5],
-  // Null and punctuation are deliberately faint — captions-tier floor.
-  ['c-null', 'bg-canvas', 3.0],
-  ['c-punct', 'bg-canvas', 3.0],
+  ['c-null', 'bg-canvas', 4.5],
+  ['c-punct', 'bg-canvas', 4.5],
+  // A selected or hovered tree row changes ground without changing the ink.
+  ['c-key', 'bg-hover', 4.5],
+  ['c-string', 'bg-hover', 4.5],
+  ['c-number', 'bg-hover', 4.5],
+  ['c-boolean', 'bg-hover', 4.5],
+  ['c-null', 'bg-hover', 4.5],
+  ['c-punct', 'bg-hover', 4.5],
 ];
 
 const themes = {

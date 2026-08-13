@@ -69,6 +69,7 @@
     "lint:contract": "node scripts/lint-contract.mjs",
     "lint:headers": "node scripts/check-source-headers.mjs",
     "lint:security": "biome lint",
+    "test:a11y": "playwright test --config playwright.config.ts",
     "build": "tsc --noEmit && vite build && npm run build:mcp && npm run build:cli",
     "build:mcp": "tsc -p tsconfig.mcp.json --noEmit && node scripts/build-mcp.mjs",
     "build:cli": "tsc -p tsconfig.cli.json --noEmit && node scripts/build-cli.mjs",
@@ -83,6 +84,7 @@
     "prepublishOnly": "npm test && npm run build"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@biomejs/biome": "^2.5.7",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@codemirror/commands": "^6.6.0",
@@ -94,6 +96,7 @@
     "@codemirror/view": "^6.43.7",
     "@lezer/highlight": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.13.3",
     "@vitest/coverage-v8": "^4.1.10",
     "codemirror": "^6.0.1",

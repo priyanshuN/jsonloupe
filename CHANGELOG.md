@@ -2,6 +2,16 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Accessibility regressions now block merges in a real browser.** Chromium
+  runs axe WCAG A/AA checks across the landing, tree, Code, Query, Checks,
+  converter, and compact Documents drawer in both light and dark themes, with
+  explicit keyboard assertions for tree navigation, modal focus trapping, and
+  focus restoration. The first run fixed workbench and syntax contrast,
+  unnamed converter controls, inaccessible scroll regions, and unreliable
+  drawer focus.
+
 ## 1.4.0 — 2026-08-13
 
 - **Queries, functions, and checks now form one reusable investigation workflow.**

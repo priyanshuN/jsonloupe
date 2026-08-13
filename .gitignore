@@ -8,3 +8,5 @@ dist-cli/
 .env.*
 PLAN-*.md
 coverage/
+playwright-report/
+test-results/

@@ -92,7 +92,11 @@ export class ScriptEditor {
           EditorView.updateListener.of((u) => {
             if (u.docChanged) opts.onChange(u.state.doc.toString());
           }),
-          EditorView.contentAttributes.of({ spellcheck: 'false', 'aria-label': 'JavaScript to run over this document' }),
+          EditorView.contentAttributes.of({
+            spellcheck: 'false',
+            tabindex: '0',
+            'aria-label': 'JavaScript to run over this document',
+          }),
         ],
       }),
     });
