@@ -59,16 +59,16 @@ scripts, and verify registry signatures and provenance:
 mkdir jsonloupe-verification
 cd jsonloupe-verification
 npm init -y
-npm install --ignore-scripts jsonloupe@1.2.0
+npm install --ignore-scripts jsonloupe@1.4.0
 npm audit signatures
 ```
 
 The command must report verified registry signatures and verified
-attestations. Replace `1.2.0` with the version being checked. You can inspect
+attestations. Replace `1.4.0` with the version being checked. You can inspect
 the published metadata without installing it:
 
 ```sh
-npm view jsonloupe@1.2.0 dist.attestations dist.signatures --json
+npm view jsonloupe@1.4.0 dist.attestations dist.signatures --json
 ```
 
 On npmjs.com, the green provenance indicator links to the source commit and
