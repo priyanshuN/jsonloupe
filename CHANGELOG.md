@@ -2,6 +2,44 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## 1.4.0 — 2026-08-13
+
+- **Queries, functions, and checks now form one reusable investigation workflow.**
+  Direct JSON queries are explicitly local, optional English translation stops
+  for review before execution, and useful results can be saved as named
+  pass/fail checks. Playbook version 3 carries checks alongside functions while
+  continuing to import older playbooks.
+- **Run functions can preserve exact numbers by contract.** Each saved function
+  chooses ordinary JavaScript numbers or exact text for unsafe numeric literals,
+  and mixed batches honor that choice function by function. The setting persists
+  through the local library and exported playbooks instead of depending on a
+  browser-wide preference.
+- **Payload tools are a complete, explicit round trip.** The workbench now pairs
+  JSON and payload panes, keeps derived output from going stale, accepts only JSON
+  for encoding, and decodes the plain Base64 format it can produce in addition to
+  Base64-Zstd and PostgreSQL bytea. Large open documents stay authoritative
+  without forcing their complete text into the editor.
+- **Embedded JSON behaves like an edit, not a temporary view.** Un-stringifying
+  a JSON string commits an undoable document change, so tree, code, table, query,
+  export, and reload all see the same value. Code Apply remains strict, tree
+  shortcuts no longer steal focused controls, and property keys remain selectable
+  and copyable.
+- **The spreadsheet mapper recognizes real id-keyed collections.** Arrays whose
+  rows are single id-keyed wrappers become one table with a map-key field instead
+  of hundreds of unrelated tables. Field discovery is shared per table, laptop
+  layouts keep mapping controls reachable, and select controls follow the same
+  visual contract as the rest of the app.
+- **Opening Code is faster and no longer risks draft loss.** CodeMirror is warmed
+  after a document opens, unchanged buffers are reused, unapplied edits survive
+  view switches, and a delayed skeleton makes genuine loading visible without
+  flashing on fast opens. The virtual tree gained DOM-level coverage for focus,
+  selection, editing, annotations, chunks, and row actions.
+- **The workbench language and demo now match the product.** Navigation and
+  documentation consistently name Query, Functions, Compare, Convert, and
+  transport payload work; the landing page describes the privacy boundary at
+  the point of use; and the demo shows the current linked-table, exact-number,
+  query, and payload workflows.
+
 ## 1.3.0 — 2026-08-09
 
 - **The workbench has a shape that fits a phone.** Below 900px the navigation
