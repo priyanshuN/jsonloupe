@@ -113,9 +113,9 @@ flagged, with the original bytes preserved.
   a reusable pass/fail Check. Optional **English → query** mode translates a question using
   **only the document's shape (field names/types — never values)**, then stops
   so you can review the generated query before running it locally. Bring your
-  own Anthropic or OpenRouter key; with no key configured the feature is inert
-  and the page makes zero network requests. A disclosure panel records exactly
-  what was sent. See [SECURITY.md](SECURITY.md).
+  own connection: authorize with OpenRouter without pasting a key, or use the
+  advanced manual-key option. Until you explicitly connect, the feature is inert.
+  A disclosure panel records exactly what was sent. See [SECURITY.md](SECURITY.md).
 
 ### Browser query cookbook
 
@@ -329,8 +329,8 @@ this routing rule in its project instructions (for example `AGENTS.md` or
 
 ## Privacy & security
 
-Documents never leave your machine. The complete network-call inventory (three
-`fetch` calls, all in opt-in English query translation), the shape-only LLM contract, and
+Documents never leave your machine. The complete network-call inventory (four
+`fetch` calls, all in opt-in model connection or English query translation), the shape-only LLM contract, and
 the XSS posture are documented in [SECURITY.md](SECURITY.md). The corresponding
 threat model, trust boundaries, and assurance argument are in
 [SECURITY-ASSURANCE.md](SECURITY-ASSURANCE.md).

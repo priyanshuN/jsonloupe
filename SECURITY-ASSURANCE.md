@@ -63,7 +63,7 @@ identity of published packages. Relevant threats are:
 | Intake | Pasted, dropped, or opened bytes | Parser/worker | Type detection, decompression and decoded-size limits, lossless parser |
 | Worker protocol | UI messages and document-derived paths | Worker document state | Typed message protocol, bounded responses, validation in shared engines |
 | DOM | Document/model strings | Browser rendering | `createElement`/`textContent`; no executable DOM sink |
-| Ask provider | User question and document shape | External HTTPS provider | Explicit enablement, visible payload, fixed provider URLs, constrained query parser |
+| Ask provider | OAuth code, user question, and document shape | External HTTPS provider | PKCE authorization, tab-only credential default, explicit enablement, visible payload, fixed provider URLs, constrained query parser |
 | Run worker | User-approved script and a plain-JSON document copy | Ephemeral execution worker | Network/storage/import capabilities removed, input shape checked, first-result termination and timeout |
 | Dev key endpoint | HTTP Host/Origin | Local key file | Loopback Host and expected Origin checks occur before file access |
 | Spreadsheet | Exported cells | CSV/XLSX consumer | Formula-prefix neutralization, exact numeric rules, format-limit reporting |

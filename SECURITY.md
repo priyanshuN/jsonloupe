@@ -35,17 +35,20 @@ unexpected cross-boundary effect, or misleading disclosure remains in scope.
 
 ## Complete network-call inventory
 
-The codebase contains exactly three `fetch` calls, all in [src/nl.ts](src/nl.ts),
-all belonging to the **opt-in** "Ask" (natural-language query) feature:
+The codebase contains exactly four `fetch` calls, all belonging to the
+**opt-in** Query model-connection and English-translation flow:
 
 | Call | Target | When |
 |---|---|---|
-| `GET /__api-key` | your own dev server (localhost) | dev mode only — the endpoint does not exist in a static deploy |
+| `GET /__api-key` | your own dev server (localhost) | dev mode only, from [src/model-auth.ts](src/model-auth.ts) — the endpoint does not exist in a static deploy |
+| `POST https://openrouter.ai/api/v1/auth/keys` | OpenRouter | only after you choose **Continue with OpenRouter**, authorize there, and return to jsonloupe; exchanges the single-use PKCE code for your key |
 | `POST https://api.anthropic.com/v1/messages` | Anthropic | only when you have configured an Anthropic key and press Ask |
 | `POST https://openrouter.ai/api/v1/chat/completions` | OpenRouter | only when you have configured an OpenRouter key and press Ask |
 
-With no key configured, **no network request ever leaves the page**. Verify this
-yourself: `grep -rn "fetch(" src/`.
+Before you explicitly start model connection or translation, **no network
+request leaves the page**. Starting OpenRouter connection also navigates the tab
+to `https://openrouter.ai/auth`; that authorization page is outside jsonloupe.
+Verify the application requests yourself: `grep -rn "fetch(" src/`.
 
 The MCP server (`npx -y -p jsonloupe jsonloupe-mcp`) makes **zero network calls of any kind**: it
 speaks JSON-RPC on stdio, reads only input paths its client passes it, and writes
@@ -65,11 +68,16 @@ keyed by email addresses). If that applies to your data, don't use Ask on it.
 
 ## API keys
 
-Your LLM API key is stored in `localStorage` on your machine and sent only to
-the provider you chose (as the `x-api-key` / `Authorization` header). Use a
-scoped, revocable key, not a production credential. In dev mode the key can also
-be read from a local file (`.api-key` or `WB_KEY_FILE`) that is gitignored and
-served over localhost only.
+OpenRouter is the recommended connection: jsonloupe creates a PKCE verifier,
+sends its challenge to OpenRouter, and exchanges the returned single-use code
+directly for a user-controlled OpenRouter key. The verifier and returned key are
+kept in `sessionStorage` by default, so they disappear with the tab. The
+advanced manual-key form follows the same tab-only default; `localStorage` is
+used only when you explicitly choose **Remember on this device**. A key is sent
+only to its provider (as the `x-api-key` / `Authorization` header). Use a scoped,
+revocable key, not a production credential. In dev mode the key can also be read
+from a local file (`.api-key` or `WB_KEY_FILE`) that is gitignored and served
+over localhost only.
 
 That dev-only `GET /__api-key` endpoint checks that both the `Host` and (when the
 browser sends one) the `Origin` header are loopback *before* the key file is
@@ -113,7 +121,7 @@ Nothing does, for any project. What each one actually means:
 - **CodeQL** finds *known patterns* of bug. A clean result means those patterns
   were not found, not that none exist.
 
-The claims that matter here—no backend, three auditable `fetch` calls, no HTML
+The claims that matter here—no backend, four auditable `fetch` calls, no HTML
 injection sink, and one explicit isolated code boundary—are stated above with
 the source files to check.
 

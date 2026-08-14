@@ -4,6 +4,11 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **English query connection no longer starts with a password bar.** OpenRouter
+  OAuth with PKCE is the recommended path; manual API keys remain an advanced
+  option. Credentials stay in the current tab by default and persist on the
+  device only after an explicit choice, while direct queries, Split, and
+  Functions remain entirely independent of model authorization.
 - **Accessibility regressions now block merges in a real browser.** Chromium
   runs axe WCAG A/AA checks across the landing, tree, Code, Query, Checks,
   converter, and compact Documents drawer in both light and dark themes, with

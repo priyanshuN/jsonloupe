@@ -17,8 +17,9 @@ npm run test:a11y # axe plus keyboard/focus journeys against the build
 
 There is no backend to stand up and nothing to configure — `npm test` should
 pass on a fresh clone. If it does not, that is a bug worth reporting on its own.
-The optional "Ask" feature needs an LLM API key, but nothing else in the app
-depends on it; you can develop everything without one.
+The optional English-query feature needs an OpenRouter connection or LLM API
+key, but nothing else in the app depends on it; you can develop everything
+without one.
 
 ## Six things about the codebase
 
@@ -47,9 +48,9 @@ The short version, which is enough to place most changes:
    in a constrained query grammar (`src/query.ts`); it is parsed and executed
    by our own engine. There is no path from model output to code execution,
    and no change that introduces one will be merged.
-6. **There are exactly three `fetch` calls**, all in `src/nl.ts`, all opt-in.
-   SECURITY.md documents this as a complete inventory a stranger can check.
-   A change that adds a fourth needs to update that contract and will be
+6. **There are exactly four `fetch` calls**, in `src/model-auth.ts` and
+   `src/nl.ts`, all opt-in. SECURITY.md documents this as a complete inventory a
+   stranger can check. A change that adds a fifth needs to update that contract and will be
    looked at very hard.
 
 ## What a good change looks like

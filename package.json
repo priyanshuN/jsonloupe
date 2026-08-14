@@ -97,6 +97,7 @@
     "@lezer/highlight": "^1.2.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@playwright/test": "^1.62.1",
+    "@tabler/icons": "^3.46.0",
     "@types/node": "^24.13.3",
     "@vitest/coverage-v8": "^4.1.10",
     "codemirror": "^6.0.1",

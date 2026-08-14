@@ -200,10 +200,10 @@ describe('interactive UI regression contracts', () => {
   });
 
   it('contains the API-key password input in a submit form', () => {
-    const form = appHtml.match(/<form class="ask-row" id="ask-key-row"[\s\S]*?<\/form>/)?.[0] ?? '';
-    expect(form).toContain('id="ask-key-input" type="password"');
-    expect(form).toContain('id="ask-key-save" type="submit"');
-    expect(mainSource).toMatch(/askKeyRow\.addEventListener\('submit',[\s\S]*?preventDefault\(\)/);
+    const form = appHtml.match(/<form id="model-key-form"[\s\S]*?<\/form>/)?.[0] ?? '';
+    expect(form).toContain('id="model-key-input" type="password"');
+    expect(form).toContain('id="model-key-save" class="primary" type="submit"');
+    expect(mainSource).toMatch(/modelKeyForm\.addEventListener\('submit',[\s\S]*?preventDefault\(\)/);
   });
 
   it('keeps payload conversion explicit, JSON-only, and free of stale derived output', () => {
@@ -224,12 +224,21 @@ describe('interactive UI regression contracts', () => {
   });
 
   it('discloses Ask data handling before the API-key field accepts input', () => {
-    expect(appHtml).toContain('document values stay in this tab');
+    expect(appHtml).toMatch(/<dt>Document values<\/dt><dd>never sent<\/dd>/);
     expect(appHtml).toContain('field names, types and array lengths — never values');
     expect(appHtml).toContain('Direct $.queries stay local');
-    expect(appHtml).toContain('aria-describedby="ask-key-note"');
-    expect(mainSource).toMatch(/function setAskKeyOpen[\s\S]*?askKeyNote\.hidden = !open/);
-    expect(mainSource).toMatch(/if \(!key\) \{[\s\S]*?setAskKeyOpen\(true\)[\s\S]*?askKeyInput\.focus\(\)/);
+    expect(appHtml).toContain('aria-describedby="model-key-note"');
+    expect(appHtml).not.toContain('id="ask-key-row"');
+    expect(mainSource).toMatch(/async function openModelConnection[\s\S]*?modelDialog\.showModal\(\)/);
+    expect(mainSource).toMatch(/if \(wantsTranslation && !modelKey\) \{[\s\S]*?openModelConnection\(\)/);
+  });
+
+  it('does not persist a potentially sensitive English question across OAuth', () => {
+    const connect = mainSource.match(/openRouterConnect\.addEventListener[\s\S]*?^\}\);/m)?.[0] ?? '';
+    const restore = mainSource.match(/async function restoreOpenRouterConnection[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(mainSource).not.toContain('wb-openrouter-pending-question');
+    expect(connect).not.toContain('sessionStorage');
+    expect(restore).toContain("askBox.value = ''");
   });
 
   it('wraps long code lines instead of forcing horizontal document scroll', () => {
@@ -375,6 +384,7 @@ describe('interactive UI regression contracts', () => {
     expect(askEnter).toContain("e.key === 'Enter'");
     expect(askEnter).toContain('e.preventDefault()');
     expect(mainSource).toMatch(/import\.meta\.env\.DEV \? ' — or put it in a \.api-key file instead' : ''/);
-    expect(mainSource).toContain('no API key configured — paste an OpenRouter or Anthropic key here');
+    expect(mainSource).toContain("askRunBtn.textContent = english ? (modelConnected ? 'translate' : 'connect to translate')");
+    expect(mainSource).toMatch(/if \(wantsTranslation && !modelKey\) \{[\s\S]*?openModelConnection\(\)/);
   });
 });

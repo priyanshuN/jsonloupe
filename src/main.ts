@@ -51,13 +51,18 @@ import {
   type TransportMeasure,
 } from './transport';
 import {
-  getApiKey,
-  setApiKey,
   translateToQuery,
   buildSentPayload,
   providerForApiKey,
   type SentPayload,
 } from './nl';
+import {
+  apiKeyPersistence,
+  beginOpenRouterAuth,
+  completeOpenRouterAuth,
+  getApiKey,
+  setApiKey,
+} from './model-auth';
 import { currentChoice, currentTheme, onThemeChange, setThemeChoice, type ThemeChoice } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
@@ -3317,7 +3322,7 @@ async function ensureEditor(): Promise<void> {
     // and it stands until Apply re-parses or the buffer is reloaded.
     onReplaceAll: (count) => setCodeStatus('bulk', `${count} replaced · ${UNAPPLIED_HINT}`),
     // Synchronous by necessity — it answers a click that is already happening.
-    // The app's three <dialog>s are bespoke surfaces (the shortcut sheet reuses
+    // The app's <dialog>s are bespoke surfaces (the shortcut sheet reuses
     // the picker's shell); one more for a gate that fires above 500 matches
     // would be another copy of the same shell.
     confirmReplaceAll: (label) =>
@@ -4295,7 +4300,18 @@ const askMode = $<HTMLSelectElement>('#ask-mode');
 const askRunBtn = $<HTMLButtonElement>('#ask-run');
 const askCloseBtn = $<HTMLButtonElement>('#ask-close');
 const queryPrivacy = $('#query-privacy');
-const askKeyButton = $<HTMLButtonElement>('#ask-key');
+const askModelButton = $<HTMLButtonElement>('#ask-model');
+const modelDialog = $<HTMLDialogElement>('#model-dialog');
+const modelDialogClose = $<HTMLButtonElement>('#model-dialog-close');
+const openRouterConnect = $<HTMLButtonElement>('#openrouter-connect');
+const openRouterConnectText = $('#openrouter-connect-text');
+const modelKeyAdvanced = $<HTMLDetailsElement>('#model-key-advanced');
+const modelKeySummary = $<HTMLElement>('#model-key-advanced > summary');
+const modelKeyForm = $<HTMLFormElement>('#model-key-form');
+const modelKeyInput = $<HTMLInputElement>('#model-key-input');
+const modelKeyRemember = $<HTMLInputElement>('#model-key-remember');
+const modelKeyClear = $<HTMLButtonElement>('#model-key-clear');
+const modelCredentialScope = $('#model-credential-scope');
 const askStatus = $('#ask-status');
 const askResult = $('#ask-result');
 const askQueryLine = $('#ask-query-line');
@@ -4318,15 +4334,11 @@ const checkCount = $<HTMLInputElement>('#check-count');
 const checkPreview = $('#check-preview');
 const checkSave = $<HTMLButtonElement>('#check-save');
 const checkCancel = $<HTMLButtonElement>('#check-cancel');
-const askKeyRow = $('#ask-key-row');
-const askKeyNote = $('#ask-key-note');
-const askKeyInput = $<HTMLInputElement>('#ask-key-input');
-
 // The .api-key file is served by the dev-server middleware only (see
 // vite.config.ts), so a static deploy must not advertise it.
 const ASK_KEY_PLACEHOLDER =
   'sk-or-… / sk-ant-…' + (import.meta.env.DEV ? ' — or put it in a .api-key file instead' : '');
-askKeyInput.placeholder = ASK_KEY_PLACEHOLDER;
+modelKeyInput.placeholder = ASK_KEY_PLACEHOLDER;
 
 // Live-preview state. `previewToken` guards against out-of-order engine
 // responses (a newer keystroke's result must never be clobbered by an older,
@@ -4338,6 +4350,8 @@ let askOrigin: { kind: 'english'; question: string } | { kind: 'direct' } | null
 let askGeneration = 0;
 let askAbort: AbortController | null = null;
 let askBusy = false;
+let modelConnected = false;
+let modelProvider: 'anthropic' | 'openrouter' | null = null;
 let lastCommittedQuery = '';
 let lastCommittedResult: QueryResp | null = null;
 let runningCheck: SavedCheck | null = null;
@@ -4348,37 +4362,51 @@ function paintQueryMode(): void {
   askBox.placeholder = english
     ? 'e.g. find failed orders placed today'
     : "$.orders[?(@.status == 'FAILED')]";
-  askRunBtn.textContent = english ? 'translate' : 'run query';
-  askRunBtn.title = english ? 'Translate this question into a JSON query' : 'Run this query locally';
+  askRunBtn.textContent = english ? (modelConnected ? 'translate' : 'connect to translate') : 'run query';
+  askRunBtn.title = english
+    ? modelConnected
+      ? 'Translate this question into a JSON query'
+      : 'Connect a model before translating this question'
+    : 'Run this query locally';
   queryPrivacy.textContent = english ? 'shape only' : 'local';
   queryPrivacy.title = english
     ? 'Only field names, types and array lengths are sent; document values stay local'
     : 'This query runs locally in the worker; nothing is sent';
-  askKeyRow.hidden = true;
-  askKeyNote.hidden = true;
-  askKeyButton.hidden = !english;
-  if (english) {
-    askKeyButton.textContent = 'model key';
-    void refreshAskKeyLabel();
-  }
+  askModelButton.hidden = !english || !modelConnected;
+  if (english) void refreshModelConnection();
 }
 
-async function refreshAskKeyLabel(): Promise<void> {
+async function refreshModelConnection(): Promise<void> {
   const key = await getApiKey();
-  if (askMode.value !== 'english') return;
-  if (!key) {
-    askKeyButton.textContent = 'model key';
-    askKeyButton.title = 'Add an OpenRouter or Anthropic API key (stored in this browser only)';
-    return;
+  modelConnected = Boolean(key);
+  modelProvider = key ? providerForApiKey(key) : null;
+  const provider = modelProvider === 'anthropic' ? 'Anthropic' : 'OpenRouter';
+  askModelButton.textContent = `${provider} connected`;
+  askModelButton.title = `Manage the ${provider} connection`;
+  if (askMode.value === 'english') {
+    askRunBtn.textContent = modelConnected ? 'translate' : 'connect to translate';
+    askRunBtn.title = modelConnected
+      ? 'Translate this question into a JSON query'
+      : 'Connect a model before translating this question';
+    askModelButton.hidden = !modelConnected;
   }
-  const provider = providerForApiKey(key) === 'anthropic' ? 'Anthropic' : 'OpenRouter';
-  askKeyButton.textContent = `${provider} key`;
-  askKeyButton.title = `${provider} key loaded — click to replace it or manage the browser key`;
+  const persistence = apiKeyPersistence();
+  modelCredentialScope.textContent = persistence === 'device' ? 'remembered on this device' : 'this tab only';
 }
 
-function setAskKeyOpen(open: boolean): void {
-  askKeyRow.hidden = !open;
-  askKeyNote.hidden = !open;
+async function openModelConnection(manage = false): Promise<void> {
+  const key = await getApiKey();
+  const persistence = apiKeyPersistence();
+  modelKeyInput.value = '';
+  modelKeyInput.placeholder = key
+    ? `credential loaded (…${key.slice(-4)}) — paste only to replace`
+    : ASK_KEY_PLACEHOLDER;
+  modelKeyRemember.checked = persistence === 'device';
+  modelKeyClear.hidden = !key;
+  modelKeyAdvanced.open = manage;
+  modelCredentialScope.textContent = persistence === 'device' ? 'remembered on this device' : 'this tab only';
+  if (!modelDialog.open) modelDialog.showModal();
+  (manage ? modelKeySummary : openRouterConnect).focus();
 }
 
 function setAskBusy(busy: boolean): void {
@@ -4420,7 +4448,6 @@ function resetAskPanel(): void {
   lastCommittedQuery = '';
   lastCommittedResult = null;
   runningCheck = null;
-  setAskKeyOpen(false);
   setAskStatus(null);
 }
 
@@ -4429,7 +4456,7 @@ $('#ask-btn').addEventListener('click', () => {
   $('#ask-btn').classList.toggle('on', !askPanel.hidden);
   if (!askPanel.hidden) {
     void renderSavedChips();
-    void refreshAskKeyLabel();
+    void refreshModelConnection();
     askBox.focus();
   }
 });
@@ -4445,26 +4472,71 @@ askMode.addEventListener('change', () => {
 });
 paintQueryMode();
 
-askKeyButton.addEventListener('click', async () => {
-  const shouldOpen = askKeyRow.hidden === true;
-  setAskKeyOpen(shouldOpen);
-  if (shouldOpen) {
-    const key = await getApiKey();
-    askKeyInput.value = '';
-    askKeyInput.placeholder = key
-      ? `key loaded (…${key.slice(-4)}) — paste here only to override`
-      : ASK_KEY_PLACEHOLDER;
-    askKeyInput.focus();
+askModelButton.addEventListener('click', () => void openModelConnection(true));
+modelDialogClose.addEventListener('click', () => modelDialog.close());
+
+openRouterConnect.addEventListener('click', async () => {
+  openRouterConnect.disabled = true;
+  openRouterConnectText.textContent = 'opening OpenRouter…';
+  try {
+    await beginOpenRouterAuth();
+  } catch (error) {
+    openRouterConnect.disabled = false;
+    openRouterConnectText.textContent = 'Continue with OpenRouter';
+    showToast(`could not open OpenRouter · ${String(error)}`);
   }
 });
 
-// Submit, not click: the row is a <form>, so Enter in the key field saves too.
-askKeyRow.addEventListener('submit', (e) => {
-  e.preventDefault();
-  setApiKey(askKeyInput.value.trim());
-  setAskKeyOpen(false);
-  void refreshAskKeyLabel();
-  showToast(askKeyInput.value.trim() ? 'key saved (this browser only)' : 'key cleared');
+// Submit, not click: Enter in the advanced key field saves too.
+modelKeyForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const key = modelKeyInput.value.trim();
+  if (!key) {
+    modelKeyInput.focus();
+    return;
+  }
+  setApiKey(key, modelKeyRemember.checked);
+  modelDialog.close();
+  void refreshModelConnection();
+  showToast(modelKeyRemember.checked ? 'model connected · remembered on this device' : 'model connected · this tab only');
+});
+
+modelKeyClear.addEventListener('click', () => {
+  setApiKey('');
+  modelDialog.close();
+  void refreshModelConnection();
+  showToast('model disconnected');
+});
+
+async function restoreOpenRouterConnection(): Promise<void> {
+  const result = await completeOpenRouterAuth();
+  if (result.status === 'none') return;
+  askMode.value = 'english';
+  // Do not persist a possibly sensitive question across the OAuth navigation.
+  // Authorization returns to a clean input so the user chooses what to send.
+  askBox.value = '';
+  askPanel.hidden = false;
+  $('#ask-btn').classList.add('on');
+  await refreshModelConnection();
+  paintQueryMode();
+  if (result.status === 'connected') {
+    showToast('OpenRouter connected · this tab only');
+    askBox.focus();
+  } else {
+    showToast(result.message);
+    await openModelConnection();
+  }
+}
+
+void restoreOpenRouterConnection();
+
+modelDialog.addEventListener('close', () => {
+  openRouterConnect.disabled = false;
+  openRouterConnectText.textContent = 'Continue with OpenRouter';
+});
+
+modelDialog.addEventListener('click', (event) => {
+  if (event.target === modelDialog) modelDialog.close();
 });
 
 function setAskStatus(msg: string | null): void {
@@ -4823,6 +4895,12 @@ async function runAsk(presetQuery?: string): Promise<void> {
   const token = ++previewToken;
   const generation = ++askGeneration;
   const documentToken = currentDocumentToken;
+  const wantsTranslation = !presetQuery && askMode.value === 'english';
+  const modelKey = wantsTranslation ? await getApiKey() : null;
+  if (wantsTranslation && !modelKey) {
+    await openModelConnection();
+    return;
+  }
   const controller = new AbortController();
   askAbort = controller;
   askSaveActions.hidden = true;
@@ -4841,18 +4919,7 @@ async function runAsk(presetQuery?: string): Promise<void> {
     let query = input;
     const isEnglish = !presetQuery && askMode.value === 'english';
     if (isEnglish && !presetQuery) {
-      const key = await getApiKey();
-      if (!isCurrent()) return;
-      if (!key) {
-        setAskKeyOpen(true);
-        askKeyInput.focus();
-        setAskStatus(
-          import.meta.env.DEV
-            ? 'no API key found — drop it in a .api-key file next to package.json (or point WB_KEY_FILE at your .env), or paste one here'
-            : 'no API key configured — paste an OpenRouter or Anthropic key here (stored only in this browser)',
-        );
-        return;
-      }
+      const key = modelKey!;
       setAskStatus('translating… (only the question and field names are sent)');
       let sent: SentPayload | null = null;
       try {
