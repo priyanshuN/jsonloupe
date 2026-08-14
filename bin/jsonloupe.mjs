@@ -6,13 +6,15 @@
 // The app is a static bundle (dist/); everything it does — parsing, diffing,
 // querying, zstd — runs in the page. This server exists only because browsers
 // gate workers and wasm behind http(s), so file:// is not an option. It binds
-// loopback ONLY and never reads anything outside its own dist directory:
-// SECURITY.md's "no backend" claim covers this binary too, and a stranger
-// auditing it should be done in one screen.
+// loopback ONLY and reads nothing outside its own dist directory — except,
+// when you pass --key-file, the one file you name, served back to the page
+// over loopback only (same guard and parser as the dev server, imported from
+// dist-cli/key-endpoint.js). SECURITY.md's "no backend" claim covers this
+// binary too, and a stranger auditing it should be done in one screen.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { join, normalize, extname } from 'node:path';
+import { join, normalize, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
@@ -32,23 +34,40 @@ if (args[0] === 'serve') args.shift();
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`jsonloupe — a loupe for large JSON, served locally from this package
 
-usage: jsonloupe [serve] [--port <n>] [--no-open]
+usage: jsonloupe [serve] [--port <n>] [--no-open] [--key-file <path>]
        jsonloupe inspect <file>
        jsonloupe draft   <file> [-o spec.json]
        jsonloupe convert <file> --spec <spec.json> [-o out] [--to xlsx|csv]
 
   --port, -p   port to listen on (default 5199; next free port if taken)
   --no-open    don't open the browser
+  --key-file   serve a model API key to the page from this file (loopback
+               only; a raw key or an OPENROUTER_API_KEY/ANTHROPIC_API_KEY
+               line). Without the flag no key file is ever read.
 
 With no arguments jsonloupe serves the viewer. The three converter verbs turn
 nested JSON into flat tables: \`inspect\` reports what is in a document,
 \`draft\` writes a mapping spec you can read and edit, \`convert\` runs one.
 
 Nothing leaves your machine: the server binds 127.0.0.1 and serves only the
-app's own files. Documents you open stay in your browser's IndexedDB, and the
-converter reads and writes only the paths you name.`);
+app's own files (plus, with --key-file, the one key file you name — to
+loopback requests only). Documents you open stay in your browser's IndexedDB,
+and the converter reads and writes only the paths you name.`);
   process.exit(0);
 }
+const keyFlag = args.findIndex((a) => a === '--key-file');
+const keyFile = keyFlag !== -1 ? args[keyFlag + 1] : null;
+if (keyFlag !== -1 && (!keyFile || keyFile.startsWith('-'))) {
+  console.error('jsonloupe: --key-file needs a path');
+  process.exit(1);
+}
+const keyFilePath = keyFile ? resolve(keyFile) : null;
+// Imported only when the flag asks for it: without --key-file this process
+// never loads the key code, let alone a key.
+const keyEndpoint = keyFilePath
+  ? await import('../dist-cli/key-endpoint.js')
+  : null;
+
 const portFlag = args.findIndex((a) => a === '--port' || a === '-p');
 const basePort = portFlag !== -1 ? Number(args[portFlag + 1]) : Number(process.env.PORT ?? 5199);
 if (!Number.isInteger(basePort) || basePort < 1 || basePort > 65535) {
@@ -80,6 +99,28 @@ const SECURITY_HEADERS = {
 
 const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  if (keyEndpoint && path === '/__api-key') {
+    // Loopback proof on both sides (Host it was addressed to, Origin it came
+    // from) before the file is opened — a hostile domain rebound to 127.0.0.1
+    // gets a 403 and the key is never read. Same guard as the dev server.
+    if (!keyEndpoint.isLoopbackRequest(req.headers.host, req.headers.origin)) {
+      res.writeHead(403, SECURITY_HEADERS).end();
+      return;
+    }
+    let key = null;
+    try {
+      key = keyEndpoint.parseKeyFile(await readFile(keyFilePath, 'utf8'));
+    } catch {
+      /* unreadable file serves a 404, same as no key */
+    }
+    res.writeHead(key ? 200 : 404, {
+      ...SECURITY_HEADERS,
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(key ?? '');
+    return;
+  }
   // normalize() collapses any ../ the URL smuggled in; the startsWith check
   // then guarantees the resolved file is inside dist, so the server cannot be
   // asked for anything this package didn't ship.
@@ -102,8 +143,14 @@ const server = createServer(async (req, res) => {
 
 function listen(port, remaining) {
   server.once('error', (err) => {
-    if (err.code === 'EADDRINUSE' && remaining > 0) listen(port + 1, remaining - 1);
-    else {
+    if (err.code === 'EADDRINUSE' && remaining > 0) {
+      // listen()'s callback is registered as a one-shot 'listening' listener,
+      // and a failed bind never fires it. Left in place it would fire on the
+      // eventual success alongside the next one, announcing a port nothing is
+      // bound to — and whoever reads the first line gets a dead address.
+      server.removeAllListeners('listening');
+      listen(port + 1, remaining - 1);
+    } else {
       console.error(`jsonloupe: ${err.message}`);
       process.exit(1);
     }
@@ -111,6 +158,7 @@ function listen(port, remaining) {
   server.listen(port, '127.0.0.1', () => {
     const url = `http://127.0.0.1:${port}/`;
     console.log(`jsonloupe serving on ${url}  (ctrl-c to stop; nothing leaves your machine)`);
+    if (keyFilePath) console.log(`jsonloupe: serving the model key from ${keyFilePath} to loopback requests only`);
     if (!args.includes('--no-open')) {
       const opener =
         process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
