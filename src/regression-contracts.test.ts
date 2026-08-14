@@ -233,6 +233,14 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toMatch(/if \(wantsTranslation && !modelKey\) \{[\s\S]*?openModelConnection\(\)/);
   });
 
+  it('does not persist a potentially sensitive English question across OAuth', () => {
+    const connect = mainSource.match(/openRouterConnect\.addEventListener[\s\S]*?^\}\);/m)?.[0] ?? '';
+    const restore = mainSource.match(/async function restoreOpenRouterConnection[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(mainSource).not.toContain('wb-openrouter-pending-question');
+    expect(connect).not.toContain('sessionStorage');
+    expect(restore).toContain("askBox.value = ''");
+  });
+
   it('wraps long code lines instead of forcing horizontal document scroll', () => {
     expect(codeSource).toContain('EditorView.lineWrapping');
   });

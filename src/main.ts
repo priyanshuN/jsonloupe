@@ -4339,21 +4339,6 @@ const checkCancel = $<HTMLButtonElement>('#check-cancel');
 const ASK_KEY_PLACEHOLDER =
   'sk-or-… / sk-ant-…' + (import.meta.env.DEV ? ' — or put it in a .api-key file instead' : '');
 modelKeyInput.placeholder = ASK_KEY_PLACEHOLDER;
-const OAUTH_PENDING_QUESTION = 'wb-openrouter-pending-question';
-
-function rememberOAuthQuestion(question: string): void {
-  try { sessionStorage.setItem(OAUTH_PENDING_QUESTION, question); } catch { /* optional restoration only */ }
-}
-
-function takeOAuthQuestion(): string {
-  try {
-    const question = sessionStorage.getItem(OAUTH_PENDING_QUESTION) ?? '';
-    sessionStorage.removeItem(OAUTH_PENDING_QUESTION);
-    return question;
-  } catch {
-    return '';
-  }
-}
 
 // Live-preview state. `previewToken` guards against out-of-order engine
 // responses (a newer keystroke's result must never be clobbered by an older,
@@ -4494,7 +4479,6 @@ openRouterConnect.addEventListener('click', async () => {
   openRouterConnect.disabled = true;
   openRouterConnectText.textContent = 'opening OpenRouter…';
   try {
-    rememberOAuthQuestion(askBox.value);
     await beginOpenRouterAuth();
   } catch (error) {
     openRouterConnect.disabled = false;
@@ -4527,9 +4511,10 @@ modelKeyClear.addEventListener('click', () => {
 async function restoreOpenRouterConnection(): Promise<void> {
   const result = await completeOpenRouterAuth();
   if (result.status === 'none') return;
-  const pendingQuestion = takeOAuthQuestion();
   askMode.value = 'english';
-  askBox.value = pendingQuestion;
+  // Do not persist a possibly sensitive question across the OAuth navigation.
+  // Authorization returns to a clean input so the user chooses what to send.
+  askBox.value = '';
   askPanel.hidden = false;
   $('#ask-btn').classList.add('on');
   await refreshModelConnection();
