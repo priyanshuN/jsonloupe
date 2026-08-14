@@ -48,9 +48,14 @@ test('tree and code workflows are named and keyboard operable', async ({ page })
 test('query results can become an accessible reusable check', async ({ page }) => {
   await openSample(page);
   await page.getByRole('button', { name: 'query', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Query input mode' })).toHaveValue('query');
-  await page.getByPlaceholder("$.orders[?(@.status == 'FAILED')]").fill("$.orders[?(@.status == 'packing')]");
-  await page.getByRole('button', { name: 'run query' }).click();
+  const panel = page.locator('#ask-panel');
+  // The mode control is a segmented switch, like the other two in the app.
+  const modes = page.getByRole('group', { name: 'Query input mode' });
+  await expect(modes.getByRole('button', { name: 'JSON query' })).toHaveAttribute('aria-pressed', 'true');
+  // One query field for both modes, and it carries a real accessible name.
+  await panel.getByRole('textbox', { name: 'query' }).fill("$.orders[?(@.status == 'packing')]");
+  await panel.getByRole('button', { name: 'run', exact: true }).click();
+  await expect(page.locator('#ask-answer')).toBeVisible();
   await expect(page.locator('#ask-result')).toBeVisible();
   await expectNoWcagViolations(page, '#ask-panel');
 

@@ -149,6 +149,7 @@ describe('deployment hardening contracts', () => {
 });
 
 describe('interactive UI regression contracts', () => {
+
   it('keeps the compact Documents drawer modal, dismissible, and focus-safe', () => {
     const paint = mainSource.match(/function paintDocumentsDrawer\(\)[\s\S]*?^\}/m)?.[0] ?? '';
     const open = mainSource.match(/function openDocumentsDrawer\(\)[\s\S]*?^\}/m)?.[0] ?? '';
@@ -204,6 +205,55 @@ describe('interactive UI regression contracts', () => {
     expect(form).toContain('id="model-key-input" type="password"');
     expect(form).toContain('id="model-key-save" class="primary" type="submit"');
     expect(mainSource).toMatch(/modelKeyForm\.addEventListener\('submit',[\s\S]*?preventDefault\(\)/);
+  });
+
+  it('leads the model dialog with the current connection, not the authorization pitch', () => {
+    // The defect this pins: connected, the dialog still opened on "Continue
+    // with OpenRouter / Recommended" and the only report of the live
+    // credential was a placeholder below the fold.
+    const status = appHtml.indexOf('id="model-status"');
+    const connect = appHtml.indexOf('id="openrouter-connect"');
+    expect(status).toBeGreaterThan(-1);
+    expect(status).toBeLessThan(connect);
+
+    const paint = mainSource.match(/function paintModelDialog\(\): void \{[\s\S]*?^\}/m)?.[0] ?? '';
+    // Provider, model, key tail, source and scope are all stated up top.
+    expect(paint).toContain('`${modelProviderName()} connected`');
+    expect(paint).toContain('modelStatus.hidden = !modelConnected');
+    expect(paint).toContain('modelFactKey.textContent = modelKeyTail');
+    expect(paint).toContain('modelFactModel.textContent = connectedModelLabel()');
+    expect(paint).toContain('modelFactSource.textContent = credentialSourceLabel(modelKeySource)');
+    expect(paint).toContain('modelFactScope.textContent = credentialScopeLabel()');
+    // …and the pitch stands down while there is a credential to report.
+    expect(paint).toContain('openRouterConnect.hidden = modelConnected');
+    expect(paint).toContain('modelConnectNote.hidden = modelConnected');
+    // Replace/disconnect stays reachable, behind the disclosure, never opened
+    // for the reader.
+    expect(paint).toContain("'Replace or disconnect this credential'");
+    expect(mainSource).toContain('modelKeyAdvanced.open = false');
+  });
+
+  it('never puts more than a credential tail on screen', () => {
+    const refresh = mainSource.match(/async function refreshModelConnection\(\): Promise<void> \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(refresh).toContain("modelKeyTail = key ? key.slice(-4) : ''");
+    // The full key must never reach the summary, and the field never re-shows
+    // a loaded credential the way the old placeholder did.
+    expect(mainSource).not.toContain('credential loaded (…');
+    const paint = mainSource.match(/function paintModelDialog\(\): void \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(paint).toContain('modelFactKey.textContent = modelKeyTail ? `…${modelKeyTail}` : \'—\'');
+    // The tail is the ONLY credential material the painter can reach: it takes
+    // no key argument and reads no key-bearing helper.
+    expect(paint).not.toMatch(/storedApiKey\(\)|getApiKey\(\)/);
+  });
+
+  it('reports a credential source it actually recorded', () => {
+    const label = mainSource.match(/function credentialSourceLabel\([\s\S]*?^\}/m)?.[0] ?? '';
+    for (const source of ['oauth', 'paste', 'file', 'dev-server']) {
+      expect(label).toContain(`source === '${source}'`);
+    }
+    // OAuth, the file picker and a plain paste each stamp their own origin.
+    expect(mainSource).toContain("modelKeyEntry = 'file'");
+    expect(mainSource).toContain('setApiKey(key, modelKeyRemember.checked, modelKeyEntry)');
   });
 
   it('keeps payload conversion explicit, JSON-only, and free of stale derived output', () => {
@@ -272,7 +322,18 @@ describe('interactive UI regression contracts', () => {
     expect(reset).toContain('cancelAskRun()');
     expect(reset).toContain('clearTimeout(previewTimer)');
     expect(reset).toContain('previewToken++');
-    expect(reset).toContain('askResult.replaceChildren()');
+    // The answer zone is emptied through one helper now (summary + actions +
+    // body + verdict), so the reset cannot clear the payload and leave a stale
+    // count or a stale pass/fail beside it.
+    expect(reset).toContain('clearAskAnswer()');
+    const clear = mainSource.match(/function clearAskAnswer\(\)[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(clear).toContain('askAnswer.hidden = true');
+    expect(clear).toContain('askSummary.textContent');
+    expect(clear).toContain('askResultActions.replaceChildren()');
+    expect(clear).toContain('askResult.replaceChildren()');
+    expect(clear).toContain('setAskVerdict(null)');
+    expect(reset).toContain('setAskNotice(null)');
+    expect(reset).toContain('setAskFail(null)');
     expect(cancel).toContain('askGeneration++');
     expect(cancel).toContain('askAbort?.abort()');
     expect(mainSource).toMatch(/async function openText[\s\S]*?resetAskPanel\(\)/);
@@ -384,7 +445,97 @@ describe('interactive UI regression contracts', () => {
     expect(askEnter).toContain("e.key === 'Enter'");
     expect(askEnter).toContain('e.preventDefault()');
     expect(mainSource).toMatch(/import\.meta\.env\.DEV \? ' — or put it in a \.api-key file instead' : ''/);
-    expect(mainSource).toContain("askRunBtn.textContent = english ? (modelConnected ? 'translate' : 'connect to translate')");
+    // Disconnected, the ⟨ask⟩ step's control says what pressing it will do
+    // first, and translating still cannot start without a credential.
+    expect(mainSource).toContain("'connect to translate'");
     expect(mainSource).toMatch(/if \(wantsTranslation && !modelKey\) \{[\s\S]*?openModelConnection\(\)/);
+  });
+
+  // ---- Query panel: three zones, one query field, one accent control ----
+
+  it('keeps exactly one accent control in the Query panel at any moment', () => {
+    const panel = appHtml.match(/<div id="ask-panel"[\s\S]*?\n {8}<\/div>/)?.[0] ?? '';
+    expect(panel).not.toBe('');
+    // Two `class="primary"` buttons live in the markup — `translate` and `run` —
+    // but they are never both the next step: the pipeline demotes whichever one
+    // has been spent. `save check` is the third, and it only exists inside the
+    // check editor, which replaces the panel's primary while it is open.
+    const accent = panel.match(/class="[^"]*\bprimary\b[^"]*"/g) ?? [];
+    expect(accent).toHaveLength(3);
+    const paint = mainSource.match(/function paintAskAccent\(\)[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(paint).toContain("askRunBtn.classList.toggle('primary', !spent)");
+    expect(paint).toContain("askRunBtn.classList.toggle('btn-quiet', spent)");
+    expect(paint).toContain("'translate again'");
+  });
+
+  it('runs, previews and copies ONE query field in both input modes', () => {
+    // The direct-mode field and its own run button are gone: #ask-query-edit is
+    // the query in both modes, which is what gives JSON mode the live preview
+    // and gives `copy` something true to copy.
+    expect(appHtml).not.toContain('id="ask-query-line"');
+    expect(appHtml).toContain('id="ask-query-step"');
+    expect(mainSource).toContain("askQueryEdit.addEventListener('input'");
+    expect(mainSource).toContain('void copyText(askQueryEdit.value)');
+    const commit = mainSource.match(/async function commitEditedQuery\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(commit).toContain('askQueryEdit.value.trim()');
+    // The example in the placeholder is still adopted when run is pressed on an
+    // untouched field — a newcomer's obvious first act.
+    expect(commit).toContain('askQueryEdit.value = askQueryEdit.placeholder');
+    // Rule 15: the panel no longer narrates a control that is already on screen.
+    expect(mainSource).not.toContain('query ready — review it, then run locally');
+    expect(mainSource).not.toContain('translating… (only the question and field names are sent)');
+  });
+
+  it('gives the unknown-field warning a home inside the pipeline card', () => {
+    // This is a safety feature, not decoration: a generated query that names a
+    // field the document lacks runs, matches nothing, and reports a plausible
+    // empty answer. It must be said before the query is trusted.
+    const warn = mainSource.match(/function askFieldWarning\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(warn).toContain('unknownQueryFields(query, schema)');
+    expect(warn).toContain('is not in this document');
+    expect(warn).toContain('too deep to send');
+    // Silent only when there is genuinely nothing to warn about.
+    expect(warn).toContain('if (!schema) return null;');
+    const run = mainSource.match(/async function runAsk\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(run).toContain('setAskNotice(askFieldWarning(query, askSchemaSent))');
+    // It rides its own tier-2 slot inside the card, and the run that answers it
+    // clears it.
+    expect(appHtml).toContain('id="ask-notice"');
+    expect(appHtml).toMatch(/id="ask-notice"[^>]*aria-live="polite"/);
+    const commit = mainSource.match(/function commitQueryResult\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(commit).toContain('setAskNotice(null)');
+  });
+
+  it('puts a Query failure inside the card and never builds dead result actions', () => {
+    const render = mainSource.match(/function renderAskResult\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(render).toContain('setAskFail(');
+    expect(render).toContain('askAnswer.hidden = true');
+    // Rule 17, not a disabled pair: filtering the tree to nothing is a trap.
+    expect(render).toContain('if (!preview && res.total > 0) {');
+    expect(render).not.toContain('filterBtnEl.disabled = res.total === 0');
+    expect(render).toContain("emptyState(\n        'No matches',");
+    // A null value is an empty state, not a 26px em dash posing as a rule.
+    expect(render).toContain("emptyState(\n        'No value',");
+    const run = mainSource.match(/async function runAsk\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(run).toMatch(/catch \(err\)[\s\S]*?setAskFail\(`✗ \$\{err instanceof Error \? err\.message/);
+  });
+
+  it('never renders the model receipt for a query that reaches no model', () => {
+    expect(mainSource).not.toContain('renderDisclosure(null, null)');
+    expect(mainSource).not.toContain('local · nothing sent');
+    // The disclosure still records the exact payload whenever there IS one.
+    expect(mainSource).toContain('function renderDisclosure(sent: SentPayload, query: string | null)');
+    expect(mainSource).toContain("row('schema summary (names & types)', sent.schema, true)");
+    expect(mainSource).toContain('only field names/types are sent, never data.');
+  });
+
+  it('keeps saved queries and checks in one head-row rail that never moves', () => {
+    expect(appHtml).not.toContain('id="ask-saved-wrap"');
+    expect(appHtml).not.toContain('id="ask-checks-wrap"');
+    const head = appHtml.match(/<div class="ask-head">[\s\S]*?<\/div>\n {10}<\/div>/)?.[0] ?? '';
+    expect(head).toContain('id="ask-kept"');
+    expect(head).toContain('id="ask-checks"');
+    expect(head).toContain('id="ask-saved"');
+    expect(mainSource).toContain('askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0');
   });
 });

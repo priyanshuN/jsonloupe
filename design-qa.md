@@ -1,22 +1,35 @@
-# Design QA — model connection
+# Design QA — OpenRouter model choice
 
-- reference: `docs/design/openrouter-auth-modal-reference.png` (1487 × 1058)
-- implementation: `docs/design/openrouter-auth-modal-implementation.png` (1280 × 720 in-app browser surface)
-- focused source/implementation comparison: `docs/design/openrouter-auth-modal-comparison.png`
-- state: sample document open, Query visible, English mode selected, unanswered question present, no model credential, modal open
+- source visual truth: `docs/design/openrouter-auth-modal-reference.png` (1487 × 1058 px)
+- implementation: `docs/design/openrouter-free-model-selector-implementation.png` (1280 × 720 px in-app-browser capture)
+- rendered viewport: 1207 × 1044 CSS px at device pixel ratio 2; browser capture is scaled to the in-app surface
+- state: sample document open, Query visible, English mode selected, no credential, modal open, **Free models** selected
 
-## Review
+## Full-view comparison evidence
 
-- The modal remains centered over the workbench and keeps the query context visible beneath the backdrop.
-- Hierarchy matches the target: one recommended OpenRouter action, a short authorization explanation, three privacy facts, an advanced manual-key disclosure, and a tab-storage footer.
-- The first comparison exposed a P1 fidelity issue: the privacy area rendered like a text table and lacked the target's icon-led hierarchy.
-- The corrected implementation uses the target's stacked label/value rows, clean section dividers, muted recommendation pill, and real link, document, message, and key icons from the MIT-licensed Tabler set. The paths are bundled into jsonloupe's existing SVG sprite, so there is no runtime icon CDN or network request.
-- Spacing, border treatment, typography, control geometry, focus treatment, and backdrop use existing jsonloupe tokens and dialog conventions.
-- Manual-key entry is collapsed by default, includes the complete pre-input disclosure, and exposes persistence only through an unchecked “remember on this device” choice.
-- The advanced disclosure was expanded in the in-app browser and its key textbox, unchecked persistence checkbox, and save action were all present and named.
-- Modal dismissal restores the full workbench. Split and Functions were exercised after dismissal and did not reopen or reserve space for model authorization.
-- OpenRouter authorization itself was not activated during visual QA because it creates an external credential; the PKCE URL and code-exchange paths are covered by unit tests.
-- The browser integration does not expose a console-reader capability; no runtime error surfaced during DOM snapshots or interaction checks. Unit, contract, security, build, and light/dark accessibility suites all pass.
-- The reference and post-fix implementation were opened independently and together in the focused comparison. No P1 or P2 visual, interaction, responsive, or accessibility mismatch remains.
+The source and implementation captures were opened together for comparison. The modal remains centered over the workbench with the same hierarchy, typography, token palette, border treatment, icon set, privacy disclosure, API-key fallback, and session-storage footer. The requested model selector is an intentional addition between authorization and privacy; it uses the existing modal width and control rhythm rather than introducing a second pane.
+
+## Focused comparison evidence
+
+The modal occupies the meaningful detail region in both full-view captures, so a separate crop was not needed. Text, radios, selected state, badges, icons, borders, and footer copy remain readable in the implementation capture.
+
+## Findings
+
+- No actionable P0/P1/P2 visual mismatch remains.
+- Typography: existing jsonloupe font, weights, sizes, and muted secondary copy remain consistent with the source.
+- Spacing and layout: the 500 px modal width is preserved; the new two-row selector adds height without clipping or hiding the footer.
+- Colors and tokens: selected, hover, focus, border, and background colors use existing theme tokens and retain contrast.
+- Image and icon fidelity: the source's Tabler icon treatment is unchanged; no placeholder or custom-drawn assets were introduced.
+- Copy: free usage is explicit (`No credits needed · up to 50 requests/day`), while the paid option clearly says it uses OpenRouter credits.
+- Interaction: Free models defaults on first use; choosing Claude persists through closing and reopening the modal; switching back to Free also persists. Split and Functions remain independent. Browser console warnings/errors: none.
+
+## Comparison history
+
+- Initial modal QA established the icon-led privacy hierarchy and compact OpenRouter authorization design.
+- This iteration added an explicit free/paid selector without changing the established hierarchy. No P0/P1/P2 fix loop was required.
+
+## Residual test gap
+
+- OAuth was not submitted during visual QA because that would create/exchange an external credential. PKCE and key exchange remain unit-tested.
 
 final result: passed

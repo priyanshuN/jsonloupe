@@ -2,8 +2,105 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.5.0 — 2026-08-15
 
+- **A document's field names are treated as untrusted input.** Those names are
+  written by whoever wrote the document and Ask copies them into the model's
+  system prompt, so red-teaming the live model asked what a hostile document can
+  do with that. It can do a lot: a key containing newlines forged headings and
+  role markers, and made the model return an attacker's sentence where the query
+  belonged — presented in the app's own chrome as its suggestion, and in one
+  variant saved to a chip that outlived the document. Three controls now stand in
+  the way. The schema renderer flattens line breaks, zero-width and bidi
+  characters out of a key and caps its length, so a key stays one line beside its
+  own type. A returned line is accepted only if it begins with `$` and parses
+  whole, so text riding after a query, a `$` found mid-sentence and over-long
+  lines are refused rather than trimmed into something runnable. And field
+  references are checked against the schema before the query is offered for
+  review. The prompt also names the schema as inert data, but that is defense in
+  depth and is not counted: the model reliably refused injections telling it to
+  stop emitting a query, and followed ones that merely reshaped the query it was
+  already writing. No injection reached code execution — model output is rendered
+  as text and never constructed — so what this closes is a spoofed or subtly
+  wrong answer.
+- **A generated query that names a field the document lacks says so.** Ask sends
+  field names and never values, and when a question implies a field that is not
+  there the model tends to supply a plausible one; the query then parses, runs,
+  matches nothing, and reports an empty result indistinguishable from a true one.
+  The schema already knows which names are real, so the check happens at the one
+  moment the query is offered for review, naming the fields that do exist there
+  and suggesting the near miss. Where the shape was truncated it says it could
+  not check rather than guessing — a warning that cannot be stood behind is worse
+  than none.
+- **The Ask prompt was measured against the live model and fixed where it was
+  wrong.** `$.orders | count` answered "1" to the commonest question there is;
+  `top` grew a second pipe whenever a question named a column; awkward keys came
+  back as `$.['odd key']`; and every enum literal in the examples was upper case,
+  so the model wrote `'SHIPPED'` against documents holding `'shipped'` and
+  silently matched nothing. The grammar now states what a bracket step attaches
+  to, that a bare array path is one value, and that pipes never chain, and the
+  examples demonstrate the case-insensitive form. The documented `Truthy` line
+  was also simply false about the engine, where `''` and `0` are set.
+- **The schema stopped lying about what it leaves out.** Its depth limit rose,
+  and both the depth marker and the character cap now say the shape was truncated
+  there, so neither the model nor the person reading the disclosure mistakes a
+  cut-off shape for a complete one.
+- **A key can come from a local file instead of the clipboard.** One parser
+  serves all three surfaces and decides raw-key versus `.env` by content rather
+  than filename, so the same file works in dev, under `npx`, and in a deployed
+  page: the dev server adds a `~/.config` location, the packaged server gains an
+  opt-in `--key-file`, and the manual-key form gains a picker that reads the file
+  in the page and never uploads it. The flag is opt-in because that binary's
+  audit story is that it reads nothing outside its own directory — without it the
+  endpoint does not exist, and with it the same loopback proof runs before the
+  file is opened. The wired-up server is now tested, not just its parts.
+- **The model dialog reports what is connected instead of selling a connection.**
+  It led with "Continue with OpenRouter" whether or not a credential was already
+  in use, so a connected user read a screen telling them to connect and had to
+  scroll to learn what was actually running. It now opens with the connection —
+  provider, model, key tail, where the credential came from, how long it lasts —
+  and keeps the pitch for the state that needs it. Disconnect repaints in place
+  rather than closing, and says plainly when clearing browser storage does not
+  actually disconnect anything because the dev server still supplies a key.
+- **Filtering the tree to query matches can be undone.** It replaced the tree
+  with a derived view without recording that it had, so the toolbar filter never
+  lit up and no expansion snapshot was taken — a one-way door with nothing on
+  screen offering a way back. It now enters the same state the search filter
+  uses, so the button shows the count and pressing it restores what was expanded.
+- **An unavailable free model explains itself.** Every free OpenRouter provider
+  trains on prompts, so an account that disallows that has none to route to and
+  the API answers 404 — which read as "the model is missing" and landed on
+  exactly the privacy-minded user this feature is for.
+
+
+- **The Query panel is three zones instead of eight stacked rows.** Ask and
+  query are one bordered card split by a hairline, because they are one
+  operation with an order; the answer follows it. The two input modes are now
+  pipelines of different length rather than two labels on one row — a JSON query
+  is a single `query · run · copy · local` step, and English adds an `ask` step
+  above it. Both modes share ONE query field, so the live preview, the copy
+  glyph and `run` all act on the string that will actually run; direct queries
+  gained the live preview they never had. Exactly one accent control exists at
+  any moment: once a translation lands, `translate` stands down and `run` takes
+  the accent. A translation failure now renders inside the card under the step
+  that produced it, the `sent to model` receipt is the card's quiet last line
+  and is not drawn at all for a query that reaches no model, and saved queries
+  and checks share one rail in the head row where they stay visible at rest and
+  never move when a result arrives.
+- **The Query panel stopped narrating its own buttons.** The status line that
+  read *"query ready — review it, then run locally"* beside a button reading
+  **run** — and stayed up after the run, telling you to do what you had just
+  done — is deleted rather than restyled. What kept a slot is what no control
+  says: a saved check's verdict, at rule 15's tier 2 with the pass/fail ink it
+  always deserved, and the warning that a generated query names a field this
+  document does not have, in its own tier-2 notice inside the card. Zero-match
+  results no longer draw two disabled buttons, and an empty value renders as an
+  empty state instead of a 26px em dash that read as a horizontal rule.
+- **The type ramp's display exception is now scoped by selector.** An unscoped
+  size allowlist was a licence any rule in the file could pick up, and one had:
+  a Query result headline ran at the landing page's 26px inside a control strip.
+  The linter also pins rule 15's tier 2 to ink-plus-hairline, so tier 2 and tier
+  3 cannot quietly converge into one device.
 - **English query connection no longer starts with a password bar.** OpenRouter
   OAuth with PKCE is the recommended path; manual API keys remain an advanced
   option. Credentials stay in the current tab by default and persist on the

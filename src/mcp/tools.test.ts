@@ -82,7 +82,7 @@ describe('tool definitions', () => {
 
   it('carry the query grammar and worked examples where the caller needs them', () => {
     const description = TOOLS.find((t) => t.name === 'run_query')!.description;
-    expect(description).toContain('Pipes (append one)');
+    expect(description).toContain('Pipes: append AT MOST ONE');
     expect(description).toContain('| group(@.failureReason)');
     expect(description).toContain('| sum');
     expect(description).toContain("[?(!@.routeId)] | count");

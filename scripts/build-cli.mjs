@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 await build({
-  entryPoints: [`${root}src/cli/commands.ts`],
+  entryPoints: [`${root}src/cli/commands.ts`, `${root}src/cli/key-endpoint.ts`],
   outdir: `${root}dist-cli`,
   bundle: true,
   format: 'esm',

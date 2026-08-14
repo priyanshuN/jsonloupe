@@ -28,15 +28,18 @@ import {
 
 export type PathSeg = string | number;
 
-interface KeySeg { kind: 'key'; name: string }
+// `pos` is the source offset of the NAME token, not of the punctuation that
+// introduced it: the static field check (query-fields.ts) underlines the word
+// the model invented, and only the parser knows where that word started.
+interface KeySeg { kind: 'key'; name: string; pos: number }
 interface IndexSeg { kind: 'index'; i: number }
 interface SliceSeg { kind: 'slice'; start: number | null; end: number | null }
 interface WildSeg { kind: 'wild' }
-interface RecurSeg { kind: 'recur'; name: string | null }
+interface RecurSeg { kind: 'recur'; name: string | null; pos: number }
 interface PredSeg { kind: 'pred'; expr: Expr }
 type Seg = KeySeg | IndexSeg | SliceSeg | WildSeg | RecurSeg | PredSeg;
 
-interface Tail { kind: 'key' | 'index'; name?: string; i?: number }
+interface Tail { kind: 'key' | 'index'; name?: string; i?: number; pos: number }
 type Operand = { kind: 'path'; tail: Tail[] } | { kind: 'lit'; value: unknown };
 
 type Expr =
@@ -297,17 +300,17 @@ class Parser {
         } else {
           const t = this.next();
           if (!isKeyToken(t)) throw new QErr('expected key after .', t.pos);
-          segs.push({ kind: 'key', name: t.v });
+          segs.push({ kind: 'key', name: t.v, pos: t.pos });
         }
       } else if (this.isPunct('..')) {
         this.next();
         if (this.isPunct('*')) {
-          this.next();
-          segs.push({ kind: 'recur', name: null });
+          const star = this.next();
+          segs.push({ kind: 'recur', name: null, pos: star.pos });
         } else {
           const t = this.next();
           if (!isKeyToken(t)) throw new QErr('expected key after ..', t.pos);
-          segs.push({ kind: 'recur', name: t.v });
+          segs.push({ kind: 'recur', name: t.v, pos: t.pos });
         }
       } else if (this.isPunct('[')) {
         this.next();
@@ -358,7 +361,7 @@ class Parser {
     const t = this.peek();
     if (t.t === 'str') {
       this.next();
-      return { kind: 'key', name: t.v };
+      return { kind: 'key', name: t.v, pos: t.pos };
     }
     if (this.isPunct(':')) {
       this.next();
@@ -393,12 +396,12 @@ class Parser {
         this.next();
         const t = this.next();
         if (!isKeyToken(t)) throw new QErr('expected key after .', t.pos);
-        tail.push({ kind: 'key', name: t.v });
+        tail.push({ kind: 'key', name: t.v, pos: t.pos });
       } else if (this.isPunct('[')) {
         this.next();
         const t = this.next();
-        if (t.t === 'num' && Number.isInteger(t.n!)) tail.push({ kind: 'index', i: t.n! });
-        else if (t.t === 'str') tail.push({ kind: 'key', name: t.v });
+        if (t.t === 'num' && Number.isInteger(t.n!)) tail.push({ kind: 'index', i: t.n!, pos: t.pos });
+        else if (t.t === 'str') tail.push({ kind: 'key', name: t.v, pos: t.pos });
         else throw new QErr('expected index or string key', t.pos);
         this.eatPunct(']');
       } else {
@@ -941,14 +944,29 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
 
 // ---------- entry ----------
 
-export function runQuery(root: unknown, src: string, options?: QueryOptions): QueryResult {
-  let q: Query;
+export type { Expr as QueryExpr, Operand as QueryOperand, Pipe as QueryPipe, Query as ParsedQuery, Seg as QuerySeg, Tail as QueryTail };
+
+export type QueryParse = { ok: true; query: Query } | { ok: false; error: string; pos: number };
+
+/**
+ * Parse without evaluating. Every entry point below funnels through this, and
+ * it is also what lets a static check (query-fields.ts) read the field names a
+ * query mentions from the one parser that defines them — a second, private
+ * parser would drift from this one and warn about the wrong things.
+ */
+export function parseQuery(src: string): QueryParse {
   try {
-    q = new Parser(lex(src)).parseQuery();
-  } catch (e) {
-    if (e instanceof QErr) return { ok: false, error: e.message, pos: e.pos };
-    return { ok: false, error: String(e), pos: 0 };
+    return { ok: true, query: new Parser(lex(src)).parseQuery() };
+  } catch (error) {
+    if (error instanceof QErr) return { ok: false, error: error.message, pos: error.pos };
+    return { ok: false, error: String(error), pos: 0 };
   }
+}
+
+export function runQuery(root: unknown, src: string, options?: QueryOptions): QueryResult {
+  const parsed = parseQuery(src);
+  if (!parsed.ok) return parsed;
+  const q = parsed.query;
   if (q.pipe) return applyPipe(root, q.segs, q.pipe, options);
   const detail = window(options, MATCH_CAP);
   const matches: Match[] = [];
@@ -972,13 +990,9 @@ export type QueryScan = { ok: true; matches: Iterable<Match> } | { ok: false; er
 
 /** Parse a path/predicate query once, then stream every match for profiles and file exports. */
 export function scanQuery(root: unknown, src: string): QueryScan {
-  let query: Query;
-  try {
-    query = new Parser(lex(src)).parseQuery();
-  } catch (error) {
-    if (error instanceof QErr) return { ok: false, error: error.message, pos: error.pos };
-    return { ok: false, error: String(error), pos: 0 };
-  }
+  const parsed = parseQuery(src);
+  if (!parsed.ok) return parsed;
+  const query = parsed.query;
   if (query.pipe) return { ok: false, error: 'this operation takes a path/predicate query, not an aggregate pipe', pos: 0 };
   return { ok: true, matches: walk(root, query.segs) };
 }
@@ -993,13 +1007,9 @@ export type QueryExportPlan =
  * their memory is bounded by the serialized file rather than the match count.
  */
 export function planQueryExport(root: unknown, src: string): QueryExportPlan {
-  let query: Query;
-  try {
-    query = new Parser(lex(src)).parseQuery();
-  } catch (error) {
-    if (error instanceof QErr) return { ok: false, error: error.message, pos: error.pos };
-    return { ok: false, error: String(error), pos: 0 };
-  }
+  const parsed = parseQuery(src);
+  if (!parsed.ok) return parsed;
+  const query = parsed.query;
 
   if (!query.pipe) {
     return {

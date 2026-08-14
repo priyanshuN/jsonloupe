@@ -114,7 +114,9 @@ flagged, with the original bytes preserved.
   **only the document's shape (field names/types — never values)**, then stops
   so you can review the generated query before running it locally. Bring your
   own connection: authorize with OpenRouter without pasting a key, or use the
-  advanced manual-key option. Until you explicitly connect, the feature is inert.
+  advanced manual-key option — paste a key, or load it from a local file (a raw
+  key or a `.env` line, read in the page and never uploaded). Until you
+  explicitly connect, the feature is inert.
   A disclosure panel records exactly what was sent. See [SECURITY.md](SECURITY.md).
 
 ### Browser query cookbook
@@ -344,9 +346,10 @@ npm run build      # dist/
 ```
 
 Serve `dist/` from any static host (GitHub Pages, Cloudflare Pages, Netlify…).
-There is nothing to configure server-side; the dev-only `/__api-key` convenience
-endpoint simply doesn't exist in production, and English translation activates only when a
-visitor adds their own key.
+There is nothing to configure server-side; the local `/__api-key` convenience
+endpoint (dev mode, or `npx jsonloupe --key-file`) simply doesn't exist in a
+static deploy, and English translation activates only when a visitor adds their
+own key.
 
 ## Development
 

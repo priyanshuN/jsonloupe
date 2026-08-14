@@ -10,7 +10,8 @@ see your data.
 ## Security review scope
 
 The supported system includes the static browser application, the npm-distributed
-CLI and MCP server, the development-only loopback key endpoint, and the GitHub
+CLI and MCP server, the loopback key endpoint (dev mode and the opt-in
+`--key-file` flag), and the GitHub
 Actions build and publishing path. Documents, model responses, HTTP requests,
 filesystem paths, dependencies, and release inputs are treated as untrusted at
 the boundaries documented in [SECURITY-ASSURANCE.md](SECURITY-ASSURANCE.md).
@@ -40,7 +41,7 @@ The codebase contains exactly four `fetch` calls, all belonging to the
 
 | Call | Target | When |
 |---|---|---|
-| `GET /__api-key` | your own dev server (localhost) | dev mode only, from [src/model-auth.ts](src/model-auth.ts) — the endpoint does not exist in a static deploy |
+| `GET /__api-key` | your own local server (loopback) | dev mode, or `npx jsonloupe --key-file` (opt-in), from [src/model-auth.ts](src/model-auth.ts) — the endpoint does not exist in a static deploy |
 | `POST https://openrouter.ai/api/v1/auth/keys` | OpenRouter | only after you choose **Continue with OpenRouter**, authorize there, and return to jsonloupe; exchanges the single-use PKCE code for your key |
 | `POST https://api.anthropic.com/v1/messages` | Anthropic | only when you have configured an Anthropic key and press Ask |
 | `POST https://openrouter.ai/api/v1/chat/completions` | OpenRouter | only when you have configured an OpenRouter key and press Ask |
@@ -66,6 +67,36 @@ no code execution path from model output.
 Note that field *names* themselves can be sensitive in some documents (e.g. maps
 keyed by email addresses). If that applies to your data, don't use Ask on it.
 
+### A document's field names are untrusted input
+
+Those names are written by whoever wrote the document, and Ask copies them into
+the model's system prompt. Red-teaming the live model confirmed the consequence:
+a key whose text reads as an instruction can steer what the model returns, so a
+document you merely *open* can try to put its own sentence where your query
+should be. Three controls stand between that and you, and none of them is the
+model's own judgement:
+
+- **Field names cannot forge structure.** The schema renderer flattens line
+  breaks, zero-width and bidi characters out of a key and caps its length, so a
+  key stays one line beside its own type and cannot fake a heading, a blank
+  line, or a role marker inside the prompt.
+- **The reply must be a query.** A returned line is accepted only if it begins
+  with `$` and parses whole against the grammar. Text riding after a query, a
+  `$` found mid-sentence, and an over-long line are all refused rather than
+  trimmed back into something runnable.
+- **Field names are checked against the shape.** Before you are asked to trust a
+  generated query, its field references are compared with the schema that was
+  actually sent, and one naming a field the document lacks says so. Where the
+  shape was truncated the check says it could not verify, rather than guessing.
+
+The prompt also tells the model the schema is inert data. That is defense in
+depth and is *not* counted as a control: testing showed the model reliably
+refuses injections that tell it to stop emitting a query, but follows ones that
+merely reshape the query it was already writing. No injection found a code
+execution path — model output is rendered with `textContent` and never reaches
+a code constructor — so the risk this closes is a spoofed or subtly wrong
+*answer*, not execution.
+
 ## API keys
 
 OpenRouter is the recommended connection: jsonloupe creates a PKCE verifier,
@@ -75,15 +106,23 @@ kept in `sessionStorage` by default, so they disappear with the tab. The
 advanced manual-key form follows the same tab-only default; `localStorage` is
 used only when you explicitly choose **Remember on this device**. A key is sent
 only to its provider (as the `x-api-key` / `Authorization` header). Use a scoped,
-revocable key, not a production credential. In dev mode the key can also be read
-from a local file (`.api-key` or `WB_KEY_FILE`) that is gitignored and served
-over localhost only.
+revocable key, not a production credential.
 
-That dev-only `GET /__api-key` endpoint checks that both the `Host` and (when the
-browser sends one) the `Origin` header are loopback *before* the key file is
-opened — so a page on a hostile domain that resolves to `127.0.0.1` (DNS
-rebinding) is refused with a `403` and the key is never read. Production builds
-have no such endpoint at all.
+A key can also come from a local file instead of the clipboard, three ways with
+one parser ([src/key-file.ts](src/key-file.ts) — a raw key, or an
+`OPENROUTER_API_KEY`/`ANTHROPIC_API_KEY` line): the manual-key form's **load
+key from file…** picker reads the chosen file in the page and never uploads it;
+dev mode reads `.api-key`, `WB_KEY_FILE`, or `~/.config/api-keys/anthropic` /
+`openrouter` (all outside version control) and serves it over
+localhost only; and `npx jsonloupe --key-file <path>` does the same for the
+packaged server — opt-in only, so without the flag that server never reads a
+key file at all.
+
+The `GET /__api-key` endpoint (dev server and `--key-file` alike) checks that
+both the `Host` and (when the browser sends one) the `Origin` header are
+loopback *before* the key file is opened — so a page on a hostile domain that
+resolves to `127.0.0.1` (DNS rebinding) is refused with a `403` and the key is
+never read. Static deploys have no such endpoint at all.
 
 ## HTML and explicit-code surfaces
 

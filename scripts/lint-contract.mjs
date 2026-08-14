@@ -19,8 +19,9 @@
 //      floors, in BOTH themes: body/dim text 4.5, faint (captions,
 //      placeholders) 3.0, accent-as-ink 4.5, status inks 4.5.
 //   6. rule 23 — the type ramp: every font size is a --fs-* token; literals
-//      survive only on the landing/spec display ladder (allowlist) or in
-//      var(--display) declarations.
+//      survive only in var(--display) declarations or on the landing/spec
+//      display ladder, which is scoped BY SELECTOR — an unscoped size list is
+//      a licence any workbench rule can pick up, and one did.
 //   7. rule 23 — spacing literals that RESTATE a --gap-* value (4/8/12/16px)
 //      in margin/padding/gap are errors; same for border-radius restating an
 //      --r-* token, min-height restating --bar-h, and the glow recipe
@@ -29,6 +30,9 @@
 //      referenced somewhere (style.css, code.ts, main.ts, or an HTML entry).
 //   9. code-status regression — the apply control never shrinks or wraps, and
 //      the status note yields on one ellipsized line instead.
+//  10. rule 15 — the named tier-2 recipes keep their hairline and stay off the
+//      -soft fills, so tier 2 and tier 3 cannot quietly converge into one
+//      device the reader has to know the domain to decode.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -188,9 +192,27 @@ for (const [name, tokens] of Object.entries(themes)) {
 
 // ---------- type ramp (rule 23) ----------
 
-// Landing/spec display ladder — the sizes rule 22's exception owns. Everything
-// else must be a token.
+/** The selector a declaration at `idx` belongs to, whitespace-collapsed. */
+function selectorAt(idx) {
+  const open = css.lastIndexOf('{', idx);
+  const start = Math.max(
+    css.lastIndexOf('}', open),
+    css.lastIndexOf(';', open),
+    css.lastIndexOf('{', open - 1), // the enclosing @media's brace
+  ) + 1;
+  return css.slice(start, open).trim().replace(/\s+/g, ' ');
+}
+
+// Landing/spec display ladder — the sizes rule 22's exception owns.
 const DISPLAY_SIZES = new Set(['17px', '18px', '20px', '26px', '30px', '38px', '42px', '58px']);
+// ...and rule 23's addition: the exception is SCOPED. A bare size allowlist let
+// any workbench rule inherit the marketing page's licence, which is how
+// .ask-value ran a control-strip headline at 26px past this linter for months.
+// The last entry is the one named workbench exception: #drop-overlay is a
+// full-viewport moment carrying one line, not a control on a bar.
+const DISPLAY_SELECTORS = /^(?:\.lp-|\.sp-|#drop-overlay\b)/;
+const onDisplayLadder = (selector) =>
+  selector.split(',').every((part) => DISPLAY_SELECTORS.test(part.trim()));
 
 for (const m of css.matchAll(/font(?:-size)?:\s*([^;]+);/g)) {
   const value = m[1];
@@ -198,8 +220,33 @@ for (const m of css.matchAll(/font(?:-size)?:\s*([^;]+);/g)) {
   if (/^(?:400|700)\s+700\b/.test(value.trim())) continue; // @font-face range
   const size = value.match(/(?:^|\s|\/)(\d+(?:\.\d+)?px)\b/);
   if (!size) continue; // token-sized or keyword
-  if (DISPLAY_SIZES.has(size[1])) continue;
+  if (DISPLAY_SIZES.has(size[1])) {
+    const selector = selectorAt(m.index);
+    if (onDisplayLadder(selector)) continue;
+    errors.push(`style.css:${lineOf(m.index)} font size ${size[1]} in "${selector}" — the display ladder belongs to the landing/spec pages (rule 23); the workbench uses --fs-* only`);
+    continue;
+  }
   errors.push(`style.css:${lineOf(m.index)} font size ${size[1]} — rule 23: use a --fs-* ramp token`);
+}
+
+// ---------- status ranks (rule 15) ----------
+
+// Rank is carried by the DRESSING, not the hue: tier 2 is ink + hairline, tier
+// 3 adds the soft fill and is the only rank that means "you must respond". A
+// tier-2 recipe that reaches for a -soft background collapses the two, and the
+// reader then has to know the domain to tell a warning from a failure.
+for (const selector of ['.ask-notice', '.ask-verdict', '.run-remark']) {
+  const body = selectorBody(selector);
+  if (!body) {
+    errors.push(`style.css: ${selector} is missing — it is a named rule-15 tier-2 recipe`);
+    continue;
+  }
+  if (!/border:\s*1px solid/.test(body)) {
+    errors.push(`style.css: ${selector} is rule 15 tier 2 and must carry its hairline`);
+  }
+  if (/background[^;]*-soft\)/.test(body)) {
+    errors.push(`style.css: ${selector} is rule 15 tier 2 — the soft fill belongs to tier 3 only`);
+  }
 }
 
 // ---------- restatement bans (rule 23) ----------
@@ -233,6 +280,20 @@ const codeApply = selectorBody('#code-apply');
 if (!/white-space:\s*nowrap/.test(codeApply) || !/flex-shrink:\s*0/.test(codeApply)) {
   errors.push('style.css: #code-apply must stay on one non-shrinking line (code-status regression)');
 }
+// A closed <dialog> is hidden by the UA's `dialog:not([open])` rule, which any
+// id selector outranks. Declaring `display` on one unconditionally therefore
+// leaves it on screen after it closes — laid out in the page flow, wearing a
+// close button that looks broken precisely because it already worked. Shipped
+// exactly that once; the fix is to scope the declaration to [open].
+for (const m of css.matchAll(/^(#[\w-]*dialog(?:\[[^\]]*\])?[^{,]*)\{/gim)) {
+  const selector = m[1].trim();
+  if (/::backdrop/.test(selector) || /\[open\]/.test(selector)) continue;
+  const [open, end] = blockRange(m.index);
+  if (/(?:^|[;{\s])display\s*:/.test(css.slice(open + 1, end - 1))) {
+    errors.push(`style.css:${lineOf(m.index)} "${selector}" sets display outside [open] — a closed dialog would stay on screen`);
+  }
+}
+
 const statusNote = selectorBody('.status-note');
 for (const declaration of [/min-width:\s*0/, /overflow:\s*hidden/, /text-overflow:\s*ellipsis/, /white-space:\s*nowrap/]) {
   if (!declaration.test(statusNote)) {

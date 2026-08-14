@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 import { defineConfig, type Plugin } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isLoopbackRequest } from './src/devKeyGuard.ts';
+import { parseKeyFile } from './src/key-file.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 
@@ -13,7 +15,10 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 // bundle, the repo, or any transcript. Search order:
 //   1. WB_KEY_FILE env var — raw key, or a .env file
 //   2. <project>/.api-key — raw key (gitignored)
-// .env files are scanned for OPENROUTER_API_KEY first, then ANTHROPIC_API_KEY.
+//   3. ~/.config/api-keys/anthropic then openrouter — the user's common
+//      per-provider key files, kept outside any repo and shared with
+//      `jsonloupe --key-file` and other tools
+// parseKeyFile decides raw-vs-.env by content, so any filename works.
 // This middleware exists only in `npm run dev`; static deploys have no key
 // endpoint and the Ask feature stays off until a user adds their own key.
 function readKey(): string | null {
@@ -21,19 +26,14 @@ function readKey(): string | null {
     process.env.WB_KEY_FILE,
     join(root, '.api-key'),
     join(root, '.anthropic-key'),
+    join(homedir(), '.config', 'api-keys', 'anthropic'),
+    join(homedir(), '.config', 'api-keys', 'openrouter'),
   ].filter((p): p is string => !!p);
   for (const p of candidates) {
     try {
       if (!existsSync(p)) continue;
-      const txt = readFileSync(p, 'utf8');
-      if (p.endsWith('.env')) {
-        for (const name of ['OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY']) {
-          const m = txt.match(new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*["']?([^"'\\r\\n]+)`, 'm'));
-          if (m?.[1].trim()) return m[1].trim();
-        }
-      } else if (txt.trim()) {
-        return txt.trim();
-      }
+      const key = parseKeyFile(readFileSync(p, 'utf8'));
+      if (key) return key;
     } catch {
       /* try next candidate */
     }

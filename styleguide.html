@@ -140,6 +140,43 @@ SPDX-License-Identifier: MIT -->
       </div>
     </section>
 
+    <!-- The Query panel's three message slots, side by side, because their
+         whole point is that they are DIFFERENT ranks: seen one at a time they
+         all just look like coloured text. -->
+    <section>
+      <h2>status ranks — rule 15, as the Query panel uses them</h2>
+      <div class="sg-row on-chrome" style="align-items:flex-start;flex-wrap:wrap">
+        <p class="ask-verdict pass">orders present: Pass — 2 matches; expected at least one match</p>
+        <p class="ask-verdict fail">orders present: Fail — 0 matches; expected at least one match</p>
+        <p class="ask-notice">total is not in this document — did you mean totalAmount?</p>
+        <div class="ask-error">✗ Free models are unavailable on this OpenRouter account.</div>
+        <span class="sg-note">tier 2 is ink + hairline (a verdict you read before the result; a query that will run but names a field the document lacks) · tier 3 adds the soft fill and is the only one that means the step did not happen</span>
+      </div>
+    </section>
+
+    <!-- The one place two controls could compete for rule 6's single accent
+         treatment, and the demotion that stops them. -->
+    <section>
+      <h2>the pipeline card — one operation, one accent (rule 6)</h2>
+      <div class="sg-row on-chrome" style="display:block">
+        <div class="ask-pipe">
+          <div class="ask-step">
+            <label class="field ask-field"><span class="field-prefix">ask</span><input value="total amount of failed orders" spellcheck="false"></label>
+            <button class="btn-quiet">translate again</button>
+            <button class="btn-quiet ask-meta">shape only · OpenRouter free</button>
+          </div>
+          <div class="ask-step">
+            <label class="field ask-field"><span class="field-prefix">query</span><input value="$.orders[?(@.status == 'FAILED')].total | sum" spellcheck="false"></label>
+            <button class="primary"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg>run</button>
+            <button class="btn-icon btn-quiet" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+            <span class="ask-meta">local</span>
+          </div>
+          <details id="ask-disclosure"><summary>sent to model</summary></details>
+        </div>
+        <span class="sg-note">the hairline is the structure — it says these steps are ordered and belong to each other. The spent step keeps its place and stands down to quiet; the receipt is the card's last line and carries no border of its own.</span>
+      </div>
+    </section>
+
     <section>
       <h2>icons — one sprite, one stroke knob (rule 3)</h2>
       <div class="sg-row">
