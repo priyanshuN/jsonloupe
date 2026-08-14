@@ -935,6 +935,23 @@ describe('filter keeps expansion state (W3)', () => {
     expect(rows().map((r) => r.key)).toEqual(before);
   });
 
+  // "filter tree to these" replaces the tree with a derived view exactly as the
+  // search filter does, so it has to be as reversible. It was not: it took no
+  // snapshot, so there was nothing to go back to.
+  it('restores the pre-filter expansion after filtering the tree to query matches', () => {
+    parse(FIXTURE);
+    const a = rows().find((r) => r.key === 'a')!;
+    h({ type: 'toggle', id: a.id, index: a.index }); // expand $.a
+    const before = rows().map((r) => r.key);
+
+    h({ type: 'query', q: '$.b.z' });
+    h({ type: 'queryFilter' });
+    expect(rows().map((r) => r.key)).not.toEqual(before);
+
+    h({ type: 'filter', query: '' });
+    expect(rows().map((r) => r.key)).toEqual(before);
+  });
+
   it('does NOT re-snapshot on repeated filter edits (keeps the ORIGINAL expansion)', () => {
     parse(FIXTURE);
     const a = rows().find((r) => r.key === 'a')!;

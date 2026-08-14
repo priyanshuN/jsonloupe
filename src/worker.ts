@@ -1835,6 +1835,11 @@ function queryReveal(i: number): { rowIndex: number; totalRows: number } {
 
 function queryFilter(): { totalRows: number; matches: number } {
   const paths = lastQueryPaths.slice(0, FILTER_CAP);
+  // Same snapshot the search filter takes on entry, for the same reason: this
+  // replaces what the user had expanded with a derived view, and without a way
+  // back that is a one-way door. Never re-snapshot while already filtered — the
+  // current tree is the previous filter's output, not their real expansion.
+  if (!filterSnapshot) filterSnapshot = { expanded: new Set(expanded), visible: [...visible] };
   return { totalRows: rebuildVisibleFromPaths(paths), matches: paths.length };
 }
 

@@ -1935,6 +1935,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   --ic-stroke: 1.6;
   width: min(500px, calc(100vw - 24px));
   max-height: min(720px, calc(100vh - 24px));
+  /* The dialog owns the height limit and the shell flexes inside it, so exactly
+     one box scrolls — the body. Giving the shell its own copy of this
+     max-height put it and the dialog's two border pixels over the limit
+     together, and the dialog grew a second scrollbar beside the body's. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 0;
   color: var(--text);
   background: var(--bg-elevated);
@@ -1949,7 +1956,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .model-dialog-shell {
   display: flex;
   flex-direction: column;
-  max-height: min(720px, calc(100vh - 24px));
+  flex: 1;
+  min-height: 0;
 }
 .model-dialog-head {
   display: flex;

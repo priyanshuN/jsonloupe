@@ -4324,6 +4324,7 @@ const modelFreeChoice = $<HTMLInputElement>('#model-choice-free');
 const modelPaidChoice = $<HTMLInputElement>('#model-choice-paid');
 const modelChoiceNote = $('#model-choice-note');
 const modelPrivacyCredential = $('#model-privacy-credential');
+const modelKeyNote = $('#model-key-note');
 const modelKeyAdvanced = $<HTMLDetailsElement>('#model-key-advanced');
 const modelKeySummary = $<HTMLElement>('#model-key-summary');
 const modelKeyForm = $<HTMLFormElement>('#model-key-form');
@@ -4505,6 +4506,11 @@ function paintModelDialog(): void {
     ? 'remembered on this device'
     : 'this tab only';
 
+  // This paragraph is the disclosure someone reads BEFORE handing over a key,
+  // so it earns its length in the disconnected state. Once connected it is a
+  // third telling of what the privacy rows just said, inside a panel opened to
+  // do something else — so it stands down rather than padding the dialog.
+  modelKeyNote.hidden = modelConnected;
   modelKeySummary.textContent = modelConnected
     ? 'Replace or disconnect this credential'
     : 'Use API key instead';
@@ -4936,11 +4942,22 @@ function renderAskResult(res: QueryResp, preview = false): void {
       const filterBtnEl = document.createElement('button');
       filterBtnEl.textContent = 'filter tree to these';
       filterBtnEl.addEventListener('click', async () => {
-        const r = await call<{ totalRows: number }>({ type: 'queryFilter' });
+        // This replaces the tree the user had built up with a derived view, so
+        // it enters the SAME filtered state the search filter does rather than
+        // a private one: the toolbar filter lights up with the count, and
+        // pressing it puts back the expansion they came from. Without that it
+        // was a one-way door — filtered, with nothing on screen offering a way
+        // back to the document they were reading.
+        if (!filterOn) filterScrollSnapshot = treeViewport.scrollTop;
+        const r = await call<{ totalRows: number; matches: number }>({ type: 'queryFilter' });
+        filterOn = true;
+        filterBtn.classList.add('on');
+        paintFilterBtn(r.matches);
         showPane('tree');
         tree.resetSelection();
         tree.setTotal(r.totalRows);
         treeViewport.scrollTop = 0;
+        showToast(`tree filtered to ${fmtNumber(r.matches)} match${r.matches === 1 ? '' : 'es'} · press filter to clear`);
       });
       const copyBtn = document.createElement('button');
       copyBtn.textContent = 'copy values';
