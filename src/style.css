@@ -2699,6 +2699,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .run-name {
   color: var(--text);
   font-size: var(--fs-base);
+  /* min-width: a derived name is a whole first line of code now, and a flex
+     item refuses to shrink below its content without this — the ellipsis
+     below only ever fires once the span is allowed to be narrower. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2859,6 +2863,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .run-lib-name {
   color: var(--text);
   font-size: var(--fs-base);
+  /* Same shrink permission as .run-name: a never-named function's name IS its
+     first line, at full length, and must ellipsise rather than push the row. */
+  min-width: 0;
+  flex-shrink: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

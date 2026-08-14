@@ -5202,13 +5202,25 @@ function setMobileRunSurface(surface: 'source' | 'workspace'): void {
   scheduleResponsiveRefresh();
 }
 
-runEmpty.replaceChildren(
-  emptyState(
-    'run a script — the result renders here',
-    'The result is a document: it expands, scrolls and downloads like one.',
-    { pane: true },
-  ),
-);
+// The empty pane has two honest things to say and must never say the wrong
+// one: before any run it is an invitation, and after a failed run it is the
+// outcome — "nothing run yet" under a visible error would be a lie.
+function paintRunEmpty(failed: boolean): void {
+  runEmpty.replaceChildren(
+    failed
+      ? emptyState(
+        'the run failed — nothing to show',
+        'The error is above. Fix the script and run again.',
+        { pane: true },
+      )
+      : emptyState(
+        'run a script — the result renders here',
+        'The result is a document: it expands, scrolls and downloads like one.',
+        { pane: true },
+      ),
+  );
+}
+paintRunEmpty(false);
 
 // Every result action answers null once that worker is gone — leaving run mode
 // terminates it, which rejects whatever was in flight, and the pane those rows
@@ -5226,6 +5238,27 @@ async function resultCall<T>(msg: Record<string, unknown>): Promise<T | null> {
   }
 }
 
+// The result rows' acts, named once: the pointer reaches them through the
+// tree's callbacks below, and the keyboard reaches the same three directly —
+// two entrances, one behavior, exactly as the source tree has.
+function resultToggle(id: number, index: number): void {
+  void resultCall<{ totalRows: number }>({ type: 'toggle', id, index }).then((r) => {
+    if (r) resultTree.setTotal(r.totalRows);
+  });
+}
+async function resultCopyPath(id: number): Promise<void> {
+  const r = await resultCall<{ text: string }>({ type: 'nodePath', id });
+  if (!r) return;
+  await copyText(r.text);
+  showToast(r.text);
+}
+async function resultCopyValue(id: number): Promise<void> {
+  const r = await resultCall<{ text: string }>({ type: 'nodeValue', id });
+  if (!r) return;
+  await copyText(r.text);
+  showToast('value copied');
+}
+
 // The result's tree. Same component, same row-slice protocol, a second callback
 // set over a second worker — no fork, and no table or inline editing, because a
 // derived value is not a document you own (see TreeCallbacks).
@@ -5234,22 +5267,10 @@ const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'
     const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start, count });
     return r?.rows ?? [];
   },
-  onToggle: (id, index) => {
-    void resultCall<{ totalRows: number }>({ type: 'toggle', id, index }).then((r) => {
-      if (r) resultTree.setTotal(r.totalRows);
-    });
-  },
+  onToggle: resultToggle,
   onCopyKey: (key) => void copyKeyOf(key),
-  onCopyPath: (id) => {
-    void resultCall<{ text: string }>({ type: 'nodePath', id }).then((r) => {
-      if (r) void copyText(r.text).then(() => showToast(r.text));
-    });
-  },
-  onCopyValue: (id) => {
-    void resultCall<{ text: string }>({ type: 'nodeValue', id }).then((r) => {
-      if (r) void copyText(r.text).then(() => showToast('value copied'));
-    });
-  },
+  onCopyPath: (id) => void resultCopyPath(id),
+  onCopyValue: (id) => void resultCopyValue(id),
   onUnpack: (id, index) => {
     void resultCall<{ ok: boolean; totalRows: number; error?: string }>({ type: 'unpack', id, index })
       .then((r) => {
@@ -5376,10 +5397,16 @@ function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
   name.className = 'run-lib-name';
   name.textContent = rec.name;
   // No note field yet: the script's first line is what the function has to say
-  // about itself, and it is already the best one-liner available.
+  // about itself, and it is already the best one-liner available. Unless the
+  // NAME already is that first line (never named, so it was derived from the
+  // script) — then the note would print the same string twice on one row, and
+  // it stands down to whatever else it carries.
   const note = document.createElement('span');
   note.className = 'run-lib-note';
-  note.textContent = `${rec.numberMode === 'exact-text' ? 'exact text · ' : ''}${scriptChipLabel(rec.script)}`;
+  const chip = deriveScriptName(rec.script) === rec.name ? '' : scriptChipLabel(rec.script);
+  const exact = rec.numberMode === 'exact-text' ? 'exact text' : '';
+  note.textContent = [exact, chip].filter(Boolean).join(' · ');
+  note.hidden = note.textContent === '';
   open.append(name, note);
 
   const meta = document.createElement('span');
@@ -5796,12 +5823,13 @@ function markRunResultStale(): void {
   runStaleBadge.hidden = runFace === 'functions';
 }
 
-function clearRunResult(): void {
+function clearRunResult(failed = false): void {
   runResultText = '';
   runResultKind = '';
   runStaleWanted = false;
   runStaleBadge.hidden = true;
-  runResultLabel.textContent = 'nothing run yet';
+  runResultLabel.textContent = failed ? 'run failed' : 'nothing run yet';
+  paintRunEmpty(failed);
   resultTree.resetSelection();
   resultTree.setTotal(0);
   // The library is the other face of these two surfaces: while it is up, an
@@ -6032,7 +6060,7 @@ async function showResultDocument(text: string): Promise<void> {
     // — say so plainly instead of blaming the script.
     runErrorEl.textContent = `✗ the result could not be re-read: ${res.error}`;
     runErrorEl.hidden = false;
-    clearRunResult();
+    clearRunResult(true);
     return;
   }
   runResultText = text;
@@ -6056,7 +6084,7 @@ async function renderRunResult(res: RunResult): Promise<void> {
   runConsoleBody.textContent = res.logs.join('\n');
 
   if (!res.ok) {
-    clearRunResult();
+    clearRunResult(true);
     runErrorEl.textContent = `✗ ${res.error}`;
     runErrorEl.hidden = false;
     setRunStatus('');
@@ -6154,7 +6182,7 @@ async function runPickedScripts(): Promise<void> {
   if (!res.ok) {
     // Only an unreadable document gets here — every script-level failure is an
     // entry, not the batch's verdict.
-    clearRunResult();
+    clearRunResult(true);
     runErrorEl.textContent = `✗ ${res.error}`;
     runErrorEl.hidden = false;
     setRunStatus('');
@@ -6246,7 +6274,13 @@ window.addEventListener('keydown', async (e) => {
     await (redo ? doRedoUI() : doUndoUI());
     return;
   }
-  if (viewer.hidden || typing || treePane.hidden) return;
+  if (viewer.hidden || typing) return;
+  // The run result is a reading surface like any other, so the reading keys
+  // read IT while focus is inside it — j over a result row must never scroll
+  // the source tree standing behind it. Everywhere else they keep meaning the
+  // source tree, including in run mode while nothing in the result has focus.
+  const resultHasFocus = ae instanceof Node && runViewport.contains(ae);
+  if (treePane.hidden && !resultHasFocus) return;
   // Buttons and links own their Enter/arrow keys. Without this guard, pressing
   // Enter on the Tree mode button both activated the button and toggled the
   // selected JSON row. Row action buttons have the same requirement.
@@ -6254,54 +6288,58 @@ window.addEventListener('keydown', async (e) => {
     && ae.closest('button, a, select, summary, [role="button"], [role="menuitem"]') !== null;
   if (focusedControl) return;
   const treeHasFocus = ae instanceof Node && treeViewport.contains(ae);
-  const sel = tree.selectedIndex();
+  const inTree = treeHasFocus || resultHasFocus;
+  const activeTree = resultHasFocus ? resultTree : tree;
+  const toggleRow = (id: number, index: number): Promise<void> | void =>
+    resultHasFocus ? resultToggle(id, index) : doToggle(id, index);
+  const sel = activeTree.selectedIndex();
   switch (e.key) {
     case 'j':
       e.preventDefault();
-      tree.select(sel + 1);
+      activeTree.select(sel + 1);
       break;
     case 'ArrowDown':
-      if (!treeHasFocus) return;
+      if (!inTree) return;
       e.preventDefault();
-      tree.select(sel + 1);
+      activeTree.select(sel + 1);
       break;
     case 'k':
       e.preventDefault();
-      tree.select(sel - 1);
+      activeTree.select(sel - 1);
       break;
     case 'ArrowUp':
-      if (!treeHasFocus) return;
+      if (!inTree) return;
       e.preventDefault();
-      tree.select(sel - 1);
+      activeTree.select(sel - 1);
       break;
     case 'ArrowRight': {
-      if (!treeHasFocus) return;
+      if (!inTree) return;
       e.preventDefault();
-      const r = tree.getSelected();
-      if (r?.hasChildren && !r.expanded) await doToggle(r.id, r.index);
+      const r = activeTree.getSelected();
+      if (r?.hasChildren && !r.expanded) await toggleRow(r.id, r.index);
       break;
     }
     case 'ArrowLeft': {
-      if (!treeHasFocus) return;
+      if (!inTree) return;
       e.preventDefault();
-      const r = tree.getSelected();
-      if (r?.expanded) await doToggle(r.id, r.index);
+      const r = activeTree.getSelected();
+      if (r?.expanded) await toggleRow(r.id, r.index);
       break;
     }
     case 'Enter': {
-      if (!treeHasFocus) return;
-      const r = tree.getSelected();
-      if (r?.hasChildren) await doToggle(r.id, r.index);
+      if (!inTree) return;
+      const r = activeTree.getSelected();
+      if (r?.hasChildren) await toggleRow(r.id, r.index);
       break;
     }
     case 'y': {
-      const r = tree.getSelected();
-      if (r) await copyPathOf(r.id);
+      const r = activeTree.getSelected();
+      if (r) await (resultHasFocus ? resultCopyPath(r.id) : copyPathOf(r.id));
       break;
     }
     case 'c': {
-      const r = tree.getSelected();
-      if (r) await copyValueOf(r.id);
+      const r = activeTree.getSelected();
+      if (r) await (resultHasFocus ? resultCopyValue(r.id) : copyValueOf(r.id));
       break;
     }
   }

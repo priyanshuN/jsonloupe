@@ -19,9 +19,13 @@ export function scriptChipLabel(script: string): string {
 // something, and its first line is the only thing it can be called. A leading
 // comment marker is stripped because a script that starts `// slow orders` was
 // the closest thing to a name the old chips could hold — that IS the name the
-// user wrote, minus the syntax.
+// user wrote, minus the syntax. The WHOLE first line, never the chip's
+// ellipsised cut: this string becomes the function's stored name, and from
+// there a batch report's key and a playbook entry — a `…` has no business
+// being data. Display surfaces truncate for themselves.
 export function deriveScriptName(script: string): string {
-  const line = scriptChipLabel(script).replace(/^(\/\/+|\/\*+|#)\s*/, '').replace(/\s*\*\/$/, '');
+  const first = script.trim().split('\n', 1)[0].trim();
+  const line = first.replace(/^(\/\/+|\/\*+|#)\s*/, '').replace(/\s*\*\/$/, '');
   return line.trim() || 'untitled';
 }
 
