@@ -2121,6 +2121,12 @@ async function openText(
   // transient). The stored raw text stays the original bytes; the badge opens the
   // code view's raw-source toggle so the user can see exactly what they pasted.
   repairBadge.hidden = !res.repaired;
+  // The badge names WHAT was repaired when the byte diff proves it; when any
+  // edit resisted classification the summary is null and the generic wording
+  // stands — a guessed itemization would be worse than none.
+  repairBadge.title = res.repaired && res.repairSummary
+    ? `Auto-repaired: ${res.repairSummary} — click to see the original bytes you pasted`
+    : 'Input was malformed and auto-repaired — click to see the original bytes you pasted';
   payloadBadge.hidden = !provenance;
   // Only a payload decoded out of another stored document can be traced back.
   originalBtn.hidden = !provenance?.sourceDocId;
@@ -2128,7 +2134,11 @@ async function openText(
     payloadBadge.textContent = `decoded · ${provenance.format}`;
     payloadBadge.title = `${provenance.sourceTitle}${provenance.sourcePath ? ` · ${provenance.sourcePath}` : ''}\n${provenanceTrace(provenance)}`;
   }
-  if (res.repaired) showToast('input was malformed — auto-repaired');
+  if (res.repaired) {
+    showToast(
+      res.repairSummary ? `auto-repaired: ${res.repairSummary}` : 'input was malformed — auto-repaired',
+    );
+  }
   parseError.hidden = true;
   searchPanel.hidden = true;
   searchBox.value = '';
