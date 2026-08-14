@@ -360,8 +360,13 @@ describe('interactive UI regression contracts', () => {
   it('scopes structural tree keys to the tree instead of focused controls', () => {
     expect(mainSource).toContain("closest('button, a, select, summary, [role=\"button\"], [role=\"menuitem\"]')");
     expect(mainSource).toContain('const treeHasFocus = ae instanceof Node && treeViewport.contains(ae)');
+    // Two reading surfaces answer to the same keys now — the run result is a
+    // tree like the document's — so the guard is their union, and each key
+    // still refuses to fire while neither tree holds focus.
+    expect(mainSource).toContain('const resultHasFocus = ae instanceof Node && runViewport.contains(ae)');
+    expect(mainSource).toContain('const inTree = treeHasFocus || resultHasFocus');
     for (const key of ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Enter']) {
-      expect(mainSource).toMatch(new RegExp(`case '${key}':[\\s\\S]*?if \\(!treeHasFocus\\) return;`));
+      expect(mainSource).toMatch(new RegExp(`case '${key}':[\\s\\S]*?if \\(!inTree\\) return;`));
     }
   });
 

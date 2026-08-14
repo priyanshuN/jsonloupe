@@ -51,6 +51,13 @@ describe('deriveScriptName', () => {
     expect(deriveScriptName('data.orders.length')).toBe('data.orders.length');
   });
 
+  it('keeps a long first line whole — the name becomes a report key, so no ellipsis', () => {
+    const long = 'data.tasks.filter(t => t.status === "FAILED").length';
+
+    expect(deriveScriptName(long)).toBe(long);
+    expect(deriveScriptName(long)).not.toContain('…');
+  });
+
   it('never answers empty — a library row has to say something', () => {
     expect(deriveScriptName('  \n ')).toBe('untitled');
     expect(deriveScriptName('//')).toBe('untitled');
