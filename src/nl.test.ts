@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSentPayload,
   providerForApiKey,
-  setApiKey,
   translateToQuery,
   type SentPayload,
 } from './nl';
@@ -67,65 +66,6 @@ describe('buildSentPayload', () => {
     const check: SentPayload = a;
     expect(check.question).toBe(QUESTION);
     expect(check.schema).toBe(SCHEMA);
-  });
-});
-
-describe('API key storage', () => {
-  it('stores a supplied key and removes an empty one', () => {
-    const setItem = vi.fn();
-    const removeItem = vi.fn();
-    vi.stubGlobal('localStorage', { getItem: vi.fn(), setItem, removeItem });
-
-    setApiKey('sk-or-local');
-    setApiKey('');
-
-    expect(setItem).toHaveBeenCalledWith('wb-api-key', 'sk-or-local');
-    expect(removeItem).toHaveBeenCalledWith('wb-api-key');
-  });
-
-  it('prefers the browser override without making a request', async () => {
-    vi.resetModules();
-    vi.stubGlobal('localStorage', { getItem: vi.fn(() => 'sk-ant-local') });
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    const { getApiKey } = await import('./nl');
-
-    await expect(getApiKey()).resolves.toBe('sk-ant-local');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('loads, trims, and caches the development key file', async () => {
-    vi.resetModules();
-    vi.stubGlobal('localStorage', { getItem: vi.fn(() => null) });
-    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => '  sk-or-file\n' }));
-    vi.stubGlobal('fetch', fetchMock);
-    const { getApiKey } = await import('./nl');
-
-    await expect(getApiKey()).resolves.toBe('sk-or-file');
-    await expect(getApiKey()).resolves.toBe('sk-or-file');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('/__api-key');
-  });
-
-  it.each([
-    ['an empty file', { ok: true, text: async () => '  ' }],
-    ['a missing endpoint', { ok: false, text: async () => 'missing' }],
-  ])('treats %s as no configured key', async (_name, response) => {
-    vi.resetModules();
-    vi.stubGlobal('localStorage', { getItem: vi.fn(() => null) });
-    vi.stubGlobal('fetch', vi.fn(async () => response));
-    const { getApiKey } = await import('./nl');
-
-    await expect(getApiKey()).resolves.toBeNull();
-  });
-
-  it('treats an unavailable development endpoint as no configured key', async () => {
-    vi.resetModules();
-    vi.stubGlobal('localStorage', { getItem: vi.fn(() => null) });
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
-    const { getApiKey } = await import('./nl');
-
-    await expect(getApiKey()).resolves.toBeNull();
   });
 });
 

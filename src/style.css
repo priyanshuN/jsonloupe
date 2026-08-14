@@ -664,7 +664,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
      Keep this an integer number of device px; fractions render as AA blur,
      the same disease rule 22 kills in type. THIS NUMBER IS DERIVED — it is
      16 / --icon, so it moves every time --icon does. */
-  stroke-width: 1.067;
+  stroke-width: var(--ic-stroke, 1.067);
 }
 /* An icon centres on the control's box, not on the text baseline (rule 3), so
    any button carrying one becomes a flex row. --gap-1 between icon and label:
@@ -1927,6 +1927,139 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .mode-switch button.on:hover { background: var(--bg-hover); }
 
+/* ---------- model connection ---------- */
+
+#model-dialog {
+  /* Tabler uses a 24-unit viewBox while jsonloupe's native sprite uses 16.
+     This keeps the rendered physical stroke at the same one-pixel weight. */
+  --ic-stroke: 1.6;
+  width: min(500px, calc(100vw - 24px));
+  max-height: min(720px, calc(100vh - 24px));
+  padding: 0;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: calc(var(--r) + var(--r-xs));
+  box-shadow: var(--shadow);
+}
+#model-dialog::backdrop {
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
+  backdrop-filter: blur(2px);
+}
+.model-dialog-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: min(720px, calc(100vh - 24px));
+}
+.model-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px 18px var(--gap-3);
+}
+.model-dialog-head > div { min-width: 0; flex: 1; }
+.model-dialog-head h2 { margin: 0; line-height: 1.3; }
+.model-dialog-head p {
+  margin: 5px 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+  line-height: 1.45;
+}
+#model-dialog-close {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-dim);
+}
+.model-dialog-body {
+  padding: var(--gap-1) 18px 18px;
+  overflow-y: auto;
+}
+.model-connect {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+}
+.model-connect-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-2);
+  font-weight: 700;
+}
+.model-recommended {
+  padding: 1px 6px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  font: 400 var(--fs-chip) var(--mono);
+}
+.model-connect-note,
+#model-key-note {
+  margin: var(--gap-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  line-height: 1.45;
+}
+.model-connect-note {
+  text-align: center;
+}
+.model-privacy {
+  margin: 18px 0 var(--gap-2);
+  border-block: 1px solid var(--border);
+  padding: var(--gap-2) 0;
+}
+.model-privacy > div {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--gap-3);
+  align-items: center;
+  min-height: 52px;
+  padding: var(--gap-2) var(--gap-3);
+}
+.model-privacy dt { color: var(--text); }
+.model-privacy dd {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+}
+#model-key-advanced {
+  padding: var(--gap-2) 0 0;
+}
+#model-key-advanced summary {
+  width: fit-content;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+#model-key-advanced[open] summary { color: var(--text); }
+#model-key-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  margin-top: var(--gap-3);
+}
+#model-key-input { width: 100%; }
+.model-remember {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  width: fit-content;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+}
+.model-key-actions { display: flex; align-items: center; gap: var(--gap-2); }
+.model-dialog-foot {
+  margin: 0;
+  padding: var(--gap-3) 18px;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-chip);
+  line-height: 1.45;
+}
+
 /* ---------- baseline picker (shell shared with the shortcut sheet) ---------- */
 
 #baseline-picker,
@@ -2399,7 +2532,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* Rule 14 gives these the ground, border, inset, type and ring; the comment
    that used to live here — "a field on chrome takes the canvas" — is now the
    rule itself, and it holds on every surface rather than only this one. */
-#ask-box, #ask-key-input { flex: 1; }
+#ask-box, #model-key-input { flex: 1; }
 /* The measure is the question, not the window. flex:1 with no cap gave this
    field ~131 characters on a wide screen for a natural-language question that
    is 40 to 80 — so the sentence you are typing trails off across a metre of
@@ -2413,14 +2546,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   font-family: var(--sans);
   font-size: var(--fs-chip);
 }
-#ask-key { flex-shrink: 0; }
-#ask-key-note {
-  margin: 0;
-  max-width: 92ch;
-  color: var(--text-dim);
-  font-size: var(--fs-chip);
-  line-height: 1.45;
-}
+#ask-model { flex-shrink: 0; }
 #ask-status, #run-status { color: var(--text-dim); font-size: var(--fs-body); font-style: italic; }
 #ask-query-line {
   display: flex;
@@ -4743,13 +4869,12 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
     flex-wrap: wrap;
   }
   #ask-box,
-  #ask-key-input {
+  #model-key-input {
     min-width: 0;
     max-width: none;
   }
   #ask-box { flex: 1 1 220px; }
-  #ask-key { margin-left: 0; }
-  #ask-key-row > #ask-key-input { flex-basis: 100%; }
+  #ask-model { margin-left: 0; }
   #ask-query-edit { flex-basis: 220px; }
   #ask-result {
     max-width: 100%;

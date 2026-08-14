@@ -4,36 +4,15 @@
 // and the document's SHAPE (field names, types, array lengths) are sent —
 // never values. The returned query string executes locally in the worker.
 //
-// Key resolution: localStorage override first, then the dev server's
-// /__api-key endpoint (which reads a local file — see vite.config.ts).
+// Key resolution and OpenRouter authorization live in model-auth.ts so the
+// credential lifecycle stays separate from document/schema processing.
 // OpenRouter keys (sk-or-…) go to OpenRouter's OpenAI-compatible endpoint;
 // Anthropic keys (sk-ant-…) go direct to the Anthropic API.
 
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from './query-grammar';
 
-const KEY_STORAGE = 'wb-api-key';
 const OPENROUTER_MODEL = 'anthropic/claude-haiku-4.5';
 const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
-
-let fileKey: string | null | undefined;
-
-export async function getApiKey(): Promise<string | null> {
-  const ls = localStorage.getItem(KEY_STORAGE);
-  if (ls) return ls;
-  if (fileKey !== undefined) return fileKey;
-  try {
-    const r = await fetch('/__api-key');
-    fileKey = r.ok ? (await r.text()).trim() || null : null;
-  } catch {
-    fileKey = null;
-  }
-  return fileKey;
-}
-
-export function setApiKey(key: string): void {
-  if (key) localStorage.setItem(KEY_STORAGE, key);
-  else localStorage.removeItem(KEY_STORAGE);
-}
 
 const GRAMMAR = `You translate a question about a JSON document into a single query in this grammar (a JSONPath subset with aggregation pipes):
 

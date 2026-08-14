@@ -127,6 +127,26 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 3.5v9" /><path d="M3.5 8h9" />
     </symbol>
+    <!-- Tabler Icons 3.46.0, MIT. These four 24-unit source glyphs are used
+         together in the model-connection surface; keeping their exact paths
+         preserves one real library style instead of approximating the mock. -->
+    <symbol id="i-tabler-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 15l6 -6" />
+      <path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464" />
+      <path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463" />
+    </symbol>
+    <symbol id="i-tabler-file-description" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" />
+      <path d="M9 17h6" /><path d="M9 13h6" />
+    </symbol>
+    <symbol id="i-tabler-message-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1" />
+    </symbol>
+    <symbol id="i-tabler-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0" />
+      <path d="M15 9h.01" />
+    </symbol>
   </svg>
   <div id="app">
     <!-- On compact screens this is the one persistent shell row. The sidebar
@@ -332,10 +352,10 @@ SPDX-License-Identifier: MIT -->
         <section class="lp-band lp-privacy" id="privacy">
           <div>
             <h2 class="lp-h2 lp-h2-sm">Your documents never leave your machine</h2>
-            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>English query translation</strong> stays off until you add your own API key, and even then it sends your question plus document shape — field names, types, and array lengths — never values. After you press Translate, “sent to model” records the exact request.</p>
+            <p class="lp-body lp-body-wide">Parsing, diffing and querying run in a web worker; documents are stored in IndexedDB on your own disk. There is no server to send them to. <strong>English query translation</strong> stays off until you connect OpenRouter or add your own API key, and even then it sends your question plus document shape — field names, types, and array lengths — never values. After you press Translate, “sent to model” records the exact request.</p>
           </div>
           <div class="lp-facts">
-            <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">3 · all opt-in translation</span></div>
+            <div class="lp-fact"><span>fetch calls in app</span><span class="lp-fact-ok">4 · all opt-in connection / translation</span></div>
             <div class="lp-fact"><span>telemetry</span><span class="lp-fact-ok">none</span></div>
             <div class="lp-fact"><span>license</span><span class="lp-fact-accent">MIT</span></div>
             <div class="lp-fact"><span>typescript</span><span class="lp-fact-accent">strict</span></div>
@@ -544,19 +564,9 @@ SPDX-License-Identifier: MIT -->
             <input id="ask-box" placeholder="$.orders[?(@.status == 'FAILED')]" spellcheck="false">
             <button id="ask-run" class="primary" title="Run this query locally">run query</button>
             <span id="query-privacy" title="This query runs locally in the worker; nothing is sent">local</span>
-            <button id="ask-key" class="btn-quiet" title="Set an OpenRouter or Anthropic API key (stored in this browser only)"
-              aria-describedby="ask-key-note" hidden>model key</button>
+            <button id="ask-model" class="btn-quiet" title="Manage the connected model" hidden>model</button>
             <button id="ask-close" class="btn-icon btn-quiet" type="button" title="Close Query" aria-label="Close Query">×</button>
           </div>
-          <p id="ask-key-note" hidden>English → query sends your question and document shape (field names, types and array lengths — never values) to OpenRouter or Anthropic. Direct $.queries stay local. Your key stays in this browser; save an empty field to remove the browser key.</p>
-          <!-- A real form: satisfies Chrome's password-field containment warning
-               and makes Enter save. autocomplete=off because this is an API key,
-               not a login — password managers must not offer to save/autofill. -->
-          <form class="ask-row" id="ask-key-row" hidden>
-            <input id="ask-key-input" type="password" placeholder="sk-or-… / sk-ant-…" spellcheck="false" autocomplete="off"
-              aria-describedby="ask-key-note">
-            <button id="ask-key-save" type="submit" class="primary">save key</button>
-          </form>
           <div id="ask-query-line" hidden>
             <span class="standing-label">generated query</span>
             <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
@@ -955,6 +965,57 @@ SPDX-License-Identifier: MIT -->
   </div>
   <div id="toast" hidden></div>
   <div id="drop-overlay" hidden><span>Drop JSON / Zstd payload</span></div>
+  <dialog id="model-dialog" aria-labelledby="model-dialog-title">
+    <div class="model-dialog-shell">
+      <div class="model-dialog-head">
+        <div>
+          <h2 id="model-dialog-title">Connect a model</h2>
+          <p>Authorize separately from your document. Nothing is sent until you translate.</p>
+        </div>
+        <button id="model-dialog-close" class="btn-icon btn-quiet" type="button" title="Close" aria-label="Close">×</button>
+      </div>
+      <div class="model-dialog-body">
+        <button id="openrouter-connect" class="primary model-connect" type="button">
+          <span class="model-connect-label"><svg class="ic" aria-hidden="true"><use href="#i-tabler-link"></use></svg><span id="openrouter-connect-text">Continue with OpenRouter</span></span>
+          <span class="model-recommended">Recommended</span>
+        </button>
+        <p class="model-connect-note">Authorize on OpenRouter. No API key to paste.</p>
+
+        <dl class="model-privacy" aria-label="Model connection privacy">
+          <div>
+            <svg class="ic" aria-hidden="true"><use href="#i-tabler-file-description"></use></svg>
+            <div><dt>Document values</dt><dd>never sent</dd></div>
+          </div>
+          <div>
+            <svg class="ic" aria-hidden="true"><use href="#i-tabler-message-circle"></use></svg>
+            <div><dt>Question + shape</dt><dd>sent when you translate</dd></div>
+          </div>
+          <div>
+            <svg class="ic" aria-hidden="true"><use href="#i-tabler-key"></use></svg>
+            <div><dt>Credential</dt><dd id="model-credential-scope">this tab only</dd></div>
+          </div>
+        </dl>
+
+        <details id="model-key-advanced">
+          <summary>Use API key instead</summary>
+          <p id="model-key-note">English → query sends your question and document shape (field names, types and array lengths — never values) to OpenRouter or Anthropic. Direct $.queries stay local.</p>
+          <!-- A real form contains the password field and makes Enter save.
+               autocomplete=off because this is an API key, not a login. -->
+          <form id="model-key-form">
+            <input id="model-key-input" type="password" placeholder="sk-or-… / sk-ant-…" spellcheck="false" autocomplete="off"
+              aria-describedby="model-key-note">
+            <label class="model-remember"><input id="model-key-remember" class="chk" type="checkbox">remember on this device</label>
+            <div class="model-key-actions">
+              <button id="model-key-clear" class="btn-quiet" type="button">disconnect</button>
+              <span class="spacer"></span>
+              <button id="model-key-save" class="primary" type="submit">save key</button>
+            </div>
+          </form>
+        </details>
+      </div>
+      <p class="model-dialog-foot">Keys stay in this tab unless you choose Remember on this device.</p>
+    </div>
+  </dialog>
   <dialog id="baseline-picker" aria-labelledby="baseline-picker-title">
     <form method="dialog" class="baseline-dialog">
       <div class="baseline-head">
