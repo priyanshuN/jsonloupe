@@ -554,58 +554,128 @@ SPDX-License-Identifier: MIT -->
           <button type="button" data-mobile-run="source" aria-pressed="false">source</button>
           <button type="button" data-mobile-run="workspace" class="on" aria-pressed="true">workspace</button>
         </div>
+        <!-- Three zones — ASK, QUERY, ANSWER — where the first two are ONE
+             bordered card because they are one operation with an order, and
+             exactly one accent control exists at any moment. The two input
+             modes are pipelines of different LENGTH, not two labels on a row:
+             a JSON query is the single ⟨query⟩ step, English adds an ⟨ask⟩
+             step above it. There is one query field for both, so the live
+             preview, the copy glyph and `run` all act on the same string. -->
         <div id="ask-panel" aria-busy="false" hidden>
-          <div class="ask-row ask-command-row">
-            <strong class="ask-command-title">Query</strong>
-            <select id="ask-mode" aria-label="Query input mode">
-              <option value="query">JSON query</option>
-              <option value="english">English → query</option>
-            </select>
-            <input id="ask-box" placeholder="$.orders[?(@.status == 'FAILED')]" spellcheck="false">
-            <button id="ask-run" class="primary" title="Run this query locally">run query</button>
-            <span id="query-privacy" title="This query runs locally in the worker; nothing is sent">local</span>
-            <button id="ask-model" class="btn-quiet" title="Manage the connected model" hidden>model</button>
+
+          <!-- HEAD — identity, mode, the kept rail, close. One row, every
+               state. Kept queries and checks ride here rather than at the
+               panel's foot: they are visible at rest and never move when a
+               result arrives. -->
+          <div class="ask-head">
+            <strong class="ask-title">Query</strong>
+            <!-- Two always-relevant destinations is a segmented control in this
+                 app's own vocabulary (#run-src-switch, #theme-switch), not a
+                 dropdown: it shows both at once and drops an 18ch box with a
+                 caret off the busiest row. -->
+            <div class="mode-switch" id="ask-mode" role="group" aria-label="Query input mode">
+              <button type="button" data-ask-mode="query" class="on" aria-pressed="true">JSON query</button>
+              <button type="button" data-ask-mode="english" aria-pressed="false">English</button>
+            </div>
+            <!-- Checks first (they carry state), then saved queries. One
+                 scrolling line, so a long history never wraps `×` onto a row of
+                 its own. main.ts hides it when both lists are empty. -->
+            <div class="ask-kept" id="ask-kept" hidden>
+              <div id="ask-checks"></div>
+              <div id="ask-saved"></div>
+            </div>
             <button id="ask-close" class="btn-icon btn-quiet" type="button" title="Close Query" aria-label="Close Query">×</button>
           </div>
-          <div id="ask-query-line" hidden>
-            <span class="standing-label">generated query</span>
-            <input id="ask-query-edit" spellcheck="false" placeholder="query — edit to preview live, Enter to run">
-            <!-- btn-mini on both: this row is rule 1's mini tier, but .btn-icon
-                 sets width AND height from --ctl-h, which the row's min-height
-                 could never override — so the copy glyph had been standing a
-                 full regular-size square in a mini row all along. -->
-            <button id="ask-query-run" class="primary" title="Run this generated query locally">run locally</button>
-            <button id="ask-query-copy" class="btn-icon btn-mini btn-quiet" title="Copy this query" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+
+          <!-- THE PIPELINE — one card, one or two steps, separated by the
+               hairline that says they are ordered and belong to each other. -->
+          <div class="ask-pipe">
+
+            <!-- step 1 · English mode only -->
+            <div class="ask-step" id="ask-ask-step" hidden>
+              <!-- Rule 14: the standing label goes INSIDE the shell, and the
+                   <label> gives #ask-box the accessible name it never had. -->
+              <label class="field ask-field">
+                <span class="field-prefix">ask</span>
+                <input id="ask-box" spellcheck="false" placeholder="e.g. find failed orders placed today">
+              </label>
+              <button id="ask-run" class="primary" type="button" title="Translate this question into a JSON query">translate</button>
+              <!-- The connection fact is not a control for this question. It
+                   rides at the end of the step that SENDS, in the quiet rank,
+                   and says the whole sentence in its title instead of leaving a
+                   bare adverb ("shape only") on the row. -->
+              <button id="ask-model" class="btn-quiet ask-meta" type="button"
+                title="Only field names, types and array lengths are sent — click to manage the connection">shape only</button>
+            </div>
+
+            <!-- step 2 · the query that will actually run. Present in BOTH
+                 modes: this is the field the live preview previews, the copy
+                 glyph copies and `run` runs. -->
+            <div class="ask-step" id="ask-query-step">
+              <label class="field ask-field">
+                <span class="field-prefix">query</span>
+                <input id="ask-query-edit" spellcheck="false" placeholder="$.orders[?(@.status == 'FAILED')]">
+              </label>
+              <!-- Rule 10: a triangle is play, the drawing already exists. The
+                   word survives beside it because `run` is the panel's verb;
+                   `locally` moves to the tag on the same row, which is where
+                   that fact belongs. -->
+              <button id="ask-query-run" class="primary" type="button" title="Run this query locally"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg><span id="ask-query-run-label">run</span></button>
+              <button id="ask-query-copy" class="btn-icon btn-quiet" type="button" title="Copy this query" aria-label="Copy this query"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+              <!-- A fact about this row, permanently true, so it gets no
+                   affordance at all (rule 16's static half). -->
+              <span class="ask-meta" id="query-privacy" title="This query runs locally in the worker; nothing is sent">local</span>
+            </div>
+
+            <!-- Rule 15 tier 2 — the generated query names a field this
+                 document does not have, or its shape was too deep to check.
+                 Notice it, then proceed: the query still runs. -->
+            <p id="ask-notice" class="ask-notice" aria-live="polite" hidden></p>
+            <!-- Rule 15 tier 3 — the failure of the step above it, inside the
+                 card that owns that step rather than two bands below it. -->
+            <div id="ask-fail" class="ask-error" hidden></div>
+
+            <!-- The receipt: last line of the card that owns it, quiet, no
+                 border of its own. Never rendered in JSON-query mode — the
+                 `local` tag above is the whole statement there. -->
+            <details id="ask-disclosure" hidden>
+              <summary>sent to model</summary>
+              <div id="ask-disclosure-body"></div>
+            </details>
           </div>
-          <details id="ask-disclosure" hidden>
-            <summary>sent to model</summary>
-            <div id="ask-disclosure-body"></div>
-          </details>
-          <div id="ask-status" aria-live="polite" hidden></div>
-          <div id="ask-result" hidden></div>
-          <div id="ask-save-actions" class="ask-actions" hidden>
-            <button id="ask-save-query" type="button">save query</button>
-            <button id="ask-save-check" type="button">save as check</button>
-          </div>
-          <div id="check-editor" hidden>
-            <input id="check-name" type="text" placeholder="check name" aria-label="Check name">
-            <select id="check-expectation" aria-label="Pass condition">
-              <option value="no-matches">pass when no matches are found</option>
-              <option value="at-least-one">pass when at least one match is found</option>
-              <option value="exact-count">pass when exactly this many matches are found</option>
-            </select>
-            <input id="check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count" hidden>
-            <span id="check-preview" aria-live="polite"></span>
-            <button id="check-save" type="button" class="primary">save check</button>
-            <button id="check-cancel" type="button" class="btn-quiet">cancel</button>
-          </div>
-          <div class="ask-kept" id="ask-saved-wrap" hidden>
-            <span class="standing-label">saved queries</span>
-            <div id="ask-saved"></div>
-          </div>
-          <div class="ask-kept" id="ask-checks-wrap" hidden>
-            <span class="standing-label">checks</span>
-            <div id="ask-checks"></div>
+
+          <!-- ANSWER — the panel's payload. -->
+          <div class="ask-answer" id="ask-answer" hidden>
+            <!-- Rule 15 tier 2: the ONE sentence this panel prints that no
+                 control on screen already says. -->
+            <p id="ask-verdict" class="ask-verdict" aria-live="polite" hidden></p>
+
+            <!-- One header line carries the count, the result's own actions and
+                 the two keep actions — three bands become one. -->
+            <div class="ask-answer-head">
+              <span id="ask-summary" class="ask-summary"></span>
+              <span class="spacer"></span>
+              <div id="ask-result-actions" class="ask-answer-actions"></div>
+              <button id="ask-save-query" class="btn-quiet" type="button">save query</button>
+              <button id="ask-save-check" class="btn-quiet" type="button">save as check</button>
+            </div>
+
+            <!-- Directly under the button that opens it, so `save check` is
+                 never below the panel's scroll fold. -->
+            <div id="check-editor" hidden>
+              <input id="check-name" type="text" placeholder="check name" aria-label="Check name">
+              <select id="check-expectation" aria-label="Pass condition">
+                <option value="no-matches">pass when no matches are found</option>
+                <option value="at-least-one">pass when at least one match is found</option>
+                <option value="exact-count">pass when exactly this many matches are found</option>
+              </select>
+              <input id="check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count" hidden>
+              <span id="check-preview" aria-live="polite"></span>
+              <button id="check-save" type="button" class="primary">save check</button>
+              <button id="check-cancel" type="button" class="btn-quiet">cancel</button>
+            </div>
+
+            <div id="ask-result"></div>
           </div>
         </div>
         <div id="search-panel" hidden></div>

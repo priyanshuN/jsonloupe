@@ -203,6 +203,14 @@
        mapping, not new colour. Hue alone does not carry rank: a successful
        budget check and a failed decode drawn at the same strength are the
        same device, and the reader has to know the domain to tell them apart.
+       The named tier-2 recipes (.ask-verdict, .ask-notice, .run-remark) are
+       lint-enforced to carry the hairline and to stay off the -soft fills, so
+       the two ranks cannot quietly converge. And a tier is a SLOT, not a
+       sentence the panel narrates: #ask-status printed "query ready — review
+       it, then run locally" beside a button reading `run`, then went stale
+       after the run and told you to do what you had just done. A status line
+       that reads a control back to you is deleted, not restyled — what stays
+       is what no control on screen already says.
    16. The inline pill has TWO SHAPES, split by whether clicking does anything.
        STATIC TAG — 4px radius, --bg-inset, no border: byte weights, count
        badges. It is a label, so it gets no affordance. ACTIONABLE CHIP —
@@ -287,7 +295,13 @@
        point of this rule: the ramp is not bookkeeping, it is the thing that
        makes a global type decision cheap enough to actually make.
        Landing/spec display sizes (17-58px)
-       stay literal under rule 22's exception. Letter-spacing belongs to the
+       stay literal under rule 22's exception — and that exception is SCOPED TO
+       THEIR SELECTORS (2026-08-14). An unscoped size allowlist is a licence any
+       rule in the file can pick up: `.ask-value` set a control-strip headline
+       at 26px and the linter waved it through, because 26 is on the landing's
+       ladder. One workbench selector is named in the linter as an exception and
+       stays named: #drop-overlay is a full-viewport moment carrying one line.
+       Letter-spacing belongs to the
        two uppercase label RANKS, not to individual selectors. The spacing
        grid is --gap-1..4 (4/8/12/16): a literal that RESTATES a gap value is
        a lint error; an off-grid literal is legal but is an OPTICAL decision —

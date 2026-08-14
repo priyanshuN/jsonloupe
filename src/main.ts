@@ -4303,10 +4303,20 @@ type QueryResp =
 
 const askPanel = $('#ask-panel');
 const askBox = $<HTMLInputElement>('#ask-box');
-const askMode = $<HTMLSelectElement>('#ask-mode');
+// The mode control is a segmented switch, like #run-src-switch and
+// #theme-switch: two always-relevant destinations, both visible at once. Its
+// value lives in `askModeValue` rather than on the element.
+type AskMode = 'query' | 'english';
+const askModeSwitch = $('#ask-mode');
+const askModeButtons = Array.from(
+  askModeSwitch.querySelectorAll<HTMLButtonElement>('button[data-ask-mode]'),
+);
+let askModeValue: AskMode = 'query';
+const askEnglish = (): boolean => askModeValue === 'english';
+const askAskStep = $('#ask-ask-step');
+const askQueryStep = $('#ask-query-step');
 const askRunBtn = $<HTMLButtonElement>('#ask-run');
 const askCloseBtn = $<HTMLButtonElement>('#ask-close');
-const queryPrivacy = $('#query-privacy');
 const askModelButton = $<HTMLButtonElement>('#ask-model');
 const modelDialog = $<HTMLDialogElement>('#model-dialog');
 const modelDialogClose = $<HTMLButtonElement>('#model-dialog-close');
@@ -4335,19 +4345,22 @@ const modelKeyFileInput = $<HTMLInputElement>('#model-key-file-input');
 const modelKeyRemember = $<HTMLInputElement>('#model-key-remember');
 const modelKeyClear = $<HTMLButtonElement>('#model-key-clear');
 const modelCredentialScope = $('#model-credential-scope');
-const askStatus = $('#ask-status');
+const askNotice = $('#ask-notice');
+const askFail = $('#ask-fail');
+const askVerdict = $('#ask-verdict');
+const askAnswer = $('#ask-answer');
+const askSummary = $('#ask-summary');
+const askResultActions = $('#ask-result-actions');
 const askResult = $('#ask-result');
-const askQueryLine = $('#ask-query-line');
 const askQueryEdit = $<HTMLInputElement>('#ask-query-edit');
 const askQueryRun = $<HTMLButtonElement>('#ask-query-run');
+const askQueryRunLabel = $('#ask-query-run-label');
 const askQueryCopy = $('#ask-query-copy');
 const askDisclosure = $<HTMLDetailsElement>('#ask-disclosure');
 const askDisclosureBody = $('#ask-disclosure-body');
+const askKept = $('#ask-kept');
 const askSaved = $('#ask-saved');
-const askSavedWrap = $('#ask-saved-wrap');
 const askChecks = $('#ask-checks');
-const askChecksWrap = $('#ask-checks-wrap');
-const askSaveActions = $('#ask-save-actions');
 const askSaveQuery = $<HTMLButtonElement>('#ask-save-query');
 const askSaveCheck = $<HTMLButtonElement>('#ask-save-check');
 const checkEditor = $('#check-editor');
@@ -4373,6 +4386,9 @@ let askOrigin: { kind: 'english'; question: string } | { kind: 'direct' } | null
 let askGeneration = 0;
 let askAbort: AbortController | null = null;
 let askBusy = false;
+// Which step of the pipeline is currently working, so the busy label lands on
+// the control that is doing it rather than on the panel.
+let askBusyStep: 'ask' | 'query' = 'query';
 let modelConnected = false;
 let modelProvider: 'anthropic' | 'openrouter' | null = null;
 // The last FOUR characters and nothing more. Enough to tell two credentials
@@ -4385,6 +4401,10 @@ let modelKeyEntry: 'paste' | 'file' = 'paste';
 let lastCommittedQuery = '';
 let lastCommittedResult: QueryResp | null = null;
 let runningCheck: SavedCheck | null = null;
+// The kept rail is one row holding two lists; it stands down only when BOTH are
+// empty, so each renderer records its own count rather than its own wrapper.
+let keptQueryCount = 0;
+let keptCheckCount = 0;
 const checkRuns = new Map<string, { pass: boolean; summary: string }>();
 const OPENROUTER_MODEL_STORAGE = 'wb-openrouter-model';
 let openRouterModelMemory: OpenRouterModel = OPENROUTER_FREE_MODEL;
@@ -4411,23 +4431,68 @@ function paintOpenRouterModelChoice(): void {
   modelPaidChoice.checked = model === OPENROUTER_PAID_MODEL;
 }
 
+/**
+ * The panel's one layout decision, in one place: how long is the pipeline, and
+ * which of its steps is the next one.
+ *
+ * JSON-query mode is a single ⟨query⟩ step. English adds an ⟨ask⟩ step above
+ * it, and that step's ⟨query⟩ only appears once a translation exists — there is
+ * nothing to review and nothing to run before then.
+ *
+ * THE INVARIANT: exactly one `button.primary` is visible in the panel at any
+ * moment, and it is the next step. The mechanism is a demotion rather than a
+ * new tier — once a translation lands, `translate` swaps .primary for
+ * .btn-quiet and relabels to `translate again`, and `run` takes the accent.
+ * Before this, `translate` and `run locally` stood 300px apart wearing rule 6's
+ * single accent treatment, so the panel could not say which one you were
+ * supposed to press.
+ */
 function paintQueryMode(): void {
-  const english = askMode.value === 'english';
-  askBox.placeholder = english
-    ? 'e.g. find failed orders placed today'
-    : "$.orders[?(@.status == 'FAILED')]";
-  askRunBtn.textContent = english ? (modelConnected ? 'translate' : 'connect to translate') : 'run query';
-  askRunBtn.title = english
-    ? modelConnected
-      ? 'Translate this question into a JSON query'
-      : 'Connect a model before translating this question'
-    : 'Run this query locally';
-  queryPrivacy.textContent = english ? 'shape only' : 'local';
-  queryPrivacy.title = english
-    ? 'Only field names, types and array lengths are sent; document values stay local'
-    : 'This query runs locally in the worker; nothing is sent';
-  askModelButton.hidden = !english || !modelConnected;
+  const english = askEnglish();
+  for (const button of askModeButtons) {
+    const on = button.dataset.askMode === askModeValue;
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+  }
+  askAskStep.hidden = !english;
+  // The ⟨query⟩ step exists exactly when there is a query: always in JSON mode,
+  // where it IS the pipeline, and in English only once a translation has landed
+  // in it. An empty row standing there before then is a step you cannot take.
+  askQueryStep.hidden = english && !askQueryEdit.value.trim();
+  paintAskAccent();
+  askModelButton.hidden = !modelConnected;
   if (english) void refreshModelConnection();
+}
+
+/** The connection fact, absorbing the bare "shape only" adverb into a sentence. */
+function askModelLabel(): string {
+  if (modelProvider === 'anthropic') return 'shape only · Anthropic';
+  return openRouterModelChoice() === OPENROUTER_FREE_MODEL
+    ? 'shape only · OpenRouter free'
+    : 'shape only · OpenRouter Haiku';
+}
+
+/** Which step is next, dressed as rule 6's one accent control. */
+function paintAskAccent(): void {
+  // Once the query is on screen it is the next step, so the step that produced
+  // it stands down — but it keeps its place, and its label says what pressing
+  // it would now do.
+  const spent = askEnglish() && !askQueryStep.hidden;
+  askRunBtn.classList.toggle('primary', !spent);
+  askRunBtn.classList.toggle('btn-quiet', spent);
+  // `translate again` only when there is a translation to redo. A query that
+  // arrived some other way — typed, or carried over from JSON mode — still
+  // demotes this control, because `run` is genuinely the next step, but it has
+  // not been translated and the label must not claim it was.
+  askRunBtn.textContent = !modelConnected
+    ? 'connect to translate'
+    : spent && askOrigin?.kind === 'english'
+      ? 'translate again'
+      : 'translate';
+  askRunBtn.title = modelConnected
+    ? 'Translate this question into a JSON query'
+    : 'Connect a model before translating this question';
+  askQueryRunLabel.textContent = 'run';
 }
 
 /** The provider's own name, for the one place the connection is announced. */
@@ -4525,17 +4590,11 @@ async function refreshModelConnection(): Promise<void> {
   modelKeyTail = key ? key.slice(-4) : '';
   modelKeySource = key ? apiKeySource() : null;
   const provider = modelProviderName();
-  askModelButton.textContent = modelProvider === 'openrouter'
-    ? `OpenRouter · ${openRouterModelChoice() === OPENROUTER_FREE_MODEL ? 'free models' : 'Claude Haiku'}`
-    : `${provider} connected`;
-  askModelButton.title = `Manage the ${provider} connection`;
-  if (askMode.value === 'english') {
-    askRunBtn.textContent = modelConnected ? 'translate' : 'connect to translate';
-    askRunBtn.title = modelConnected
-      ? 'Translate this question into a JSON query'
-      : 'Connect a model before translating this question';
-    askModelButton.hidden = !modelConnected;
-  }
+  askModelButton.textContent = askModelLabel();
+  askModelButton.title =
+    `Only field names, types and array lengths are sent — click to manage the ${provider} connection`;
+  askModelButton.hidden = !modelConnected;
+  if (askEnglish()) paintAskAccent();
   paintModelDialog();
 }
 
@@ -4560,10 +4619,15 @@ function setAskBusy(busy: boolean): void {
   askRunBtn.disabled = busy;
   askQueryEdit.disabled = busy;
   askQueryRun.disabled = busy;
-  askMode.disabled = busy;
+  for (const button of askModeButtons) button.disabled = busy;
   askBox.disabled = busy;
-  if (busy) askRunBtn.textContent = askMode.value === 'english' ? 'translating…' : 'running…';
-  else paintQueryMode();
+  // Each step reports its own work, on its own control: the ⟨ask⟩ step
+  // translates, the ⟨query⟩ step runs. Exactly one of them is ever the busy
+  // one, which is why the panel no longer needs a line to narrate it.
+  if (busy) {
+    if (askBusyStep === 'ask') askRunBtn.textContent = 'translating…';
+    else askQueryRunLabel.textContent = 'running…';
+  } else paintQueryMode();
   askPanel.setAttribute('aria-busy', String(busy));
 }
 
@@ -4582,19 +4646,31 @@ function resetAskPanel(): void {
   if (previewTimer) clearTimeout(previewTimer);
   previewToken++; // an in-flight preview must not repopulate the cleared result
   askOrigin = null;
-  askQueryLine.hidden = true;
   askQueryEdit.value = '';
-  askResult.replaceChildren();
-  askResult.classList.remove('preview');
-  askResult.hidden = true;
+  clearAskAnswer();
   askDisclosure.hidden = true;
   askDisclosure.open = false;
-  askSaveActions.hidden = true;
   checkEditor.hidden = true;
   lastCommittedQuery = '';
   lastCommittedResult = null;
   runningCheck = null;
-  setAskStatus(null);
+  setAskNotice(null);
+  setAskFail(null);
+  paintQueryMode();
+}
+
+/** The field the reader types in for this mode — the first step of the pipeline. */
+function askFirstField(): HTMLInputElement {
+  return askEnglish() ? askBox : askQueryEdit;
+}
+
+function setAskMode(mode: AskMode): void {
+  askModeValue = mode;
+  // Where the query came from is a fact about the pipeline that produced it, so
+  // changing the pipeline forgets it: a query typed by hand must not be saved
+  // under the English question that happened to precede it.
+  askOrigin = null;
+  paintQueryMode();
 }
 
 $('#ask-btn').addEventListener('click', () => {
@@ -4603,7 +4679,7 @@ $('#ask-btn').addEventListener('click', () => {
   if (!askPanel.hidden) {
     void renderSavedChips();
     void refreshModelConnection();
-    askBox.focus();
+    askFirstField().focus();
   }
 });
 
@@ -4612,9 +4688,12 @@ askCloseBtn.addEventListener('click', () => {
   $('#ask-btn').classList.remove('on');
 });
 
-askMode.addEventListener('change', () => {
-  paintQueryMode();
-  askBox.focus();
+askModeSwitch.addEventListener('click', (event) => {
+  const mode = (event.target as HTMLElement)
+    .closest<HTMLButtonElement>('button[data-ask-mode]')?.dataset.askMode;
+  if ((mode !== 'query' && mode !== 'english') || mode === askModeValue) return;
+  setAskMode(mode);
+  askFirstField().focus();
 });
 paintQueryMode();
 
@@ -4704,7 +4783,7 @@ modelKeyFileInput.addEventListener('change', async () => {
 async function restoreOpenRouterConnection(): Promise<void> {
   const result = await completeOpenRouterAuth();
   if (result.status === 'none') return;
-  askMode.value = 'english';
+  askModeValue = 'english';
   // Do not persist a possibly sensitive question across the OAuth navigation.
   // Authorization returns to a clean input so the user chooses what to send.
   askBox.value = '';
@@ -4732,9 +4811,51 @@ modelDialog.addEventListener('click', (event) => {
   if (event.target === modelDialog) modelDialog.close();
 });
 
-function setAskStatus(msg: string | null): void {
-  askStatus.hidden = !msg;
-  askStatus.textContent = msg ?? '';
+// Three slots, three urgencies (rule 15), each one owned by the thing it is
+// about. The panel used to run all of this through a single italic line that
+// mostly read the button beside it back to you, and went stale when it did not.
+//
+// NOTICE (tier 2, in the pipeline card, under the query it is about): the query
+// will run, but it names a field this document does not have.
+function setAskNotice(msg: string | null): void {
+  askNotice.hidden = !msg;
+  askNotice.textContent = msg ?? '';
+}
+
+// FAILURE (tier 3, in the pipeline card, under the step that produced it): a
+// translation that did not come back, or a query the engine cannot parse. It
+// lands here rather than in the answer zone because it is not an answer.
+function setAskFail(msg: string | null, preview = false): void {
+  askFail.replaceChildren();
+  askFail.hidden = !msg;
+  if (!msg) return;
+  if (preview) {
+    const tag = document.createElement('span');
+    tag.className = 'ask-preview-tag';
+    tag.textContent = 'preview · error';
+    askFail.append(tag, document.createElement('br'));
+  }
+  askFail.append(msg);
+}
+
+// VERDICT (tier 2, leading the answer): a saved check's pass/fail. The one
+// sentence this panel prints that no control on screen already says, which is
+// why it is the only one that kept a band of its own.
+function setAskVerdict(msg: string | null, pass?: boolean): void {
+  askVerdict.hidden = !msg;
+  askVerdict.textContent = msg ?? '';
+  askVerdict.classList.remove('pass', 'fail');
+  if (msg && pass !== undefined) askVerdict.classList.add(pass ? 'pass' : 'fail');
+}
+
+/** The answer zone, emptied — summary, actions, body and verdict together. */
+function clearAskAnswer(): void {
+  askAnswer.hidden = true;
+  askSummary.textContent = '';
+  askResultActions.replaceChildren();
+  askResult.replaceChildren();
+  askResult.classList.remove('preview');
+  setAskVerdict(null);
 }
 
 /** The schema string handed to the model for the query now under review. */
@@ -4747,17 +4868,25 @@ let askSchemaSent: string | null = null;
  * `$.orders[…].total | sum`, which runs, matches nothing, and reports "0
  * numeric values" — a wrong answer wearing the costume of a right one. The
  * schema says which names are real, so say it here, at the one moment the user
- * is being asked to trust the query. Silence is reserved for the case where the
- * schema was truncated: there the names genuinely cannot be checked, and a
- * warning we cannot stand behind is worse than none.
+ * is being asked to trust the query.
+ *
+ * Returns null when there is nothing to say. It used to return "query ready —
+ * review it, then run locally" in that case, beside a button reading `run`,
+ * which is the narration this redesign deletes; the WARNING is the part that
+ * carries information, so it is the part that kept a slot — rule 15's tier 2,
+ * inside the pipeline card, directly under the query it is about.
  */
-function askReviewStatus(query: string, schema: string | null): string {
-  const ready = 'query ready — review it, then run locally';
-  if (!schema) return ready;
+function askFieldWarning(query: string, schema: string | null): string | null {
+  if (!schema) return null;
   const { unknown, complete } = unknownQueryFields(query, schema);
   const [first] = unknown;
   if (!first) {
-    return complete ? ready : `${ready} · part of this document's shape was too deep to send, so its field names could not be checked`;
+    // Not a warning about a name, but a warning about the CHECK: a truncated
+    // schema means the names genuinely could not be verified, and saying so is
+    // the only honest alternative to a guarantee we cannot make.
+    return complete
+      ? null
+      : "part of this document's shape was too deep to send, so this query's field names could not be checked";
   }
   const fix = first.suggestion
     ? `did you mean ${first.suggestion}?`
@@ -4819,57 +4948,72 @@ function commitQueryResult(query: string, res: QueryResp): void {
   lastCommittedResult = res;
   renderAskResult(res, false);
   const observed = queryResultCount(res);
-  askSaveActions.hidden = !res.ok;
   askSaveCheck.disabled = observed === null;
   if (runningCheck && observed !== null) {
     const evaluation = evaluateCheck(runningCheck.expectation, observed);
     checkRuns.set(runningCheck.id, { pass: evaluation.pass, summary: evaluation.summary });
-    setAskStatus(`${runningCheck.name}: ${evaluation.summary}`);
+    setAskVerdict(`${runningCheck.name}: ${evaluation.summary}`, evaluation.pass);
   } else {
-    // The review line ("review it, then run locally", or a warning about a field
-    // the document lacks) belongs to the query BEFORE it runs. The result below
-    // now answers both, and leaving the instruction up tells the user to do what
-    // they just did.
-    setAskStatus(null);
+    setAskVerdict(null);
   }
+  // The review notice (a warning about a field the document lacks) belongs to
+  // the query BEFORE it runs. The result now answers it, and leaving it up
+  // tells the reader to check something they have already acted on.
+  setAskNotice(null);
   if (!checkEditor.hidden) paintCheckPreview();
 }
 
 // `preview` = live engine-only render while the user is editing the query
 // input; it is styled as provisional and omits the mutating/navigating actions
 // (filter/copy/CSV/reveal) so a half-typed query can't fire a side effect.
+//
+// The answer is THREE parts and they no longer stack as separate bands: the
+// count goes to #ask-summary on the answer's one header line, the result's own
+// actions go beside it in #ask-result-actions, and only the payload lands in
+// #ask-result. A failure is not an answer at all — it goes up into the pipeline
+// card, under the query that produced it.
 function renderAskResult(res: QueryResp, preview = false): void {
   askResult.replaceChildren();
+  askResultActions.replaceChildren();
   askResult.classList.toggle('preview', preview);
+  askSummary.textContent = '';
+
+  if (!res.ok) {
+    setAskFail(`✗ ${res.error}${res.pos ? ` (at position ${res.pos})` : ''}`, preview);
+    askAnswer.hidden = true;
+    return;
+  }
+  setAskFail(null);
+  askAnswer.hidden = false;
+  // A preview is provisional: there is no committed query to keep yet, so the
+  // two keep actions are not offered. They would be controls that do nothing.
+  askSaveQuery.hidden = preview;
+  askSaveCheck.hidden = preview;
+
   if (preview) {
     const tag = document.createElement('span');
     tag.className = 'ask-preview-tag';
-    tag.textContent = res.ok ? 'live preview' : 'preview · error';
+    tag.textContent = 'live preview';
     askResult.appendChild(tag);
   }
 
-  if (!res.ok) {
-    const err = document.createElement('div');
-    err.className = 'ask-error';
-    err.textContent = `✗ ${res.error}${res.pos ? ` (at position ${res.pos})` : ''}`;
-    askResult.appendChild(err);
-    askResult.hidden = false;
-    return;
-  }
-
   if (res.kind === 'value') {
-    const big = document.createElement('div');
-    big.className = 'ask-value';
-    big.textContent = res.value === null ? '—' : typeof res.value === 'number' ? fmtNumber(res.value) : String(res.value);
-    const label = document.createElement('div');
-    label.className = 'ask-label';
-    label.textContent = res.label + (res.note ? ` · ${res.note}` : '');
-    askResult.append(big, label);
+    askSummary.textContent = res.label + (res.note ? ` · ${res.note}` : '');
+    if (res.value === null) {
+      // Rule 17: a null result used to render as a bare `—` at display size,
+      // which reads as a horizontal rule rather than as an answer.
+      askResult.appendChild(emptyState(
+        'No value',
+        'The query found nothing to compute — check the field name or widen the path.',
+      ));
+    } else {
+      const big = document.createElement('div');
+      big.className = 'ask-value';
+      big.textContent = typeof res.value === 'number' ? fmtNumber(res.value) : String(res.value);
+      askResult.appendChild(big);
+    }
   } else if (res.kind === 'groups') {
-    const label = document.createElement('div');
-    label.className = 'ask-label';
-    label.textContent = `grouped by ${res.label}${res.truncated ? ' · truncated' : ''}`;
-    askResult.appendChild(label);
+    askSummary.textContent = `grouped by ${res.label}${res.truncated ? ' · truncated' : ''}`;
     for (const g of res.groups.slice(0, 50)) {
       const row = document.createElement('div');
       row.className = 'ask-group';
@@ -4888,12 +5032,9 @@ function renderAskResult(res: QueryResp, preview = false): void {
       more.textContent = `… +${res.groups.length - 50} more groups`;
       askResult.appendChild(more);
     }
-    if (!preview) askResult.appendChild(queryCsvButton());
+    if (!preview) askResultActions.appendChild(queryCsvButton());
   } else if (res.kind === 'rows') {
-    const label = document.createElement('div');
-    label.className = 'ask-label';
-    label.textContent = `${fmtNumber(res.total)} row${res.total === 1 ? '' : 's'}${res.truncated ? ' · truncated' : ''}`;
-    askResult.appendChild(label);
+    askSummary.textContent = `${fmtNumber(res.total)} row${res.total === 1 ? '' : 's'}${res.truncated ? ' · truncated' : ''}`;
     const table = document.createElement('table');
     table.className = 'ask-table';
     const thead = document.createElement('tr');
@@ -4929,16 +5070,15 @@ function renderAskResult(res: QueryResp, preview = false): void {
         await copyText(copied.text);
         showToast(`${copied.count} rows copied`);
       });
-      askResult.append(copyBtn, queryCsvButton());
+      askResultActions.append(copyBtn, queryCsvButton());
     }
   } else {
-    const label = document.createElement('div');
-    label.className = 'ask-label';
-    label.textContent = `${fmtNumber(res.total)} match${res.total === 1 ? '' : 'es'}${res.truncated ? ' (list truncated)' : ''}`;
-    askResult.appendChild(label);
-    if (!preview) {
-      const actions = document.createElement('div');
-      actions.className = 'ask-actions';
+    askSummary.textContent = `${fmtNumber(res.total)} match${res.total === 1 ? '' : 'es'}${res.truncated ? ' (list truncated)' : ''}`;
+    // At 0 matches the count has already said everything these could do, and
+    // filtering the tree to nothing is a trap — so they are NOT BUILT rather
+    // than built and disabled. A control you cannot press is still a control
+    // you have to read past.
+    if (!preview && res.total > 0) {
       const filterBtnEl = document.createElement('button');
       filterBtnEl.textContent = 'filter tree to these';
       filterBtnEl.addEventListener('click', async () => {
@@ -4966,12 +5106,13 @@ function renderAskResult(res: QueryResp, preview = false): void {
         await copyText(r.text);
         showToast(`${r.count} values copied as JSON`);
       });
-      // At 0 matches the label has already said everything these could do —
-      // filtering the tree to nothing is a trap, not an action.
-      filterBtnEl.disabled = res.total === 0;
-      copyBtn.disabled = res.total === 0;
-      actions.append(filterBtnEl, copyBtn);
-      askResult.appendChild(actions);
+      askResultActions.append(filterBtnEl, copyBtn);
+    }
+    if (res.total === 0) {
+      askResult.appendChild(emptyState(
+        'No matches',
+        'Nothing in this document satisfies this query — widen the path, or check the field names.',
+      ));
     }
     for (const m of res.matches.slice(0, preview ? 50 : res.matches.length)) {
       const el = document.createElement('div');
@@ -4993,7 +5134,6 @@ function renderAskResult(res: QueryResp, preview = false): void {
       askResult.appendChild(el);
     }
   }
-  askResult.hidden = false;
 }
 
 askResult.addEventListener('click', async (e) => {
@@ -5015,12 +5155,14 @@ askResult.addEventListener('keydown', (event) => {
 
 // Render the "sent to model" disclosure straight off the SentPayload — the same
 // object nl.ts hands to fetch — so what's shown is provably what left the
-// browser. `sent === null` means no model was involved (direct/engine query).
-function renderDisclosure(sent: SentPayload | null, query: string | null): void {
+// browser. It is only ever built when a model was actually involved: the card
+// direct mode used to get was a full-width bordered object whose entire message
+// was that nothing had happened, standing between the query and its result on
+// every local run. That fact now rides the `local` tag on the query row, with
+// its title, and costs no band at all.
+function renderDisclosure(sent: SentPayload, query: string | null): void {
   askDisclosureBody.replaceChildren();
   askDisclosure.hidden = false;
-  const summary = askDisclosure.querySelector('summary');
-  if (summary) summary.textContent = sent ? 'sent to model' : 'local · nothing sent';
 
   const row = (label: string, value: string, pre = false): void => {
     const r = document.createElement('div');
@@ -5035,25 +5177,21 @@ function renderDisclosure(sent: SentPayload | null, query: string | null): void 
     askDisclosureBody.appendChild(r);
   };
 
-  if (!sent) {
-    row('model call', 'none — this query runs locally in the worker; nothing is sent.');
-  } else {
-    row('endpoint', `${sent.provider} · ${sent.endpoint}`);
-    row('model', sent.model);
-    row('question', sent.question);
-    row('schema summary (names & types)', sent.schema, true);
-    row('query returned', query ?? '… waiting for model …');
-    // The exact request body object serialized into the POST — collapsed.
-    const raw = document.createElement('details');
-    raw.className = 'disc-raw';
-    const rawSum = document.createElement('summary');
-    rawSum.textContent = 'raw request body';
-    const rawPre = document.createElement('pre');
-    rawPre.className = 'disc-pre';
-    rawPre.textContent = JSON.stringify(sent.body, null, 2);
-    raw.append(rawSum, rawPre);
-    askDisclosureBody.appendChild(raw);
-  }
+  row('endpoint', `${sent.provider} · ${sent.endpoint}`);
+  row('model', sent.model);
+  row('question', sent.question);
+  row('schema summary (names & types)', sent.schema, true);
+  row('query returned', query ?? '… waiting for model …');
+  // The exact request body object serialized into the POST — collapsed.
+  const raw = document.createElement('details');
+  raw.className = 'disc-raw';
+  const rawSum = document.createElement('summary');
+  rawSum.textContent = 'raw request body';
+  const rawPre = document.createElement('pre');
+  rawPre.className = 'disc-pre';
+  rawPre.textContent = JSON.stringify(sent.body, null, 2);
+  raw.append(rawSum, rawPre);
+  askDisclosureBody.appendChild(raw);
 
   const note = document.createElement('div');
   note.className = 'disc-note';
@@ -5067,9 +5205,8 @@ async function runPreview(q: string): Promise<void> {
   const token = ++previewToken;
   const documentToken = currentDocumentToken;
   if (!q) {
-    askResult.replaceChildren();
-    askResult.classList.remove('preview');
-    askResult.hidden = true;
+    clearAskAnswer();
+    setAskFail(null);
     return;
   }
   if (!q.startsWith('$')) {
@@ -5081,8 +5218,10 @@ async function runPreview(q: string): Promise<void> {
   renderAskResult(res, true);
 }
 
-// Commit the edited query: run it for real, render as a committed result, and —
-// exactly as today — save a chip only when the query originated from English.
+// Commit the query in the ⟨query⟩ step: run it for real, render as a committed
+// result, and — exactly as before — save a chip only when the query originated
+// from English. This is now the ONE run path for both modes; JSON-query mode
+// used to have a second field and a second button of its own.
 async function commitEditedQuery(): Promise<void> {
   if (askBusy) return;
   if (previewTimer) {
@@ -5092,8 +5231,14 @@ async function commitEditedQuery(): Promise<void> {
   const token = ++previewToken; // invalidate any in-flight preview
   const generation = ++askGeneration;
   const documentToken = currentDocumentToken;
+  // The field ships showing a valid example query, and a newcomer's obvious
+  // first act is pressing run on exactly that: adopt the example rather than
+  // silently doing nothing.
+  if (!askQueryEdit.value.trim() && !askEnglish()) askQueryEdit.value = askQueryEdit.placeholder;
   const q = askQueryEdit.value.trim();
   if (!q) return;
+  askOrigin ??= { kind: 'direct' };
+  askBusyStep = 'query';
   setAskBusy(true);
   const isCurrent = (): boolean =>
     generation === askGeneration
@@ -5113,17 +5258,18 @@ async function commitEditedQuery(): Promise<void> {
   }
 }
 
+/**
+ * The ⟨ask⟩ step, plus the saved-chip / saved-check re-run path that arrives
+ * with a query already in hand.
+ *
+ * With one query field for both modes, the plain JSON run no longer comes
+ * through here at all — it is commitEditedQuery(), the same function `Enter` in
+ * the query field has always used. What is left is: translate a question, put
+ * the query in the ⟨query⟩ step for review, and stop. Nothing runs until the
+ * reader presses `run`, which is the whole point of showing them the query.
+ */
 async function runAsk(presetQuery?: string): Promise<void> {
-  let input = presetQuery ?? askBox.value.trim();
-  // The box ships showing a valid example query, and a newcomer's obvious
-  // first act is pressing run on exactly that: adopt the example rather than
-  // silently doing nothing. Direct mode only — the English placeholder is
-  // prose ("e.g. …"), and translating our own words would spend the user's
-  // model call on them.
-  if (!input && presetQuery === undefined && askMode.value !== 'english') {
-    input = askBox.placeholder;
-    askBox.value = input;
-  }
+  const input = presetQuery ?? askBox.value.trim();
   if (!input || askBusy) return;
 
   // Claim the committed-result lane before the first await. This invalidates a
@@ -5136,7 +5282,7 @@ async function runAsk(presetQuery?: string): Promise<void> {
   const token = ++previewToken;
   const generation = ++askGeneration;
   const documentToken = currentDocumentToken;
-  const wantsTranslation = !presetQuery && askMode.value === 'english';
+  const wantsTranslation = !presetQuery && askEnglish();
   const modelKey = wantsTranslation ? await getApiKey() : null;
   if (wantsTranslation && !modelKey) {
     await openModelConnection();
@@ -5144,12 +5290,14 @@ async function runAsk(presetQuery?: string): Promise<void> {
   }
   const controller = new AbortController();
   askAbort = controller;
-  askSaveActions.hidden = true;
   checkEditor.hidden = true;
-  askResult.hidden = true;
-  askDisclosure.hidden = true;
+  clearAskAnswer();
+  setAskNotice(null);
+  setAskFail(null);
+  if (wantsTranslation) askDisclosure.hidden = true;
   lastCommittedQuery = '';
   lastCommittedResult = null;
+  askBusyStep = wantsTranslation ? 'ask' : 'query';
   setAskBusy(true);
   const isCurrent = (): boolean =>
     generation === askGeneration
@@ -5158,10 +5306,10 @@ async function runAsk(presetQuery?: string): Promise<void> {
 
   try {
     let query = input;
-    const isEnglish = !presetQuery && askMode.value === 'english';
-    if (isEnglish && !presetQuery) {
+    if (wantsTranslation) {
       const key = modelKey!;
-      setAskStatus('translating… (only the question and field names are sent)');
+      // No status line saying "translating…" beside a button that already says
+      // `translating…` and is disabled. The control IS the report.
       let sent: SentPayload | null = null;
       try {
         const schema = await call<{ text: string }>({ type: 'schema' });
@@ -5174,26 +5322,30 @@ async function runAsk(presetQuery?: string): Promise<void> {
         renderDisclosure(sent, query);
       } catch (err) {
         if (!isCurrent() || controller.signal.aborted) return;
-        setAskStatus(null);
-        askQueryLine.hidden = true;
+        // Inside the card, under the step that failed — not two bands below it
+        // behind an unrelated receipt. There is no query, so the ⟨query⟩ step
+        // stays away and `translate` keeps the accent: retry is what is next.
+        askQueryEdit.value = '';
+        askQueryStep.hidden = true;
         if (sent) renderDisclosure(sent, '(request failed)');
-        renderAskResult({ ok: false, error: String(err), pos: 0 });
+        // The mark already says this is a failure; `String(err)` would prefix a
+        // second "Error:" onto a sentence that then reads "✗ Error: …".
+        setAskFail(`✗ ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
       askOrigin = { kind: 'english', question: input };
     } else {
-      // A directly-typed `$…` query or a saved-chip re-run — engine only, no model.
+      // A saved query or a saved check, re-run engine-only: no model, so no
+      // receipt either.
       askOrigin = { kind: 'direct' };
-      renderDisclosure(null, null);
     }
     if (!isCurrent()) return;
-    setAskStatus(null);
-    // Direct JSON mode already has one authoritative query field. English mode
-    // reveals the generated query for review before later local re-runs.
-    askQueryLine.hidden = !isEnglish;
     askQueryEdit.value = query;
-    if (isEnglish) {
-      setAskStatus(askReviewStatus(query, askSchemaSent));
+    if (wantsTranslation) {
+      // The ⟨query⟩ step appears, `translate` stands down and relabels, and the
+      // accent moves to `run` — one accent control, and it is the next step.
+      paintQueryMode();
+      setAskNotice(askFieldWarning(query, askSchemaSent));
       askQueryEdit.focus();
       return;
     }
@@ -5249,7 +5401,7 @@ async function renderSavedChips(): Promise<void> {
     chip.append(label, del);
     askSaved.appendChild(chip);
   }
-  askSavedWrap.hidden = saved.length === 0;
+  keptQueryCount = saved.length;
   await renderSavedChecks();
 }
 
@@ -5275,7 +5427,11 @@ async function renderSavedChecks(): Promise<void> {
     chip.append(mark, label, del);
     askChecks.appendChild(chip);
   }
-  askChecksWrap.hidden = checks.length === 0;
+  keptCheckCount = checks.length;
+  // One rail, one hidden flag: the two lists were two labelled sections at the
+  // panel's foot, stranded under an empty result area at rest and pushed below
+  // the scroll fold after a run.
+  askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0;
 }
 
 function selectedCheckExpectation(): CheckExpectation {
@@ -5331,9 +5487,10 @@ askChecks.addEventListener('click', async (event) => {
   }
   const check = (await store.listChecks()).find((item) => item.id === id);
   if (!check) return;
-  askMode.value = 'query';
-  paintQueryMode();
-  askBox.value = check.query;
+  // A check re-runs its stored query verbatim, so it lands in the ⟨query⟩ step
+  // — the field that will actually run it — rather than in the English box.
+  askQueryEdit.value = check.query;
+  setAskMode('query');
   runningCheck = check;
   try {
     await runAsk(check.query);
@@ -5355,9 +5512,8 @@ askSaved.addEventListener('click', async (e) => {
   }
   const saved = (await store.listQueries()).find((s) => s.id === id);
   if (!saved) return;
-  askMode.value = 'query';
-  paintQueryMode();
-  askBox.value = saved.query;
+  askQueryEdit.value = saved.query;
+  setAskMode('query');
   void store.touchSaved(id);
   await runAsk(saved.query); // engine-only re-run: no API call
 });

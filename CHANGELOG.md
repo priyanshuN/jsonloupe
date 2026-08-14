@@ -4,6 +4,34 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **The Query panel is three zones instead of eight stacked rows.** Ask and
+  query are one bordered card split by a hairline, because they are one
+  operation with an order; the answer follows it. The two input modes are now
+  pipelines of different length rather than two labels on one row — a JSON query
+  is a single `query · run · copy · local` step, and English adds an `ask` step
+  above it. Both modes share ONE query field, so the live preview, the copy
+  glyph and `run` all act on the string that will actually run; direct queries
+  gained the live preview they never had. Exactly one accent control exists at
+  any moment: once a translation lands, `translate` stands down and `run` takes
+  the accent. A translation failure now renders inside the card under the step
+  that produced it, the `sent to model` receipt is the card's quiet last line
+  and is not drawn at all for a query that reaches no model, and saved queries
+  and checks share one rail in the head row where they stay visible at rest and
+  never move when a result arrives.
+- **The Query panel stopped narrating its own buttons.** The status line that
+  read *"query ready — review it, then run locally"* beside a button reading
+  **run** — and stayed up after the run, telling you to do what you had just
+  done — is deleted rather than restyled. What kept a slot is what no control
+  says: a saved check's verdict, at rule 15's tier 2 with the pass/fail ink it
+  always deserved, and the warning that a generated query names a field this
+  document does not have, in its own tier-2 notice inside the card. Zero-match
+  results no longer draw two disabled buttons, and an empty value renders as an
+  empty state instead of a 26px em dash that read as a horizontal rule.
+- **The type ramp's display exception is now scoped by selector.** An unscoped
+  size allowlist was a licence any rule in the file could pick up, and one had:
+  a Query result headline ran at the landing page's 26px inside a control strip.
+  The linter also pins rule 15's tier 2 to ink-plus-hairline, so tier 2 and tier
+  3 cannot quietly converge into one device.
 - **English query connection no longer starts with a password bar.** OpenRouter
   OAuth with PKCE is the recommended path; manual API keys remain an advanced
   option. Credentials stay in the current tab by default and persist on the
