@@ -8,7 +8,8 @@
 //
 // Checks:
 //   1. rule 22 — font weights are 400/700 on --sans/--mono; other values only
-//      in declarations set in var(--display) (Space Grotesk ships real faces).
+//      in declarations set in var(--display) or var(--display-prose) (Martian
+//      Mono and Space Grotesk both ship real variable weights).
 //   2. rule 11/tokens — hex colors live ONLY inside the :root token blocks.
 //   3. rule 3 — stroke-width exists only in the .ic rule (one sprite knob),
 //      and never as an attribute in index.html.
@@ -77,13 +78,14 @@ for (const m of css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
 
 for (const m of css.matchAll(/font(?:-weight)?:\s*([^;]+);/g)) {
   const value = m[1];
-  if (/^400 700$/.test(value.trim())) continue; // @font-face variable range
+  if (/^\d{3} \d{3}$/.test(value.trim())) continue; // @font-face variable range
   const w = value.match(/(?:^|\s)(\d{3})(?:\s|$)/);
   if (!w) continue;
   const weight = w[1];
   if (weight === '400' || weight === '700') continue;
-  if (value.includes('var(--display)')) continue; // rule 22's named exception
-  errors.push(`style.css:${lineOf(m.index)} font weight ${weight} — rule 22 allows only 400/700 outside var(--display)`);
+  // rule 22's named exception — BOTH display faces ship real variable weights
+  if (/var\(--display(?:-prose)?\)/.test(value)) continue;
+  errors.push(`style.css:${lineOf(m.index)} font weight ${weight} — rule 22 allows only 400/700 outside var(--display)/var(--display-prose)`);
 }
 
 // ---------- stroke-width: one knob ----------
@@ -192,7 +194,7 @@ const DISPLAY_SIZES = new Set(['17px', '18px', '20px', '26px', '30px', '38px', '
 
 for (const m of css.matchAll(/font(?:-size)?:\s*([^;]+);/g)) {
   const value = m[1];
-  if (value.includes('var(--display)')) continue;
+  if (/var\(--display(?:-prose)?\)/.test(value)) continue;
   if (/^(?:400|700)\s+700\b/.test(value.trim())) continue; // @font-face range
   const size = value.match(/(?:^|\s|\/)(\d+(?:\.\d+)?px)\b/);
   if (!size) continue; // token-sized or keyword

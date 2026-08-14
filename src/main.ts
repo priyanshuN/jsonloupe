@@ -17,7 +17,13 @@ import { SemanticCompareView, type CompareRow } from './compare-view';
 import { ConvertView } from './convert-view';
 import type { ConvertReport, ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
 import { onlyStoredZipEntry } from './one-file-zip';
-import { SAMPLE_DOC, SAMPLE_DOC_TITLE } from './sample-doc';
+import {
+  buildLargeSample,
+  LARGE_SAMPLE_ELEMENTS,
+  LARGE_SAMPLE_TITLE,
+  SAMPLE_DOC,
+  SAMPLE_DOC_TITLE,
+} from './sample-doc';
 import type { AlignmentPlan, ArrayMode, ArrayRule } from './semantic';
 import * as store from './db';
 import {
@@ -1336,7 +1342,7 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
 // The strip's resting line in the tree: an empty bottom edge would be the one
 // view that still says nothing (rule 19 — every view carries a "where am I",
 // including "nowhere yet").
-const TREE_STATUS_RESTING = 'Select a row to see its path.';
+const TREE_STATUS_RESTING = 'Select a row to see its path · press ? for shortcuts.';
 
 // The crumb is debounced and then awaits the worker, so by the time it has an
 // answer the bottom edge may belong to another view. It only ever paints while
@@ -1381,6 +1387,22 @@ function updateCrumbSoon(): void {
       same.title = 'Find every node in this document holding the same value';
       same.addEventListener('click', () => void findSameValue(r.id));
       trailChips.push(same);
+    }
+    // The landing's lens, paid off inside the app: selecting a number whose
+    // exact digits a float cannot hold names the wrong readback right on the
+    // status line. String compare on purpose — "41.30" → "41.3" is a real
+    // loss in a money column, and the digits are this product's whole claim.
+    if (r.type === 'number') {
+      const exact = r.preview;
+      const asFloat = String(Number(exact));
+      if (asFloat !== exact) {
+        const note = document.createElement('span');
+        note.className = 'crumb-float-note';
+        note.textContent = `float would read ${asFloat}`;
+        note.title =
+          'What an ordinary JSON.parse hands back for this value — jsonloupe keeps the source digits';
+        trailChips.push(note);
+      }
     }
     setStatusLead(p.jsonpath, {
       path: true,
@@ -1434,7 +1456,10 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
     else {
       tree.setTotal(r.totalRows);
       await refreshAfterEdit(documentToken);
-      showToast('embedded JSON parsed');
+      // The chip looks like "peek inside", but it is a real (undoable) edit —
+      // say so at the moment it happens, with the way back in hand, instead of
+      // letting "· edited" in the toolbar be the first notice.
+      showToastAction('embedded JSON parsed — document edited', 'undo', () => void doUndoUI());
     }
   },
   onTable: (id) => void openTable(id),
@@ -1925,6 +1950,33 @@ async function compareBaselineFile(file: File): Promise<void> {
   }
 }
 
+// Paste is this app's primary intake, and the second half of a diff is
+// likelier on the clipboard than in a file. Reading happens on the click (a
+// user gesture, which is what the permission wants); a refusal degrades to a
+// toast that names the way that always works.
+const baselinePasteBtn = $<HTMLButtonElement>('#baseline-paste-btn');
+baselinePasteBtn.addEventListener('click', async () => {
+  const documentRevision = currentDocumentRevision;
+  let text: string;
+  try {
+    text = (await navigator.clipboard.readText()).trim();
+  } catch {
+    showToast('clipboard not readable here — open it as a new document and compare from there', 'bad');
+    return;
+  }
+  if (!text) {
+    showToast('clipboard is empty');
+    return;
+  }
+  if (documentRevision !== currentDocumentRevision) return;
+  if (text === currentText) {
+    showToast('the clipboard matches the open document exactly');
+    return;
+  }
+  baselinePicker.close();
+  await compareWith(text, 'pasted baseline', null, null);
+});
+
 baselineFileBtn.addEventListener('click', async () => {
   const handles = await pickPayloadFiles(false, baselineFileInput);
   const handle = handles?.[0];
@@ -2069,6 +2121,12 @@ async function openText(
   // transient). The stored raw text stays the original bytes; the badge opens the
   // code view's raw-source toggle so the user can see exactly what they pasted.
   repairBadge.hidden = !res.repaired;
+  // The badge names WHAT was repaired when the byte diff proves it; when any
+  // edit resisted classification the summary is null and the generic wording
+  // stands — a guessed itemization would be worse than none.
+  repairBadge.title = res.repaired && res.repairSummary
+    ? `Auto-repaired: ${res.repairSummary} — click to see the original bytes you pasted`
+    : 'Input was malformed and auto-repaired — click to see the original bytes you pasted';
   payloadBadge.hidden = !provenance;
   // Only a payload decoded out of another stored document can be traced back.
   originalBtn.hidden = !provenance?.sourceDocId;
@@ -2076,7 +2134,11 @@ async function openText(
     payloadBadge.textContent = `decoded · ${provenance.format}`;
     payloadBadge.title = `${provenance.sourceTitle}${provenance.sourcePath ? ` · ${provenance.sourcePath}` : ''}\n${provenanceTrace(provenance)}`;
   }
-  if (res.repaired) showToast('input was malformed — auto-repaired');
+  if (res.repaired) {
+    showToast(
+      res.repairSummary ? `auto-repaired: ${res.repairSummary}` : 'input was malformed — auto-repaired',
+    );
+  }
   parseError.hidden = true;
   searchPanel.hidden = true;
   searchBox.value = '';
@@ -3255,8 +3317,9 @@ async function ensureEditor(): Promise<void> {
     // and it stands until Apply re-parses or the buffer is reloaded.
     onReplaceAll: (count) => setCodeStatus('bulk', `${count} replaced · ${UNAPPLIED_HINT}`),
     // Synchronous by necessity — it answers a click that is already happening.
-    // The app's two <dialog>s are bespoke surfaces; a third one for a gate that
-    // fires above 500 matches would be a third copy of the same shell.
+    // The app's three <dialog>s are bespoke surfaces (the shortcut sheet reuses
+    // the picker's shell); one more for a gate that fires above 500 matches
+    // would be another copy of the same shell.
     confirmReplaceAll: (label) =>
       window.confirm(
         `Replace ${label}?\n\nThis rewrites the editor buffer immediately. The tree, table and queries only change when you apply.`,
@@ -4590,6 +4653,10 @@ function renderAskResult(res: QueryResp, preview = false): void {
         await copyText(r.text);
         showToast(`${r.count} values copied as JSON`);
       });
+      // At 0 matches the label has already said everything these could do —
+      // filtering the tree to nothing is a trap, not an action.
+      filterBtnEl.disabled = res.total === 0;
+      copyBtn.disabled = res.total === 0;
       actions.append(filterBtnEl, copyBtn);
       askResult.appendChild(actions);
     }
@@ -4734,7 +4801,16 @@ async function commitEditedQuery(): Promise<void> {
 }
 
 async function runAsk(presetQuery?: string): Promise<void> {
-  const input = presetQuery ?? askBox.value.trim();
+  let input = presetQuery ?? askBox.value.trim();
+  // The box ships showing a valid example query, and a newcomer's obvious
+  // first act is pressing run on exactly that: adopt the example rather than
+  // silently doing nothing. Direct mode only — the English placeholder is
+  // prose ("e.g. …"), and translating our own words would spend the user's
+  // model call on them.
+  if (!input && presetQuery === undefined && askMode.value !== 'english') {
+    input = askBox.placeholder;
+    askBox.value = input;
+  }
   if (!input || askBusy) return;
 
   // Claim the committed-result lane before the first await. This invalidates a
@@ -6133,6 +6209,8 @@ runOpenBtn.addEventListener('click', () => {
 
 // ---------- keyboard ----------
 
+const keysDialog = $<HTMLDialogElement>('#keys-dialog');
+
 window.addEventListener('keydown', async (e) => {
   const ae = document.activeElement;
   // A CodeMirror surface is a contenteditable div, not an <input>/<textarea> —
@@ -6143,6 +6221,13 @@ window.addEventListener('keydown', async (e) => {
     ae instanceof HTMLInputElement ||
     ae instanceof HTMLTextAreaElement ||
     (ae != null && (codeHost.contains(ae) || runEditorHost.contains(ae)));
+  // '?' opens the shortcut sheet — the bindings this handler answers to are
+  // otherwise invisible, and the tree's resting status line points here.
+  if (e.key === '?' && !typing) {
+    e.preventDefault();
+    keysDialog.showModal();
+    return;
+  }
   // '/' focuses search — but not while the code editor is up (it must type '/').
   if (e.key === '/' && !viewer.hidden && !typing && codeView.hidden && activePane !== 'semantic') {
     e.preventDefault();
@@ -6263,6 +6348,29 @@ $('#sample-btn').addEventListener('click', () => {
   openText(SAMPLE_DOC, SAMPLE_DOC_TITLE, null).catch((error) => {
     showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
   });
+});
+
+// The scale claim, felt: build five million elements here, then open them
+// through the same path a paste takes. The button narrates its own progress —
+// the build is the only part that takes visible time, and a percentage is the
+// difference between "working" and "hung".
+const sampleBigBtn = $<HTMLButtonElement>('#sample-big-btn');
+sampleBigBtn.addEventListener('click', async () => {
+  if (sampleBigBtn.disabled) return;
+  sampleBigBtn.disabled = true;
+  const restLabel = sampleBigBtn.textContent;
+  try {
+    const text = await buildLargeSample(LARGE_SAMPLE_ELEMENTS, (done, total) => {
+      sampleBigBtn.textContent = `building… ${Math.round((done / total) * 100)}%`;
+    });
+    sampleBigBtn.textContent = 'opening…';
+    await openText(text, LARGE_SAMPLE_TITLE, null);
+  } catch (error) {
+    showToast(`sample failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
+  } finally {
+    sampleBigBtn.disabled = false;
+    sampleBigBtn.textContent = restLabel;
+  }
 });
 
 // ---------- init ----------

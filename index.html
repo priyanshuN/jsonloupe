@@ -17,8 +17,10 @@ SPDX-License-Identifier: MIT -->
   <meta property="og:title" content="jsonloupe — a loupe for large JSON, and a JSON to Excel converter" />
   <meta property="og:description" content="Local-first JSON viewer, diff and query tool — and a converter that turns nested JSON into linked Excel or CSV tables. Lossless int64, five-million-element arrays, all in your browser tab." />
   <meta property="og:type" content="website" />
-  <!-- The landing headline is the LCP element and uses Space Grotesk. Discover
-       the font from HTML instead of waiting for the stylesheet to reveal it. -->
+  <!-- The landing headline is the LCP element and uses Martian Mono; the lede
+       right under it uses Space Grotesk. Discover both fonts from HTML instead
+       of waiting for the stylesheet to reveal them. -->
+  <link rel="preload" href="/fonts/martian-mono-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="/fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin />
   <!-- Pre-paint gate: theme and the returning-user flag must apply before first
        paint, or the page flashes the wrong theme / the marketing landing before
@@ -197,11 +199,22 @@ SPDX-License-Identifier: MIT -->
 
         <div class="lp-hero">
           <div class="lp-hero-copy">
-            <span class="lp-pill">local-first <span class="lp-pill-sep">·</span> no backend, no telemetry</span>
-            <h1>A loupe for JSON that is too big — and too precise — for your viewer.</h1>
-            <p class="lp-lede">Five-million-element arrays open instantly. Int64 IDs and exact decimals survive paste → edit → copy without a single rounded digit. Diff, query, and turn the nesting into linked spreadsheet tables — all inside your browser tab.</p>
+            <h1>A loupe for large&nbsp;JSON.</h1>
+            <!-- The signature: the rest of the old headline ("too precise for
+                 your viewer") is now DRAWN instead of said — a lens resting on
+                 the digits a float parser destroys, with the wrong readback
+                 named beneath. The strip is decorative duplication of the
+                 note's claim, hence aria-hidden; the note is the real text. -->
+            <div class="lp-lens-strip" aria-hidden="true">
+              <code class="lp-lens-line">{ "orderId": 9007199254740993, "status": "PAID" }</code>
+              <div class="lp-lens">
+                <code class="lp-lens-mag">{ "orderId": <b>9007199254740993</b>, "status": "PAID" }</code>
+              </div>
+            </div>
+            <p class="lp-lens-note">too precise for your viewer: a float parser reads that id back as <code class="lp-rounded">9007199254740992</code> — jsonloupe never rounds.</p>
+            <p class="lp-lede">Five-million-element arrays open instantly. Diff, query, and turn the nesting into linked spreadsheet tables — all inside your browser tab.</p>
             <p class="lp-wedge">Paste a Zstd, Base64 or PostgreSQL bytea blob and it opens as JSON with a transformation trace. Compress JSON the other way from the same app — no upload or separate converter.</p>
-            <p class="lp-trust">0 bytes uploaded · no account · MIT</p>
+            <p class="lp-trust">0 bytes uploaded · no backend · no telemetry · no account · MIT</p>
           </div>
           <div class="lp-paste">
             <div class="lp-paste-head">
@@ -218,6 +231,7 @@ SPDX-License-Identifier: MIT -->
               <div class="lp-paste-actions">
                 <button id="parse-btn" class="primary">parse</button>
                 <button id="sample-btn" title="Load a small sample document">try a sample</button>
+                <button id="sample-big-btn" title="Build a five-million-element array locally and open it — nothing is downloaded">try 5M elements</button>
                 <button id="open-btn">open file…</button>
                 <span class="lp-spacer"></span>
                 <span class="lp-note">⌃↵ to open</span>
@@ -240,6 +254,7 @@ SPDX-License-Identifier: MIT -->
               <span class="lp-tag lp-tag-number">lossless numbers</span>
               <h3>Int64 and exact decimals</h3>
               <p>IDs beyond 2^53 survive paste → view → edit → copy → download with every digit intact. Nothing is coerced to a float, ever.</p>
+              <p class="lp-proof"><code class="lp-proof-exact">9223372036854775807</code><code class="lp-proof-lost">922337203685477580<b>8</b></code></p>
             </article>
             <article class="lp-cell">
               <span class="lp-tag lp-tag-accent">scale</span>
@@ -951,6 +966,7 @@ SPDX-License-Identifier: MIT -->
       </div>
       <div id="baseline-recents" class="baseline-list"></div>
       <div class="baseline-actions">
+        <button id="baseline-paste-btn" type="button" title="Compare against the JSON on your clipboard">paste baseline</button>
         <button id="baseline-file-btn" type="button">choose a file…</button>
         <span class="spacer"></span>
         <button value="cancel">cancel</button>
@@ -958,6 +974,34 @@ SPDX-License-Identifier: MIT -->
     </form>
     <input type="file" id="baseline-file-input"
       accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
+  </dialog>
+  <!-- The shortcut sheet: the tree's bindings (j/k, y, c, arrows, double-click
+       edit) are otherwise invisible — the status bar points here with "press ?".
+       It borrows the picker's dialog shell rather than growing a third copy. -->
+  <dialog id="keys-dialog" aria-labelledby="keys-dialog-title">
+    <form method="dialog" class="baseline-dialog">
+      <div class="baseline-head">
+        <div>
+          <h2 id="keys-dialog-title">Keyboard shortcuts</h2>
+          <p>What the workbench answers to. Escape closes.</p>
+        </div>
+        <button class="baseline-x btn-icon" value="cancel" title="Close" aria-label="Close">×</button>
+      </div>
+      <div class="keys-list">
+        <span class="keys-group">tree</span>
+        <div class="keys-row"><span><kbd>↓</kbd> <kbd>↑</kbd> or <kbd>j</kbd> <kbd>k</kbd></span><span>move selection</span></div>
+        <div class="keys-row"><span><kbd>→</kbd> <kbd>←</kbd></span><span>expand · collapse</span></div>
+        <div class="keys-row"><span><kbd>Enter</kbd></span><span>toggle a container</span></div>
+        <div class="keys-row"><span><kbd>y</kbd></span><span>copy path</span></div>
+        <div class="keys-row"><span><kbd>c</kbd></span><span>copy value — digits exact</span></div>
+        <div class="keys-row"><span>double-click a value</span><span>edit in place</span></div>
+        <span class="keys-group">document</span>
+        <div class="keys-row"><span><kbd>/</kbd></span><span>search keys and values</span></div>
+        <div class="keys-row"><span><kbd>⌘Z</kbd> or <kbd>Ctrl Z</kbd></span><span>undo — shift redoes</span></div>
+        <span class="keys-group">paste view</span>
+        <div class="keys-row"><span><kbd>⌃↵</kbd></span><span>open the pasted text</span></div>
+      </div>
+    </form>
   </dialog>
   <dialog id="transport-dialog" aria-labelledby="transport-dialog-title" tabindex="-1">
     <form method="dialog" class="transport-dialog">

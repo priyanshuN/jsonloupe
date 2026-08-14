@@ -777,7 +777,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## Bundled fonts
 
-Not an npm dependency — the font file is committed under `public/fonts/` and
+Not an npm dependency — the font files are committed under `public/fonts/` and
 served by this site directly, so no third-party font host is ever contacted.
 
 ### Space Grotesk (variable, latin subset) — SIL Open Font License 1.1
@@ -786,5 +786,19 @@ Copyright 2020 The Space Grotesk Project Authors
 (https://github.com/floriankarsten/space-grotesk)
 
 Shipped as `public/fonts/space-grotesk-latin.woff2`. The full OFL 1.1 text is
+reproduced verbatim alongside it in `public/fonts/OFL.txt`, as the license
+requires when the font is redistributed.
+
+### Martian Mono (variable, latin subset) — SIL Open Font License 1.1
+
+Copyright 2020 The Martian Mono Project Authors
+(https://github.com/evilmartians/mono)
+
+Designed by Evil Martians. Obtained from the Google Fonts release
+(https://github.com/google/fonts) via the `@fontsource-variable/martian-mono`
+npm package (v5.3.0); upstream project at https://github.com/evilmartians/mono.
+
+Shipped as `public/fonts/martian-mono-latin.woff2`, a latin-subset variable
+woff2 carrying a single `wght` axis (100–800). The full OFL 1.1 text is
 reproduced verbatim alongside it in `public/fonts/OFL.txt`, as the license
 requires when the font is redistributed.

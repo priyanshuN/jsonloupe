@@ -47,6 +47,7 @@ import {
 } from './codec';
 import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
+import { summarizeRepair } from './repair-summary';
 
 // Lossless number handling lives in ./lossless so the converter engine and the
 // MCP server parse through the exact same predicate.
@@ -631,6 +632,7 @@ function doParse(text: string, isApply: boolean, allowRepair: boolean): ParseOk 
   let value: unknown;
   let jsonl = false;
   let repaired = false;
+  let repairSummary: string | null = null;
   try {
     value = lparse(parserText);
   } catch (err) {
@@ -640,8 +642,10 @@ function doParse(text: string, isApply: boolean, allowRepair: boolean): ParseOk 
       jsonl = true;
     } else if (allowRepair && looksJsonish(parserText)) {
       try {
-        value = lparse(jsonrepair(parserText));
+        const fixedText = jsonrepair(parserText);
+        value = lparse(fixedText);
         repaired = true;
+        repairSummary = summarizeRepair(parserText, fixedText);
       } catch {
         return errorInfo(text, err as Error, positionOffset); // report the ORIGINAL parse error
       }
@@ -660,7 +664,7 @@ function doParse(text: string, isApply: boolean, allowRepair: boolean): ParseOk 
     undoStack = [];
     redoStack = [];
   }
-  return { ok: true, totalRows: visible.length, parseMs, jsonl, repaired, hasUnsafeNumbers: sawUnsafeNumber };
+  return { ok: true, totalRows: visible.length, parseMs, jsonl, repaired, repairSummary, hasUnsafeNumbers: sawUnsafeNumber };
 }
 
 function formatStandalone(

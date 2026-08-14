@@ -52,3 +52,47 @@ export const SAMPLE_DOC = `{
   ]
 }
 `;
+
+// The landing's scale claim ("five-million-element arrays open instantly"),
+// made experienceable: nothing a first visit can click proves it, because no
+// first visit has a 35 MB file handy. This builds one locally — a flat sensor
+// trace whose one int64 id keeps the lossless story in frame — and hands it to
+// the same open path a paste takes, so what opens is exactly what any real
+// document goes through. Text, not objects, for the same reason as above.
+//
+// Deterministic on purpose: a seeded LCG, no Date/Math.random, so every visitor
+// opens byte-identical output and a bug report about row 3,401,882 reproduces.
+// The builder yields between chunks to keep the page interactive while ~35 MB
+// of text accumulates; the caller owns whatever progress it wants to show.
+export const LARGE_SAMPLE_TITLE = 'five-million-readings.json';
+export const LARGE_SAMPLE_ELEMENTS = 5_000_000;
+
+export async function buildLargeSample(
+  elements: number = LARGE_SAMPLE_ELEMENTS,
+  onChunk?: (done: number, total: number) => void,
+): Promise<string> {
+  const CHUNK = 250_000;
+  const parts: string[] = [
+    '{\n' +
+      '  "instrument": "flux sensor 7 — synthetic trace, built in this tab",\n' +
+      '  "sensorId": 9007199254740993,\n' +
+      '  "unit": "uV",\n' +
+      '  "readings": [',
+  ];
+  let seed = 0x2545f491;
+  const nums: string[] = new Array(Math.min(CHUNK, elements));
+  for (let done = 0; done < elements; ) {
+    const n = Math.min(CHUNK, elements - done);
+    for (let i = 0; i < n; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      nums[i] = String(seed % 1_000_000);
+    }
+    parts.push((done === 0 ? '' : ',') + (n === nums.length ? nums : nums.slice(0, n)).join(','));
+    done += n;
+    onChunk?.(done, elements);
+    // Yield the main thread between chunks; the paste card stays responsive.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  parts.push(']\n}\n');
+  return parts.join('');
+}
