@@ -189,7 +189,7 @@ try {
   check(`sample keeps the int64 exact (${INT64})`, sampled.includes(INT64), sampled.slice(0, 300));
 
   const taught = text(await call('run_query', { docId: 'd1', query: '$.tasks | sumr(@.weightKg)' }));
-  check('a bad query teaches the grammar', /suggestion: did you mean `\| sum`/.test(taught) && /Pipes \(append one\)/.test(taught), taught.slice(0, 300));
+  check('a bad query teaches the grammar', /suggestion: did you mean `\| sum`/.test(taught) && /Pipes: append AT MOST ONE/.test(taught), taught.slice(0, 300));
 
   // Isolation: a second document must not disturb the first.
   const second = text(await call('load_doc', { path: small }));
