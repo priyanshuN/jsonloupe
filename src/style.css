@@ -1418,8 +1418,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    row never reflows. */
 .lp-paste-body:has(#parse-error:not([hidden])) #paste-box { border-color: var(--danger); }
 
-.lp-paste-actions { display: flex; align-items: center; gap: var(--gap-2); margin-top: var(--gap-3); }
-.lp-paste-actions button { padding: 0 var(--gap-4); border-radius: var(--r-sm); }
+/* Four intake buttons share this row since the 5M sample landed: the ROW
+   wraps, a label never does — a button that breaks its own words mid-phrase
+   reads as broken, a second row of whole buttons reads as a row. */
+.lp-paste-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-2); margin-top: var(--gap-3); }
+.lp-paste-actions button { padding: 0 var(--gap-4); border-radius: var(--r-sm); white-space: nowrap; }
 .lp-note {
   font: var(--fs-chip) var(--mono);
   color: var(--text-dim);
@@ -1924,9 +1927,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .mode-switch button.on:hover { background: var(--bg-hover); }
 
-/* ---------- baseline picker ---------- */
+/* ---------- baseline picker (shell shared with the shortcut sheet) ---------- */
 
-#baseline-picker {
+#baseline-picker,
+#keys-dialog {
   width: min(560px, calc(100vw - 24px));
   max-height: min(680px, calc(100vh - 24px));
   padding: 0;
@@ -1936,9 +1940,50 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: calc(var(--r) + var(--r-xs));
   box-shadow: var(--shadow);
 }
-#baseline-picker::backdrop {
+#baseline-picker::backdrop,
+#keys-dialog::backdrop {
   background: color-mix(in srgb, var(--bg) 58%, transparent);
   backdrop-filter: blur(2px);
+}
+
+/* The shortcut sheet's body: keys column + description column. .keys-row is
+   display:contents so each pair lands on the shared grid tracks and every
+   description starts on one x. Group labels are the SECTION LABEL rank. */
+.keys-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--gap-2) 22px;
+  align-items: baseline;
+  padding: 14px 18px 20px;
+  overflow-y: auto;
+}
+.keys-row { display: contents; }
+.keys-row span:last-child { color: var(--text-dim); font-size: var(--fs-body); }
+.keys-group {
+  grid-column: 1 / -1;
+  margin-top: var(--gap-2);
+  font: 400 var(--fs-chip) var(--mono);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+/* The float-readback note rides the status strip's trailing edge: amber
+   because it warns about OTHER parsers, not about anything wrong here. */
+.crumb-float-note {
+  color: var(--warn);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+}
+
+.keys-list kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  font: 400 var(--fs-chip) var(--mono);
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-bottom-color: var(--border-strong);
+  border-radius: var(--r-xs);
 }
 .baseline-dialog {
   display: flex;

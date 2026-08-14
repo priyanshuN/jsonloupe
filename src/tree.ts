@@ -88,15 +88,25 @@ export class VirtualTree {
       if (index === this.selected) return;
       this.select(index, { scroll: false });
     });
-    // Double-click a primitive value → inline edit, where this tree can edit.
+    // Double-click a container row → toggle it: the caret is a small target,
+    // and this is the convention every neighboring tree (editors, devtools)
+    // obeys. Double-click a primitive value → inline edit, where this tree can
+    // edit. Row action chips keep their own clicks either way.
     layer.addEventListener('dblclick', (e) => {
-      if (!cbs.getEditText || !cbs.onEditCommit) return;
       const t = e.target as HTMLElement;
-      if (!t.classList.contains('val')) return;
       const rowEl = t.closest('.row') as HTMLElement | null;
       if (!rowEl) return;
       const row = this.lastRows.find((r) => r.index === Number(rowEl.dataset.index));
-      if (!row || row.hasChildren || row.type === 'object' || row.type === 'array') return;
+      if (!row) return;
+      if (row.hasChildren) {
+        if (t.closest('button')) return;
+        e.preventDefault();
+        cbs.onToggle(row.id, row.index);
+        return;
+      }
+      if (!cbs.getEditText || !cbs.onEditCommit) return;
+      if (!t.classList.contains('val')) return;
+      if (row.type === 'object' || row.type === 'array') return;
       e.preventDefault();
       void this.startEdit(rowEl, row);
     });

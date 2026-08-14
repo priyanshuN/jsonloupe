@@ -231,6 +231,7 @@ SPDX-License-Identifier: MIT -->
               <div class="lp-paste-actions">
                 <button id="parse-btn" class="primary">parse</button>
                 <button id="sample-btn" title="Load a small sample document">try a sample</button>
+                <button id="sample-big-btn" title="Build a five-million-element array locally and open it — nothing is downloaded">try 5M elements</button>
                 <button id="open-btn">open file…</button>
                 <span class="lp-spacer"></span>
                 <span class="lp-note">⌃↵ to open</span>
@@ -965,6 +966,7 @@ SPDX-License-Identifier: MIT -->
       </div>
       <div id="baseline-recents" class="baseline-list"></div>
       <div class="baseline-actions">
+        <button id="baseline-paste-btn" type="button" title="Compare against the JSON on your clipboard">paste baseline</button>
         <button id="baseline-file-btn" type="button">choose a file…</button>
         <span class="spacer"></span>
         <button value="cancel">cancel</button>
@@ -972,6 +974,34 @@ SPDX-License-Identifier: MIT -->
     </form>
     <input type="file" id="baseline-file-input"
       accept=".json,.jsonl,.txt,.zst,.zstd,application/json,application/zstd" hidden>
+  </dialog>
+  <!-- The shortcut sheet: the tree's bindings (j/k, y, c, arrows, double-click
+       edit) are otherwise invisible — the status bar points here with "press ?".
+       It borrows the picker's dialog shell rather than growing a third copy. -->
+  <dialog id="keys-dialog" aria-labelledby="keys-dialog-title">
+    <form method="dialog" class="baseline-dialog">
+      <div class="baseline-head">
+        <div>
+          <h2 id="keys-dialog-title">Keyboard shortcuts</h2>
+          <p>What the workbench answers to. Escape closes.</p>
+        </div>
+        <button class="baseline-x btn-icon" value="cancel" title="Close" aria-label="Close">×</button>
+      </div>
+      <div class="keys-list">
+        <span class="keys-group">tree</span>
+        <div class="keys-row"><span><kbd>↓</kbd> <kbd>↑</kbd> or <kbd>j</kbd> <kbd>k</kbd></span><span>move selection</span></div>
+        <div class="keys-row"><span><kbd>→</kbd> <kbd>←</kbd></span><span>expand · collapse</span></div>
+        <div class="keys-row"><span><kbd>Enter</kbd></span><span>toggle a container</span></div>
+        <div class="keys-row"><span><kbd>y</kbd></span><span>copy path</span></div>
+        <div class="keys-row"><span><kbd>c</kbd></span><span>copy value — digits exact</span></div>
+        <div class="keys-row"><span>double-click a value</span><span>edit in place</span></div>
+        <span class="keys-group">document</span>
+        <div class="keys-row"><span><kbd>/</kbd></span><span>search keys and values</span></div>
+        <div class="keys-row"><span><kbd>⌘Z</kbd> or <kbd>Ctrl Z</kbd></span><span>undo — shift redoes</span></div>
+        <span class="keys-group">paste view</span>
+        <div class="keys-row"><span><kbd>⌃↵</kbd></span><span>open the pasted text</span></div>
+      </div>
+    </form>
   </dialog>
   <dialog id="transport-dialog" aria-labelledby="transport-dialog-title" tabindex="-1">
     <form method="dialog" class="transport-dialog">

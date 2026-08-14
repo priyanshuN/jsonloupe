@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { convert, draftSpec, inspect, memorySink } from './convert/index';
-import { SAMPLE_DOC, SAMPLE_DOC_TITLE } from './sample-doc';
+import { buildLargeSample, SAMPLE_DOC, SAMPLE_DOC_TITLE } from './sample-doc';
 
 // Handed to the engine as text, so it goes through the same lossless parse the
 // app uses. Anything asserted below is what a real click actually produces.
@@ -86,5 +86,32 @@ describe('the sample document', () => {
     const rate = text(orders.rows[0][column(orders.columns, 'fxRateAtCapture')]);
     expect(rate).toBe('1.27384516789012345678');
     expect(String(Number(rate))).not.toBe(rate); // more digits than a double holds
+  });
+});
+
+// The big sample is also a claim — five million elements, built the same for
+// every visitor. Asserted at a small count (the shape and determinism are the
+// subject; the count is a constant).
+describe('large sample builder', () => {
+  it('builds valid JSON with exactly the requested element count', async () => {
+    const text = await buildLargeSample(1234);
+    const doc = JSON.parse(text) as { readings: number[] };
+    expect(doc.readings).toHaveLength(1234);
+    expect(doc.readings.every((n) => Number.isInteger(n) && n >= 0)).toBe(true);
+  });
+
+  it('keeps the int64 id as exact source digits and is deterministic', async () => {
+    const a = await buildLargeSample(500);
+    const b = await buildLargeSample(500);
+    expect(a).toBe(b);
+    // 2^53 + 1: JSON.parse would flatten it, so assert on the text itself.
+    expect(a).toContain('"sensorId": 9007199254740993');
+  });
+
+  it('reports monotonic chunk progress ending at the total', async () => {
+    const seen: number[] = [];
+    await buildLargeSample(600_000, (done) => seen.push(done));
+    expect(seen.at(-1)).toBe(600_000);
+    expect([...seen].sort((x, y) => x - y)).toEqual(seen);
   });
 });
