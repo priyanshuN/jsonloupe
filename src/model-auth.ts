@@ -5,10 +5,28 @@
 
 const SESSION_KEY_STORAGE = 'wb-api-key-session';
 const DEVICE_KEY_STORAGE = 'wb-api-key';
+const SOURCE_STORAGE = 'wb-api-key-source';
 const PKCE_VERIFIER_STORAGE = 'wb-openrouter-pkce-verifier';
 const PKCE_ACTIVE_STORAGE = 'wb-openrouter-pkce-active';
 
 let fileKey: string | null | undefined;
+
+/**
+ * WHERE a credential came from, so the connection dialog can say it instead of
+ * making the reader guess. Recorded beside the key in the SAME storage the key
+ * went into, so it lives and dies with it. 'stored' is the honest answer for a
+ * key that was already in storage when the page loaded and carries no record —
+ * a key written by an older build, or one whose companion entry was evicted.
+ * Never widen this to a free string: it is rendered into the dialog, and
+ * storage is the one input a page shares with everything else on its origin.
+ */
+export type ApiKeySource = 'oauth' | 'paste' | 'file' | 'dev-server' | 'stored';
+
+const SOURCES: readonly ApiKeySource[] = ['oauth', 'paste', 'file', 'dev-server', 'stored'];
+
+function asSource(value: string | null): ApiKeySource | null {
+  return SOURCES.includes(value as ApiKeySource) ? (value as ApiKeySource) : null;
+}
 
 function read(storage: Storage | undefined, key: string): string | null {
   try {
@@ -66,16 +84,28 @@ export async function getApiKey(): Promise<string | null> {
   return fileKey;
 }
 
+/**
+ * Where the credential `getApiKey()` would hand back actually came from, or
+ * null when there is none. Call it after `getApiKey()` has resolved: the
+ * dev-server answer depends on that call having run.
+ */
+export function apiKeySource(): ApiKeySource | null {
+  const scope = apiKeyPersistence();
+  if (scope === 'session') return asSource(read(session(), SOURCE_STORAGE)) ?? 'stored';
+  if (scope === 'device') return asSource(read(device(), SOURCE_STORAGE)) ?? 'stored';
+  return fileKey ? 'dev-server' : null;
+}
+
 /** Session-only is the safe default. Persistence requires explicit consent. */
-export function setApiKey(key: string, rememberOnDevice = false): void {
+export function setApiKey(key: string, rememberOnDevice = false, source: ApiKeySource = 'paste'): void {
   remove(session(), SESSION_KEY_STORAGE);
   remove(device(), DEVICE_KEY_STORAGE);
+  remove(session(), SOURCE_STORAGE);
+  remove(device(), SOURCE_STORAGE);
   if (!key) return;
-  write(
-    rememberOnDevice ? device() : session(),
-    rememberOnDevice ? DEVICE_KEY_STORAGE : SESSION_KEY_STORAGE,
-    key,
-  );
+  const store = rememberOnDevice ? device() : session();
+  write(store, rememberOnDevice ? DEVICE_KEY_STORAGE : SESSION_KEY_STORAGE, key);
+  write(store, SOURCE_STORAGE, source);
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -156,7 +186,7 @@ export async function completeOpenRouterAuth(): Promise<OpenRouterCallbackResult
     const data = (await response.json()) as { key?: string };
     const key = data.key?.trim();
     if (!key) throw new Error('OpenRouter did not return an application key');
-    setApiKey(key, false);
+    setApiKey(key, false, 'oauth');
     return { status: 'connected', key };
   } catch (error) {
     return { status: 'error', message: String(error) };

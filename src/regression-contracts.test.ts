@@ -206,6 +206,55 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toMatch(/modelKeyForm\.addEventListener\('submit',[\s\S]*?preventDefault\(\)/);
   });
 
+  it('leads the model dialog with the current connection, not the authorization pitch', () => {
+    // The defect this pins: connected, the dialog still opened on "Continue
+    // with OpenRouter / Recommended" and the only report of the live
+    // credential was a placeholder below the fold.
+    const status = appHtml.indexOf('id="model-status"');
+    const connect = appHtml.indexOf('id="openrouter-connect"');
+    expect(status).toBeGreaterThan(-1);
+    expect(status).toBeLessThan(connect);
+
+    const paint = mainSource.match(/function paintModelDialog\(\): void \{[\s\S]*?^\}/m)?.[0] ?? '';
+    // Provider, model, key tail, source and scope are all stated up top.
+    expect(paint).toContain('`${modelProviderName()} connected`');
+    expect(paint).toContain('modelStatus.hidden = !modelConnected');
+    expect(paint).toContain('modelFactKey.textContent = modelKeyTail');
+    expect(paint).toContain('modelFactModel.textContent = connectedModelLabel()');
+    expect(paint).toContain('modelFactSource.textContent = credentialSourceLabel(modelKeySource)');
+    expect(paint).toContain('modelFactScope.textContent = credentialScopeLabel()');
+    // …and the pitch stands down while there is a credential to report.
+    expect(paint).toContain('openRouterConnect.hidden = modelConnected');
+    expect(paint).toContain('modelConnectNote.hidden = modelConnected');
+    // Replace/disconnect stays reachable, behind the disclosure, never opened
+    // for the reader.
+    expect(paint).toContain("'Replace or disconnect this credential'");
+    expect(mainSource).toContain('modelKeyAdvanced.open = false');
+  });
+
+  it('never puts more than a credential tail on screen', () => {
+    const refresh = mainSource.match(/async function refreshModelConnection\(\): Promise<void> \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(refresh).toContain("modelKeyTail = key ? key.slice(-4) : ''");
+    // The full key must never reach the summary, and the field never re-shows
+    // a loaded credential the way the old placeholder did.
+    expect(mainSource).not.toContain('credential loaded (…');
+    const paint = mainSource.match(/function paintModelDialog\(\): void \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(paint).toContain('modelFactKey.textContent = modelKeyTail ? `…${modelKeyTail}` : \'—\'');
+    // The tail is the ONLY credential material the painter can reach: it takes
+    // no key argument and reads no key-bearing helper.
+    expect(paint).not.toMatch(/storedApiKey\(\)|getApiKey\(\)/);
+  });
+
+  it('reports a credential source it actually recorded', () => {
+    const label = mainSource.match(/function credentialSourceLabel\([\s\S]*?^\}/m)?.[0] ?? '';
+    for (const source of ['oauth', 'paste', 'file', 'dev-server']) {
+      expect(label).toContain(`source === '${source}'`);
+    }
+    // OAuth, the file picker and a plain paste each stamp their own origin.
+    expect(mainSource).toContain("modelKeyEntry = 'file'");
+    expect(mainSource).toContain('setApiKey(key, modelKeyRemember.checked, modelKeyEntry)');
+  });
+
   it('keeps payload conversion explicit, JSON-only, and free of stale derived output', () => {
     const toolbarCompress = mainSource.match(/\$\('#compress-btn'\)\.addEventListener[\s\S]*?^\}\);/m)?.[0] ?? '';
     const jsonEdit = mainSource.match(/codecJson\.addEventListener\('input'[\s\S]*?^\}\);/m)?.[0] ?? '';

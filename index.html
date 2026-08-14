@@ -970,16 +970,47 @@ SPDX-License-Identifier: MIT -->
       <div class="model-dialog-head">
         <div>
           <h2 id="model-dialog-title">Connect a model</h2>
-          <p>Authorize separately from your document. Nothing is sent until you translate.</p>
+          <p id="model-dialog-lede">Authorize separately from your document. Nothing is sent until you translate.</p>
         </div>
         <button id="model-dialog-close" class="btn-icon btn-quiet" type="button" title="Close" aria-label="Close">×</button>
       </div>
       <div class="model-dialog-body">
+        <!-- CONNECTED leads with the state, not the pitch. The four facts a
+             reader opens this dialog to check — which key, which model, where
+             the credential came from, how long it lives — are the first thing
+             under the title, at the top, never behind a scroll. main.ts fills
+             every value; the markup ships neutral placeholders so a half-
+             painted dialog can never assert a credential it does not have.
+             DISCONNECTED hides this and restores the OAuth headline below. -->
+        <dl id="model-status" class="model-status" hidden>
+          <div><dt>key</dt><dd><span id="model-fact-key" class="model-fact-tag">—</span></dd></div>
+          <div><dt>model</dt><dd id="model-fact-model">—</dd></div>
+          <div><dt>source</dt><dd id="model-fact-source">—</dd></div>
+          <div><dt>scope</dt><dd id="model-fact-scope">—</dd></div>
+        </dl>
+
         <button id="openrouter-connect" class="primary model-connect" type="button">
           <span class="model-connect-label"><svg class="ic" aria-hidden="true"><use href="#i-tabler-link"></use></svg><span id="openrouter-connect-text">Continue with OpenRouter</span></span>
           <span class="model-recommended">Recommended</span>
         </button>
-        <p class="model-connect-note">Authorize on OpenRouter. No API key to paste.</p>
+        <p id="model-connect-note" class="model-connect-note">Authorize on OpenRouter. No API key to paste.</p>
+
+        <fieldset class="model-choice">
+          <legend>OpenRouter model</legend>
+          <label class="model-choice-row">
+            <input id="model-choice-free" type="radio" name="openrouter-model" value="openrouter/free" checked>
+            <span class="model-choice-copy"><strong>Free models</strong><small>No credits needed · up to 50 requests/day</small></span>
+            <span class="model-choice-badge">Default</span>
+          </label>
+          <label class="model-choice-row">
+            <input id="model-choice-paid" type="radio" name="openrouter-model" value="anthropic/claude-haiku-4.5">
+            <span class="model-choice-copy"><strong>Claude Haiku 4.5</strong><small>Uses your OpenRouter credits</small></span>
+          </label>
+        </fieldset>
+        <!-- An Anthropic key never travels through OpenRouter, so the switch
+             above cannot change the model it uses. Say so rather than leaving
+             two model claims on screen contradicting each other. -->
+        <p id="model-choice-note" class="model-choice-note" hidden>This choice applies to OpenRouter credentials.</p>
 
         <dl class="model-privacy" aria-label="Model connection privacy">
           <div>
@@ -990,14 +1021,17 @@ SPDX-License-Identifier: MIT -->
             <svg class="ic" aria-hidden="true"><use href="#i-tabler-message-circle"></use></svg>
             <div><dt>Question + shape</dt><dd>sent when you translate</dd></div>
           </div>
-          <div>
+          <!-- Hidden once connected: the scope row above states the live fact,
+               and a dialog whose defect was "you cannot tell the state" does
+               not get to say the same thing twice. -->
+          <div id="model-privacy-credential">
             <svg class="ic" aria-hidden="true"><use href="#i-tabler-key"></use></svg>
             <div><dt>Credential</dt><dd id="model-credential-scope">this tab only</dd></div>
           </div>
         </dl>
 
         <details id="model-key-advanced">
-          <summary>Use API key instead</summary>
+          <summary id="model-key-summary">Use API key instead</summary>
           <p id="model-key-note">English → query sends your question and document shape (field names, types and array lengths — never values) to OpenRouter or Anthropic. Direct $.queries stay local.</p>
           <!-- A real form contains the password field and makes Enter save.
                autocomplete=off because this is an API key, not a login. -->
@@ -1007,10 +1041,14 @@ SPDX-License-Identifier: MIT -->
             <label class="model-remember"><input id="model-key-remember" class="chk" type="checkbox">remember on this device</label>
             <div class="model-key-actions">
               <button id="model-key-clear" class="btn-quiet" type="button">disconnect</button>
+              <button id="model-key-file-btn" class="btn-quiet" type="button"
+                title="Read a key from a local file — a raw key or a .env line. Read in this page, never uploaded.">load key from file…</button>
               <span class="spacer"></span>
               <button id="model-key-save" class="primary" type="submit">save key</button>
             </div>
           </form>
+          <!-- No accept filter: key files are usually extensionless (.api-key, api-key). -->
+          <input type="file" id="model-key-file-input" hidden>
         </details>
       </div>
       <p class="model-dialog-foot">Keys stay in this tab unless you choose Remember on this device.</p>

@@ -1975,6 +1975,47 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   padding: var(--gap-1) 18px 18px;
   overflow-y: auto;
 }
+/* The CONNECTED headline. Deliberately not a control and deliberately quiet:
+   it is the answer to "what am I connected to", printed where the title used
+   to be followed by a sales pitch. Same card recipe as .model-choice-row
+   (--bg on the elevated dialog, 1px --border, --r) because it is the same kind
+   of block on the same surface — one recipe, not a second card species. */
+.model-status {
+  margin: 0;
+  padding: var(--gap-2) var(--gap-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.model-status > div {
+  display: grid;
+  /* A fixed label column so the four values start on one x — the whole point
+     of the block is that it reads as a table of facts at a glance. */
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--gap-3);
+  padding: 3px 0;
+}
+.model-status dt {
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+}
+.model-status dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+/* Rule 16's STATIC TAG — a label, not a control, so no affordance. Mono
+   because the only thing it ever holds is the tail of a credential. */
+.model-fact-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+  font: 400 var(--fs-chip) var(--mono);
+}
 .model-connect {
   width: 100%;
   display: flex;
@@ -2006,22 +2047,98 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .model-connect-note {
   text-align: center;
 }
+.model-choice {
+  margin: var(--gap-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+.model-choice legend {
+  margin-bottom: var(--gap-2);
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  font-weight: 700;
+}
+.model-choice-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--gap-3);
+  min-height: 58px;
+  padding: var(--gap-2) var(--gap-3);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+}
+.model-choice-row:first-of-type {
+  border-radius: var(--r) var(--r) 0 0;
+}
+.model-choice-row:last-of-type {
+  margin-top: -1px;
+  border-radius: 0 0 var(--r) var(--r);
+}
+.model-choice-row:has(input:checked) {
+  position: relative;
+  z-index: 1;
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.model-choice-row:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.model-choice-row input { margin: 0; }
+.model-choice-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.model-choice-copy strong {
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+.model-choice-copy small {
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+}
+.model-choice-badge {
+  padding: 1px 6px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font: 400 var(--fs-chip) var(--mono);
+}
+.model-choice-note {
+  margin: var(--gap-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  line-height: 1.45;
+}
 .model-privacy {
-  margin: 18px 0 var(--gap-2);
+  margin: var(--gap-4) 0 var(--gap-1);
   border-block: 1px solid var(--border);
   padding: var(--gap-2) 0;
 }
+/* Term and definition on ONE line. Stacking them cost 52px a row for a
+   two-word answer, which is three quarters of the height this dialog had to
+   give back before the common states stopped scrolling at 720. */
 .model-privacy > div {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   gap: var(--gap-3);
   align-items: center;
-  min-height: 52px;
-  padding: var(--gap-2) var(--gap-3);
+  padding: 5px var(--gap-3);
+}
+.model-privacy > div > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-2);
+  min-width: 0;
 }
 .model-privacy dt { color: var(--text); }
 .model-privacy dd {
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--text-dim);
   font-size: var(--fs-chip);
 }

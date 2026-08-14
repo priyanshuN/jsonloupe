@@ -53,16 +53,22 @@ import {
 import {
   translateToQuery,
   buildSentPayload,
+  OPENROUTER_FREE_MODEL,
+  OPENROUTER_PAID_MODEL,
   providerForApiKey,
+  type OpenRouterModel,
   type SentPayload,
 } from './nl';
 import {
   apiKeyPersistence,
+  apiKeySource,
   beginOpenRouterAuth,
   completeOpenRouterAuth,
   getApiKey,
   setApiKey,
+  type ApiKeySource,
 } from './model-auth';
+import { parseKeyFile } from './key-file';
 import { currentChoice, currentTheme, onThemeChange, setThemeChoice, type ThemeChoice } from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
@@ -78,6 +84,7 @@ import { evaluateCheck, expectationText, type CheckExpectation } from './check';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
 import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
+import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
@@ -4303,12 +4310,27 @@ const queryPrivacy = $('#query-privacy');
 const askModelButton = $<HTMLButtonElement>('#ask-model');
 const modelDialog = $<HTMLDialogElement>('#model-dialog');
 const modelDialogClose = $<HTMLButtonElement>('#model-dialog-close');
+const modelDialogTitle = $('#model-dialog-title');
+const modelDialogLede = $('#model-dialog-lede');
+const modelStatus = $('#model-status');
+const modelFactKey = $('#model-fact-key');
+const modelFactModel = $('#model-fact-model');
+const modelFactSource = $('#model-fact-source');
+const modelFactScope = $('#model-fact-scope');
 const openRouterConnect = $<HTMLButtonElement>('#openrouter-connect');
 const openRouterConnectText = $('#openrouter-connect-text');
+const modelConnectNote = $('#model-connect-note');
+const modelFreeChoice = $<HTMLInputElement>('#model-choice-free');
+const modelPaidChoice = $<HTMLInputElement>('#model-choice-paid');
+const modelChoiceNote = $('#model-choice-note');
+const modelPrivacyCredential = $('#model-privacy-credential');
 const modelKeyAdvanced = $<HTMLDetailsElement>('#model-key-advanced');
-const modelKeySummary = $<HTMLElement>('#model-key-advanced > summary');
+const modelKeySummary = $<HTMLElement>('#model-key-summary');
 const modelKeyForm = $<HTMLFormElement>('#model-key-form');
 const modelKeyInput = $<HTMLInputElement>('#model-key-input');
+const modelKeySave = $<HTMLButtonElement>('#model-key-save');
+const modelKeyFileBtn = $<HTMLButtonElement>('#model-key-file-btn');
+const modelKeyFileInput = $<HTMLInputElement>('#model-key-file-input');
 const modelKeyRemember = $<HTMLInputElement>('#model-key-remember');
 const modelKeyClear = $<HTMLButtonElement>('#model-key-clear');
 const modelCredentialScope = $('#model-credential-scope');
@@ -4352,10 +4374,41 @@ let askAbort: AbortController | null = null;
 let askBusy = false;
 let modelConnected = false;
 let modelProvider: 'anthropic' | 'openrouter' | null = null;
+// The last FOUR characters and nothing more. Enough to tell two credentials
+// apart, useless to anyone reading it over a shoulder or off a screenshot.
+let modelKeyTail = '';
+let modelKeySource: ApiKeySource | null = null;
+// Which control put the text now sitting in the key field there, so "save key"
+// can record a truthful source. Reset whenever the field is typed into.
+let modelKeyEntry: 'paste' | 'file' = 'paste';
 let lastCommittedQuery = '';
 let lastCommittedResult: QueryResp | null = null;
 let runningCheck: SavedCheck | null = null;
 const checkRuns = new Map<string, { pass: boolean; summary: string }>();
+const OPENROUTER_MODEL_STORAGE = 'wb-openrouter-model';
+let openRouterModelMemory: OpenRouterModel = OPENROUTER_FREE_MODEL;
+
+function openRouterModelChoice(): OpenRouterModel {
+  try {
+    openRouterModelMemory = sessionStorage.getItem(OPENROUTER_MODEL_STORAGE) === OPENROUTER_PAID_MODEL
+      ? OPENROUTER_PAID_MODEL
+      : OPENROUTER_FREE_MODEL;
+  } catch { /* private mode: use the in-memory choice */ }
+  return openRouterModelMemory;
+}
+
+function setOpenRouterModelChoice(model: OpenRouterModel): void {
+  openRouterModelMemory = model;
+  try {
+    sessionStorage.setItem(OPENROUTER_MODEL_STORAGE, model);
+  } catch { /* private mode: keep the current radio selection for this page */ }
+}
+
+function paintOpenRouterModelChoice(): void {
+  const model = openRouterModelChoice();
+  modelFreeChoice.checked = model === OPENROUTER_FREE_MODEL;
+  modelPaidChoice.checked = model === OPENROUTER_PAID_MODEL;
+}
 
 function paintQueryMode(): void {
   const english = askMode.value === 'english';
@@ -4376,12 +4429,99 @@ function paintQueryMode(): void {
   if (english) void refreshModelConnection();
 }
 
+/** The provider's own name, for the one place the connection is announced. */
+function modelProviderName(): string {
+  return modelProvider === 'anthropic' ? 'Anthropic' : 'OpenRouter';
+}
+
+/**
+ * The model a translation would actually use right now. An Anthropic key goes
+ * straight to Anthropic, so the OpenRouter switch does not reach it — say the
+ * model that will really run rather than echoing a control that is inert.
+ */
+function connectedModelLabel(): string {
+  if (modelProvider === 'anthropic') return 'Claude Haiku 4.5 · direct';
+  return openRouterModelChoice() === OPENROUTER_FREE_MODEL ? 'Free models' : 'Claude Haiku 4.5';
+}
+
+/**
+ * Where the credential came from, in the reader's terms. Every branch is a
+ * fact the app actually recorded; there is no default that guesses, because a
+ * dialog that invents a provenance is worse than one that admits it lost it.
+ */
+function credentialSourceLabel(source: ApiKeySource | null): string {
+  if (source === 'oauth') return 'authorized on OpenRouter';
+  if (source === 'paste') return 'pasted into this dialog';
+  if (source === 'file') return 'loaded from a local file';
+  if (source === 'dev-server') return 'served by the local dev server';
+  return 'already in this browser when the page loaded';
+}
+
+/** How long the credential lives, in the reader's terms. */
+function credentialScopeLabel(): string {
+  const persistence = apiKeyPersistence();
+  if (persistence === 'device') return 'remembered on this device';
+  if (persistence === 'session') return 'this tab only';
+  // No browser storage holds it — the dev server hands it over per page load.
+  return 'not stored in this browser';
+}
+
+/**
+ * Paint the dialog for the CURRENT connection. Two states, one surface:
+ * CONNECTED leads with the four facts and demotes replace/disconnect into the
+ * disclosure; DISCONNECTED restores the OAuth headline. Sync on purpose — it
+ * runs off state refreshModelConnection() has already resolved, so a radio
+ * change repaints the summary with no await and no flicker.
+ */
+function paintModelDialog(): void {
+  const anthropic = modelProvider === 'anthropic';
+
+  modelDialogTitle.textContent = modelConnected
+    ? `${modelProviderName()} connected`
+    : 'Connect a model';
+  modelDialogLede.textContent = modelConnected
+    ? 'Ready to turn English questions into queries.'
+    : 'Authorize separately from your document. Nothing is sent until you translate.';
+
+  modelStatus.hidden = !modelConnected;
+  modelFactKey.textContent = modelKeyTail ? `…${modelKeyTail}` : '—';
+  modelFactModel.textContent = connectedModelLabel();
+  modelFactSource.textContent = credentialSourceLabel(modelKeySource);
+  modelFactScope.textContent = credentialScopeLabel();
+
+  // The pitch only exists while there is nothing to pitch against.
+  openRouterConnect.hidden = modelConnected;
+  modelConnectNote.hidden = modelConnected;
+
+  modelChoiceNote.hidden = !(modelConnected && anthropic);
+  // Connected, the live scope is stated at the top; the privacy list keeps the
+  // two rows that are about the DOCUMENT rather than the credential.
+  modelPrivacyCredential.hidden = modelConnected;
+  // Disconnected, this row is a PROMISE about the key you are about to add,
+  // not a report — so it names the default the save control will apply, and
+  // leaves "not stored in this browser" to the status panel, which is the only
+  // place that fact can be true.
+  modelCredentialScope.textContent = apiKeyPersistence() === 'device'
+    ? 'remembered on this device'
+    : 'this tab only';
+
+  modelKeySummary.textContent = modelConnected
+    ? 'Replace or disconnect this credential'
+    : 'Use API key instead';
+  modelKeyInput.placeholder = modelConnected ? 'paste a new key to replace' : ASK_KEY_PLACEHOLDER;
+  modelKeyClear.hidden = !modelConnected;
+}
+
 async function refreshModelConnection(): Promise<void> {
   const key = await getApiKey();
   modelConnected = Boolean(key);
   modelProvider = key ? providerForApiKey(key) : null;
-  const provider = modelProvider === 'anthropic' ? 'Anthropic' : 'OpenRouter';
-  askModelButton.textContent = `${provider} connected`;
+  modelKeyTail = key ? key.slice(-4) : '';
+  modelKeySource = key ? apiKeySource() : null;
+  const provider = modelProviderName();
+  askModelButton.textContent = modelProvider === 'openrouter'
+    ? `OpenRouter · ${openRouterModelChoice() === OPENROUTER_FREE_MODEL ? 'free models' : 'Claude Haiku'}`
+    : `${provider} connected`;
   askModelButton.title = `Manage the ${provider} connection`;
   if (askMode.value === 'english') {
     askRunBtn.textContent = modelConnected ? 'translate' : 'connect to translate';
@@ -4390,23 +4530,23 @@ async function refreshModelConnection(): Promise<void> {
       : 'Connect a model before translating this question';
     askModelButton.hidden = !modelConnected;
   }
-  const persistence = apiKeyPersistence();
-  modelCredentialScope.textContent = persistence === 'device' ? 'remembered on this device' : 'this tab only';
+  paintModelDialog();
 }
 
-async function openModelConnection(manage = false): Promise<void> {
-  const key = await getApiKey();
-  const persistence = apiKeyPersistence();
+async function openModelConnection(): Promise<void> {
+  await refreshModelConnection();
   modelKeyInput.value = '';
-  modelKeyInput.placeholder = key
-    ? `credential loaded (…${key.slice(-4)}) — paste only to replace`
-    : ASK_KEY_PLACEHOLDER;
-  modelKeyRemember.checked = persistence === 'device';
-  modelKeyClear.hidden = !key;
-  modelKeyAdvanced.open = manage;
-  modelCredentialScope.textContent = persistence === 'device' ? 'remembered on this device' : 'this tab only';
+  modelKeyEntry = 'paste';
+  modelKeyRemember.checked = apiKeyPersistence() === 'device';
+  // Never pre-opened: replacing a working credential is not what opening this
+  // dialog means, in either state.
+  modelKeyAdvanced.open = false;
+  paintOpenRouterModelChoice();
   if (!modelDialog.open) modelDialog.showModal();
-  (manage ? modelKeySummary : openRouterConnect).focus();
+  // Connected, the dialog is something to READ — the title carries the state
+  // to a screen reader, so focus rests on the way out rather than on a control
+  // that implies you still have work to do.
+  (modelConnected ? modelDialogClose : openRouterConnect).focus();
 }
 
 function setAskBusy(busy: boolean): void {
@@ -4472,8 +4612,20 @@ askMode.addEventListener('change', () => {
 });
 paintQueryMode();
 
-askModelButton.addEventListener('click', () => void openModelConnection(true));
+askModelButton.addEventListener('click', () => void openModelConnection());
 modelDialogClose.addEventListener('click', () => modelDialog.close());
+
+modelFreeChoice.addEventListener('change', () => {
+  if (!modelFreeChoice.checked) return;
+  setOpenRouterModelChoice(OPENROUTER_FREE_MODEL);
+  void refreshModelConnection();
+});
+
+modelPaidChoice.addEventListener('change', () => {
+  if (!modelPaidChoice.checked) return;
+  setOpenRouterModelChoice(OPENROUTER_PAID_MODEL);
+  void refreshModelConnection();
+});
 
 openRouterConnect.addEventListener('click', async () => {
   openRouterConnect.disabled = true;
@@ -4487,6 +4639,11 @@ openRouterConnect.addEventListener('click', async () => {
   }
 });
 
+// Typing into the field makes it a paste, whatever put text there before.
+modelKeyInput.addEventListener('input', () => {
+  modelKeyEntry = 'paste';
+});
+
 // Submit, not click: Enter in the advanced key field saves too.
 modelKeyForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -4495,17 +4652,47 @@ modelKeyForm.addEventListener('submit', (event) => {
     modelKeyInput.focus();
     return;
   }
-  setApiKey(key, modelKeyRemember.checked);
+  setApiKey(key, modelKeyRemember.checked, modelKeyEntry);
   modelDialog.close();
   void refreshModelConnection();
   showToast(modelKeyRemember.checked ? 'model connected · remembered on this device' : 'model connected · this tab only');
 });
 
-modelKeyClear.addEventListener('click', () => {
+// Disconnect leaves the dialog OPEN and repaints it. The whole redesign is
+// that this surface tells you the current state; the one moment the state
+// changes under your hand is the last moment to hide it. It also keeps the
+// dev-server case honest — clearing browser storage there reveals that the
+// local key file is still supplying a credential, instead of claiming a
+// disconnection the next translation would contradict.
+modelKeyClear.addEventListener('click', async () => {
   setApiKey('');
-  modelDialog.close();
-  void refreshModelConnection();
-  showToast('model disconnected');
+  modelKeyInput.value = '';
+  modelKeyEntry = 'paste';
+  await refreshModelConnection();
+  modelKeyAdvanced.open = false;
+  showToast(modelConnected
+    ? 'browser credential cleared · the local dev server still supplies one'
+    : 'model disconnected');
+});
+
+modelKeyFileBtn.addEventListener('click', () => modelKeyFileInput.click());
+
+modelKeyFileInput.addEventListener('change', async () => {
+  const file = modelKeyFileInput.files?.[0];
+  modelKeyFileInput.value = '';
+  if (!file) return;
+  // Only the head is read: a key file is tiny, and this keeps a mis-picked
+  // large document out of memory.
+  const key = parseKeyFile(await file.slice(0, 64 * 1024).text());
+  if (!key) {
+    showToast('no API key in that file — expected a raw key or an OPENROUTER_API_KEY / ANTHROPIC_API_KEY line');
+    return;
+  }
+  // Into the field, not into storage: saving still takes the explicit
+  // "save key" press so the remember-on-this-device choice stays deliberate.
+  modelKeyInput.value = key;
+  modelKeyEntry = 'file';
+  modelKeySave.focus();
 });
 
 async function restoreOpenRouterConnection(): Promise<void> {
@@ -4542,6 +4729,37 @@ modelDialog.addEventListener('click', (event) => {
 function setAskStatus(msg: string | null): void {
   askStatus.hidden = !msg;
   askStatus.textContent = msg ?? '';
+}
+
+/** The schema string handed to the model for the query now under review. */
+let askSchemaSent: string | null = null;
+
+/**
+ * The model is told the document's field names, not its values, and when it
+ * cannot find the field a question implies it tends to invent a plausible one:
+ * asking for order totals against a document without them produced
+ * `$.orders[…].total | sum`, which runs, matches nothing, and reports "0
+ * numeric values" — a wrong answer wearing the costume of a right one. The
+ * schema says which names are real, so say it here, at the one moment the user
+ * is being asked to trust the query. Silence is reserved for the case where the
+ * schema was truncated: there the names genuinely cannot be checked, and a
+ * warning we cannot stand behind is worse than none.
+ */
+function askReviewStatus(query: string, schema: string | null): string {
+  const ready = 'query ready — review it, then run locally';
+  if (!schema) return ready;
+  const { unknown, complete } = unknownQueryFields(query, schema);
+  const [first] = unknown;
+  if (!first) {
+    return complete ? ready : `${ready} · part of this document's shape was too deep to send, so its field names could not be checked`;
+  }
+  const fix = first.suggestion
+    ? `did you mean ${first.suggestion}?`
+    : first.available.length
+      ? `${first.context} has ${first.available.slice(0, 4).join(', ')}`
+      : 'the document has no fields there';
+  const rest = unknown.length > 1 ? ` (+${unknown.length - 1} more)` : '';
+  return `${first.name} is not in this document${rest} — ${fix}`;
 }
 
 function fmtNumber(v: number): string {
@@ -4601,6 +4819,12 @@ function commitQueryResult(query: string, res: QueryResp): void {
     const evaluation = evaluateCheck(runningCheck.expectation, observed);
     checkRuns.set(runningCheck.id, { pass: evaluation.pass, summary: evaluation.summary });
     setAskStatus(`${runningCheck.name}: ${evaluation.summary}`);
+  } else {
+    // The review line ("review it, then run locally", or a warning about a field
+    // the document lacks) belongs to the query BEFORE it runs. The result below
+    // now answers both, and leaving the instruction up tells the user to do what
+    // they just did.
+    setAskStatus(null);
   }
   if (!checkEditor.hidden) paintCheckPreview();
 }
@@ -4925,7 +5149,8 @@ async function runAsk(presetQuery?: string): Promise<void> {
       try {
         const schema = await call<{ text: string }>({ type: 'schema' });
         if (!isCurrent()) return;
-        sent = buildSentPayload(key, schema.text, input); // the one object we send AND disclose
+        askSchemaSent = schema.text;
+        sent = buildSentPayload(key, schema.text, input, openRouterModelChoice()); // the one object we send AND disclose
         renderDisclosure(sent, null);
         query = await translateToQuery(key, sent, controller.signal);
         if (!isCurrent()) return;
@@ -4951,7 +5176,7 @@ async function runAsk(presetQuery?: string): Promise<void> {
     askQueryLine.hidden = !isEnglish;
     askQueryEdit.value = query;
     if (isEnglish) {
-      setAskStatus('query ready — review it, then run locally');
+      setAskStatus(askReviewStatus(query, askSchemaSent));
       askQueryEdit.focus();
       return;
     }

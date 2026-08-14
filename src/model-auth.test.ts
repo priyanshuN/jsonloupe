@@ -60,6 +60,65 @@ describe('model credential storage', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('records where a credential came from beside the key that carries it', async () => {
+    vi.resetModules();
+    const tab = storage();
+    const device = storage();
+    vi.stubGlobal('sessionStorage', tab);
+    vi.stubGlobal('localStorage', device);
+    const { apiKeySource, setApiKey } = await import('./model-auth');
+
+    setApiKey('sk-or-file', false, 'file');
+    expect(tab.setItem).toHaveBeenCalledWith('wb-api-key-source', 'file');
+    expect(apiKeySource()).toBe('file');
+
+    // Remembering moves the provenance into the SAME storage as the key, so a
+    // reload reads back a matched pair rather than a stale source.
+    setApiKey('sk-ant-device', true, 'paste');
+    expect(device.setItem).toHaveBeenCalledWith('wb-api-key-source', 'paste');
+    expect(apiKeySource()).toBe('paste');
+  });
+
+  it('forgets the source when the credential is cleared', async () => {
+    vi.resetModules();
+    const tab = storage();
+    vi.stubGlobal('sessionStorage', tab);
+    vi.stubGlobal('localStorage', storage());
+    const { apiKeySource, setApiKey } = await import('./model-auth');
+
+    setApiKey('sk-or-tab', false, 'oauth');
+    setApiKey('');
+
+    expect(tab.removeItem).toHaveBeenCalledWith('wb-api-key-source');
+    expect(apiKeySource()).toBeNull();
+  });
+
+  it('reports a key it cannot explain as stored rather than inventing a source', async () => {
+    vi.resetModules();
+    // Storage is shared with everything else on the origin, so a source that is
+    // not one of the known values must never reach the dialog verbatim.
+    vi.stubGlobal('sessionStorage', storage({
+      'wb-api-key-session': 'sk-or-tab',
+      'wb-api-key-source': 'authorized by <b>someone</b>',
+    }));
+    vi.stubGlobal('localStorage', storage());
+    const { apiKeySource } = await import('./model-auth');
+
+    expect(apiKeySource()).toBe('stored');
+  });
+
+  it('attributes the development key file to the dev server, and only after it is read', async () => {
+    vi.resetModules();
+    vi.stubGlobal('sessionStorage', storage());
+    vi.stubGlobal('localStorage', storage());
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, text: async () => 'sk-or-file' })));
+    const { apiKeySource, getApiKey } = await import('./model-auth');
+
+    expect(apiKeySource()).toBeNull();
+    await getApiKey();
+    expect(apiKeySource()).toBe('dev-server');
+  });
+
   it('loads, trims, and caches the development key file', async () => {
     vi.resetModules();
     vi.stubGlobal('sessionStorage', storage());
@@ -129,6 +188,7 @@ describe('OpenRouter OAuth PKCE', () => {
       }),
     }));
     expect(tab.setItem).toHaveBeenCalledWith('wb-api-key-session', 'sk-or-oauth');
+    expect(tab.setItem).toHaveBeenCalledWith('wb-api-key-source', 'oauth');
     expect(device.setItem).not.toHaveBeenCalled();
   });
 });
