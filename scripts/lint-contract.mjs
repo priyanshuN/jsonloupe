@@ -233,6 +233,20 @@ const codeApply = selectorBody('#code-apply');
 if (!/white-space:\s*nowrap/.test(codeApply) || !/flex-shrink:\s*0/.test(codeApply)) {
   errors.push('style.css: #code-apply must stay on one non-shrinking line (code-status regression)');
 }
+// A closed <dialog> is hidden by the UA's `dialog:not([open])` rule, which any
+// id selector outranks. Declaring `display` on one unconditionally therefore
+// leaves it on screen after it closes — laid out in the page flow, wearing a
+// close button that looks broken precisely because it already worked. Shipped
+// exactly that once; the fix is to scope the declaration to [open].
+for (const m of css.matchAll(/^(#[\w-]*dialog(?:\[[^\]]*\])?[^{,]*)\{/gim)) {
+  const selector = m[1].trim();
+  if (/::backdrop/.test(selector) || /\[open\]/.test(selector)) continue;
+  const [open, end] = blockRange(m.index);
+  if (/(?:^|[;{\s])display\s*:/.test(css.slice(open + 1, end - 1))) {
+    errors.push(`style.css:${lineOf(m.index)} "${selector}" sets display outside [open] — a closed dialog would stay on screen`);
+  }
+}
+
 const statusNote = selectorBody('.status-note');
 for (const declaration of [/min-width:\s*0/, /overflow:\s*hidden/, /text-overflow:\s*ellipsis/, /white-space:\s*nowrap/]) {
   if (!declaration.test(statusNote)) {

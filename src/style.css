@@ -695,8 +695,7 @@ button:has(> .ic) {
 .btn-unpack,
 .chip-del,
 .crumb-chip,
-.codec-box-head button,
-#ask-query-line button {
+.codec-box-head button {
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
   font-size: var(--fs-chip);
@@ -1935,12 +1934,6 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   --ic-stroke: 1.6;
   width: min(500px, calc(100vw - 24px));
   max-height: min(720px, calc(100vh - 24px));
-  /* The dialog owns the height limit and the shell flexes inside it, so exactly
-     one box scrolls — the body. Giving the shell its own copy of this
-     max-height put it and the dialog's two border pixels over the limit
-     together, and the dialog grew a second scrollbar beside the body's. */
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
   padding: 0;
   color: var(--text);
@@ -1948,6 +1941,18 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border: 1px solid var(--border-strong);
   border-radius: calc(var(--r) + var(--r-xs));
   box-shadow: var(--shadow);
+}
+/* Scoped to [open], and it must stay that way: the browser hides a closed
+   dialog with `dialog:not([open]) { display: none }`, which an id selector
+   outranks — an unscoped `display` here leaves the dialog on screen after it
+   closes, sitting in the page flow with a close button that appears dead.
+   The dialog owns the height limit and the shell flexes inside it so exactly
+   one box scrolls: giving the shell its own copy of the max-height put it and
+   the dialog's two border pixels over the limit together, and the dialog grew
+   a second scrollbar beside the body's. */
+#model-dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 #model-dialog::backdrop {
   background: color-mix(in srgb, var(--bg) 58%, transparent);
@@ -2642,52 +2647,148 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   max-height: 46vh;
   overflow-y: auto;
 }
-/* Rule 1: without align-items the buttons STRETCH to the input's natural
-   height, which made every control in this panel 31px — a third size the
-   contract does not have. The input is pinned to --ctl-h and the row centres,
-   so 28px holds even if the font changes. */
-.ask-row { display: flex; align-items: center; gap: var(--gap-2); }
-.ask-command-row { flex-wrap: nowrap; }
-.ask-command-title {
+/* HEAD — identity, mode, the kept rail, close. Rule 1: without align-items the
+   controls STRETCH to the field's natural height, which made every control in
+   this panel a third size the contract does not have. */
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  min-height: var(--ctl-h);
+}
+.ask-title {
   flex-shrink: 0;
   color: var(--text);
   font-size: var(--fs-body);
 }
-#ask-mode { flex: 0 0 auto; width: 18ch; font-family: var(--sans); }
-/* Rule 14 gives these the ground, border, inset, type and ring; the comment
-   that used to live here — "a field on chrome takes the canvas" — is now the
-   rule itself, and it holds on every surface rather than only this one. */
-#ask-box, #model-key-input { flex: 1; }
-/* The measure is the question, not the window. flex:1 with no cap gave this
-   field ~131 characters on a wide screen for a natural-language question that
-   is 40 to 80 — so the sentence you are typing trails off across a metre of
-   chrome while more than half the box stays empty. Capped, the row's leftover
-   width goes to the controls instead of to the field, which is why `key` sits
-   out at the edge rather than glued to `run`. */
-#ask-box { min-width: 22ch; max-width: none; }
-#query-privacy {
+#ask-mode { flex-shrink: 0; }
+
+/* The kept rail takes the row's leftover width and SCROLLS: a long history must
+   never wrap `×` onto a row of its own, and it must never move when a result
+   arrives — which is exactly what the two bottom sections it replaces did. */
+.ask-kept {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ask-kept::-webkit-scrollbar { display: none; }
+.ask-kept > div { display: flex; flex-shrink: 0; gap: var(--gap-1); }
+.ask-kept[hidden] { display: none; }
+/* With no rail there is nothing to eat the leftover width, so `×` would sit
+   glued to the mode switch instead of at the panel's edge. */
+.ask-kept[hidden] + #ask-close { margin-left: auto; }
+
+/* THE PIPELINE CARD — the one object that says ask → review → run are ONE
+   operation with an order.
+   It keeps the strip's CHROME ground rather than taking the canvas, and that is
+   deliberate: rule 11's "a card on chrome takes the canvas" corollary is about
+   controls, and rule 14 gives every field the canvas unconditionally. A canvas
+   card holding canvas fields draws white on white — the fields stop reading as
+   boxes you type in and become regions of a card. Ground stays chrome, the
+   fields lift off it exactly as they do everywhere else, and the border alone
+   does the grouping. */
+.ask-pipe {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  padding: var(--gap-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.ask-step { display: flex; align-items: center; gap: var(--gap-2); }
+.ask-step[hidden] { display: none; }
+/* The hairline IS the structure: two full-bleed rows separated by whitespace
+   cannot say "ordered, and part of the same thing"; this can. `~` rather than
+   `+` so the rule reads "any visible step that has a visible step before it" —
+   with `+` the query step would draw a line under the hidden ask step in JSON
+   mode, i.e. a hairline above the card's first row. The notice and the failure
+   are bordered boxes already and are excluded on purpose; the receipt takes the
+   line because it is the card's last, quietest word. */
+.ask-pipe > .ask-step:not([hidden]) ~ .ask-step:not([hidden]),
+.ask-pipe > :not([hidden]) ~ #ask-disclosure:not([hidden]) {
+  border-top: 1px solid var(--border);
+  padding-top: var(--gap-2);
+}
+
+/* Rule 14: the standing label lives INSIDE the shell, so it stops eating the
+   query's measure — GENERATED QUERY cost 15ch and truncated the query it
+   labelled at 430px. 6ch holds both `ask` and `query` on one x. */
+.ask-field { flex: 1; min-width: 0; }
+.ask-field > .field-prefix { min-width: 6ch; }
+#ask-query-edit { color: var(--c-number); font-family: var(--mono); }
+.ask-step > button { flex-shrink: 0; }
+
+/* Rule 16's distinction made on purpose: the connection fact is a BUTTON in
+   English mode (clicking manages the connection) and a static label in JSON
+   mode (clicking does nothing, so it gets no affordance) — same rank, two
+   shapes. */
+.ask-meta {
   flex-shrink: 0;
   color: var(--text-dim);
   font-family: var(--sans);
   font-size: var(--fs-chip);
 }
-#ask-model { flex-shrink: 0; }
-#ask-status, #run-status { color: var(--text-dim); font-size: var(--fs-body); font-style: italic; }
-#ask-query-line {
+button.ask-meta {
+  /* Long enough for the longest label the connection can produce
+     (`shape only · OpenRouter Haiku`) and no longer: past that the fact starts
+     competing with the question for the row. */
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rule 15 tier 2 — ink AND a hairline, no fill: the query runs, but it names a
+   field this document does not have, and a plausible empty answer read as a
+   right one is the failure mode this exists to prevent. As wide as what it
+   says, like .run-remark, so it reads as a remark rather than a banner. */
+.ask-notice {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0;
+  padding: 2px var(--gap-2);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--r-sm);
+  font-size: var(--fs-body);
+}
+.ask-notice[hidden] { display: none; }
+
+/* ANSWER — the panel's payload. */
+.ask-answer { display: flex; flex-direction: column; gap: var(--gap-2); }
+.ask-answer[hidden] { display: none; }
+.ask-answer-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--gap-2);
-  color: var(--text-dim);
-  font: var(--fs-chip) var(--mono);
+  min-height: var(--ctl-h);
 }
-#ask-query-edit {
-  flex: 1;
-  min-width: 0;
-  color: var(--c-number);
-}
-#ask-query-line button { flex-shrink: 0; }
+.ask-answer-actions { display: flex; flex-wrap: wrap; gap: var(--gap-2); }
+.ask-summary { color: var(--text-dim); font-size: var(--fs-body); }
 
-#ask-save-actions { margin: 0; }
+/* Rule 15 tier 2 — the check verdict is the one sentence this panel prints that
+   no control on screen already says, so it is the one that keeps a band of its
+   own. The pass/fail edges reuse .check-chip's existing 55% recipe rather than
+   inventing a fourth colour-mix. */
+.ask-verdict {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0;
+  padding: 2px var(--gap-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+}
+.ask-verdict[hidden] { display: none; }
+.ask-verdict.pass { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.ask-verdict.fail { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+
 #check-editor {
   display: flex;
   align-items: center;
@@ -2698,8 +2799,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: var(--r);
   background: var(--bg-canvas);
 }
-#check-editor[hidden],
-.ask-kept[hidden] { display: none; }
+#check-editor[hidden] { display: none; }
 #check-name { flex: 1 1 22ch; }
 #check-expectation { flex: 0 1 34ch; font-family: var(--sans); }
 #check-count { width: 12ch; }
@@ -2710,13 +2810,6 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 #check-preview.pass { color: var(--ok); }
 #check-preview.fail { color: var(--danger); }
-.ask-kept {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--gap-2);
-}
-.ask-kept > .standing-label { padding-top: 5px; }
-#ask-checks { display: flex; flex-wrap: wrap; gap: 6px; }
 .check-chip.pass { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
 .check-chip.fail { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
 .check-chip .check-mark { font-weight: 700; }
@@ -2741,10 +2834,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   margin-bottom: 5px;
 }
 
-/* "sent to model" transparency disclosure */
-/* Cards sitting ON the ask panel's chrome take the canvas, same reasoning as
-   the fields above. */
-#ask-disclosure,
+/* "sent to model" transparency disclosure. It has NO border of its own — the
+   pipeline card it closes is already the container, and a bordered card inside
+   a bordered card is what made the receipt outrank the answer. The run
+   console keeps the shell: it stands on chrome with nothing around it, and a
+   card sitting ON chrome takes the canvas (rule 11's corollary). */
 #run-console {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -2758,6 +2852,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--text-dim);
   font: var(--fs-chip) var(--mono);
 }
+/* A receipt is read after the fact, on purpose, not glanced at — so it drops to
+   the faint rank as the card's last, quietest line. */
+#ask-disclosure > summary { color: var(--text-faint); }
 #ask-disclosure-body { margin-top: 7px; display: flex; flex-direction: column; gap: 5px; }
 .disc-row { display: flex; gap: 10px; align-items: baseline; }
 .disc-key { flex-shrink: 0; min-width: 158px; color: var(--text-dim); font-size: var(--fs-chip); }
@@ -2794,12 +2891,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: var(--r-sm);
   font: var(--fs-body) var(--mono);
 }
-.ask-value { font: 700 26px var(--mono); color: var(--c-number); }
+/* Rule 23: the result headline takes the ramp's top rank. 26px survived lint
+   only because DISPLAY_SIZES was not scoped by selector — that allowlist exists
+   for the LANDING's display ladder under rule 22's exception, and a workbench
+   control was inheriting the marketing page's licence. */
+.ask-value { font: 700 var(--fs-title) var(--mono); color: var(--c-number); }
 .ask-label { color: var(--text-dim); font-size: var(--fs-body); }
 .ask-group { display: flex; gap: 14px; font: var(--fs-body) var(--mono); padding: 2px 0; }
 .ask-group-key { color: var(--c-key); min-width: 160px; }
 .ask-group-count { color: var(--c-number); }
-.ask-actions { display: flex; gap: var(--gap-2); margin: var(--gap-1) 0; }
 .ask-table { border-collapse: collapse; font: var(--fs-body) var(--mono); margin: var(--gap-1) 0; }
 .ask-table th, .ask-table td {
   border: 1px solid var(--border);
@@ -2812,7 +2912,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .ask-table th { color: var(--c-key); font-weight: 700; }
 #ask-result .hit { padding: 3px 0; }
-#ask-saved, #run-saved { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Run mode's saved chips still wrap into a block; the Query panel's two lists
+   are one non-wrapping scrolling rail in the head row (.ask-kept > div), so
+   they are deliberately not in this selector any more. */
+#run-saved { display: flex; flex-wrap: wrap; gap: 6px; }
 /* Rule 16, the ACTIONABLE CHIP: clicking it re-runs the query, so it wears the
    same fully-round canvas shape as .crumb-chip rather than a third radius. */
 .ask-chip {
@@ -2847,10 +2950,16 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    state. Desktop continues to show both panes and never pays for this row. */
 #run-mobile-switch { display: none; }
 
-/* The producer strip itself, its rows, its status line, its failure line and
-   its console shell are all the ask panel's, shared by selector above rather
-   than restated here — they are the same strip. What is left is the script box,
-   the facts only the runner has, and the column the two of them stand in. */
+/* The producer strip's box and its failure line are still the ask panel's,
+   shared by selector above rather than restated here — they are the same strip.
+   What is left is the script box, the facts only the runner has, and the column
+   the two of them stand in. */
+
+/* The runner's narration is a real one — it reports elapsed time and the shape
+   a sandbox returned, which no control on that strip says. The Query panel's
+   twin was deleted with this redesign (it read back the button beside it), so
+   this recipe is now the run strip's alone rather than a shared rule. */
+#run-status { color: var(--text-dim); font-size: var(--fs-body); font-style: italic; }
 
 /* The strip is a scrolling column (it shares #ask-panel's max-height), so its
    bands keep their own height and the STRIP scrolls. Without this the script
@@ -4988,19 +5097,23 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
     max-height: 58vh;
     max-height: 58dvh;
   }
-  .ask-row,
-  #ask-query-line,
-  .ask-actions {
-    flex-wrap: wrap;
+  /* Compact: the field takes the whole row and the step's controls follow under
+     it, rather than the field being squeezed to nothing between them. The kept
+     rail drops to a line of its own so the head keeps `Query`, the mode switch
+     and `×` together on one row. */
+  .ask-head { flex-wrap: wrap; }
+  .ask-kept {
+    order: 3;
+    flex-basis: 100%;
   }
-  #ask-box,
+  .ask-kept[hidden] + #ask-close { margin-left: 0; }
+  #ask-close { margin-left: auto; }
+  .ask-step { flex-wrap: wrap; }
+  .ask-field { flex-basis: 100%; }
   #model-key-input {
     min-width: 0;
     max-width: none;
   }
-  #ask-box { flex: 1 1 220px; }
-  #ask-model { margin-left: 0; }
-  #ask-query-edit { flex-basis: 220px; }
   #ask-result {
     max-width: 100%;
     overflow-x: auto;
