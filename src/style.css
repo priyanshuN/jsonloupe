@@ -476,8 +476,15 @@
   --r-xl: 16px;
   --mono: ui-monospace, 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  /* Display face for the public pages only — the workbench keeps --sans. */
-  --display: 'Space Grotesk', var(--sans);
+  /* Display faces for the public pages only — the workbench keeps --sans.
+     TWO ranks: --display (Martian Mono) is the DISPLAY voice — headlines,
+     band titles, card titles, the wordmark — chosen because the product's
+     thesis is exact digits, and a mono headline sets that thesis in the
+     letterforms themselves. --display-prose (Space Grotesk) is the public
+     pages' PROSE voice — landing body copy and the whole spec page — where
+     a mono would be hostile at paragraph length. */
+  --display: 'Martian Mono', var(--mono);
+  --display-prose: 'Space Grotesk', var(--sans);
   --row-h: 28px;
 
   /* Contract rules 1, 3 and 4 — the only control sizes and gaps in the app.
@@ -527,9 +534,20 @@
 
 /* Self-hosted so the public pages issue zero third-party requests — the page
    claims "0 bytes uploaded" and SECURITY.md inventories every fetch, and a
-   Google Fonts link would quietly contradict both. One variable woff2 (latin
-   subset) covers the 400/500/700 the design uses. SIL OFL 1.1, see
-   public/fonts/OFL.txt and THIRD_PARTY_LICENSES.md. */
+   Google Fonts link would quietly contradict both. Two variable woff2s (latin
+   subset each): Martian Mono carries the display rank, Space Grotesk the
+   public-page prose rank. SIL OFL 1.1 for both, see public/fonts/OFL.txt and
+   THIRD_PARTY_LICENSES.md. */
+@font-face {
+  font-family: 'Martian Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/martian-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
 @font-face {
   font-family: 'Space Grotesk';
   font-style: normal;
@@ -1142,7 +1160,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  font-family: var(--display);
+  font-family: var(--display-prose);
 }
 
 /* app mode: strip the marketing surface down to the paste card */
@@ -1228,22 +1246,96 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   background: radial-gradient(1100px 420px at 8% -10%, var(--hero-wash), transparent 70%);
 }
 .lp-hero-copy { align-self: center; }
-.lp-pill {
-  display: inline-block;
-  margin-bottom: 26px;
-  padding: 5px var(--gap-3);
-  border: 1px solid var(--accent-line);
-  border-radius: var(--r-pill);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font: 400 var(--fs-chip) var(--mono);
-}
-.lp-pill-sep { color: var(--text-faint); }
+/* No eyebrow pill: the headline opens the page, and the trust facts live in
+   the mono readout line below the copy — the same status-bar idiom the rest
+   of the page already speaks. A badge above a headline is decoration; a
+   readout is information. */
 .lp-hero h1 {
   margin: 0;
-  font: 700 58px/1.04 var(--display);
-  letter-spacing: -2.2px;
+  font: 700 58px/1.14 var(--display);
+  letter-spacing: -2px;
   text-wrap: balance;
+}
+
+/* ---- the loupe (hero signature) -----------------------------------------
+   One line of document, one lens resting on the sixteen digits a float
+   parser would destroy. The raw line sits faint on the page; under the
+   glass the same characters render magnified on --bg-canvas — the reading
+   surface — because looking through the loupe IS reading the document.
+   Geometry is ch-based so it holds on any platform mono. On load the lens
+   sweeps once from the key to the digits and settles; reduced motion (and
+   browsers without @property) get the resting frame. */
+@property --lens-x {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+.lp-lens-strip {
+  position: relative;
+  margin: 34px 0 0;
+  height: 104px;
+  display: flex;
+  align-items: center;
+  /* the line is longer than a phone: clip at the strip and fade the cut so
+     the document reads as continuing past the viewport, not as truncated.
+     A mask reads only alpha, so the keyword is not a color decision. */
+  max-width: 100%;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, black 0 85%, transparent);
+  /* the strip's own font IS the raw line's font, so 1ch below = 1 raw char */
+  font: 400 var(--fs-code) var(--mono);
+  /* resting point: the TAIL of "9007199254740993" — 13 chars of prefix put
+     the digits at ch 13-29, and the story is the last three, so the glass
+     centers near the end rather than the middle of the number */
+  --lens-x: 26ch;
+  --lens-d: 104px;
+  --lens-mag: 2.1;
+  animation: lens-sweep 1100ms 250ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@keyframes lens-sweep {
+  from { --lens-x: 4ch; }
+}
+.lp-lens-line {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.lp-lens {
+  position: absolute;
+  top: 50%;
+  left: var(--lens-x);
+  transform: translate(-50%, -50%);
+  width: var(--lens-d);
+  height: var(--lens-d);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-canvas);
+  /* the ring is the brand's loupe drawn at 1:1 — accent hairline, like the
+     favicon's ring, never a fill (contract rule 6) */
+  border: 2px solid var(--accent-line);
+  box-shadow: var(--shadow-sm), 0 0 0 1px var(--border-soft);
+}
+.lp-lens-mag {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--lens-d) / 2 - var(--lens-x) * var(--lens-mag));
+  transform: translateY(-50%);
+  font-size: calc(var(--fs-code) * var(--lens-mag));
+  white-space: nowrap;
+}
+.lp-lens-mag b { font-weight: 400; color: var(--c-number); }
+.lp-lens-note {
+  margin: var(--gap-3) 0 0;
+  color: var(--text-dim);
+  font: var(--fs-body) var(--mono);
+  text-wrap: pretty;
+}
+.lp-lens-note .lp-rounded {
+  color: var(--danger);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-lens-strip { animation: none; }
 }
 .lp-lede {
   margin: 22px 0 0;
@@ -1368,10 +1460,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   transition: background var(--dur) var(--ease);
 }
 .lp-cell:hover { background: color-mix(in srgb, var(--bg-hover) 45%, var(--bg-elevated)); }
+/* Lowercase, like every label in the workbench (contract rule 2) — the caps
+   eyebrow is the one treatment every templated feature grid reaches for, and
+   the card titles already carry the hierarchy. */
 .lp-tag {
   font: 400 var(--fs-chip) var(--mono);
-  letter-spacing: 1px;
-  text-transform: uppercase;
 }
 .lp-tag-number { color: var(--c-number); }
 .lp-tag-accent { color: var(--accent); }
@@ -1382,6 +1475,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-cell h3 { margin: 10px 0 var(--gap-2); font: 600 18px var(--display); }
 .lp-cell p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.6; text-wrap: pretty; }
 .lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
+/* Evidence on the flagship card: the same int64 twice, exact then as a float
+   parser returns it — stacked so the last digit's drift is the whole story. */
+.lp-proof { display: grid; gap: 3px; margin: var(--gap-3) 0 0; font: var(--fs-lede) var(--mono); }
+.lp-proof-exact { color: var(--c-number); }
+.lp-proof-lost { color: var(--text-faint); text-decoration: line-through; text-decoration-thickness: 1px; }
+.lp-proof-lost b { font-weight: 400; color: var(--danger); }
 
 /* query / reusable-workflow split */
 .lp-split {
@@ -1400,6 +1499,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: var(--r-lg);
   font: var(--fs-body)/1.8 var(--mono);
   overflow-x: auto;
+  /* The box is an artifact, not a band: it hugs its command the way the prose
+     above it holds its measure, instead of stretching to the grid column.
+     max-width keeps the narrow-viewport contract — the command scrolls inside
+     its own box rather than widening the band. */
+  width: fit-content;
+  max-width: 100%;
 }
 .lp-str { color: var(--c-string); }
 .lp-code-id { font: var(--fs-code) var(--mono); color: var(--c-number); }
@@ -1480,7 +1585,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    actually arrives on. */
 @media (max-width: 1100px) {
   .lp-hero { grid-template-columns: 1fr; gap: 34px; padding: 44px 24px 36px; }
-  .lp-hero h1 { font-size: 42px; letter-spacing: -1.4px; }
+  .lp-hero h1 { font-size: 42px; letter-spacing: -1.2px; }
+  .lp-lens-strip { --lens-d: 92px; height: 92px; }
   .lp-header { gap: 18px; padding: var(--gap-4) 24px; flex-wrap: wrap; }
   .lp-nav { flex-wrap: wrap; }
   .lp-band, .lp-split-cell { padding: 40px 24px; }
@@ -1495,13 +1601,16 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   .lp-privacy > *,
   .lp-agents > *,
   .lp-split > *,
-  .lp-grid > * { min-width: 0; }
+  .lp-grid > *,
+  /* same min-content trap: the lens strip's nowrap document line must clip
+     inside the hero column, not prop it open past the viewport */
+  .lp-hero > * { min-width: 0; }
   .lp-footer { padding: 20px 24px; flex-wrap: wrap; }
 }
 
 /* ---------- spec page (spec.html) ---------- */
 
-.spec-page { font-family: var(--display); }
+.spec-page { font-family: var(--display-prose); }
 .sp-header {
   display: flex;
   align-items: center;
@@ -1553,6 +1662,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .sp-row p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.65; text-wrap: pretty; }
 
 @media (max-width: 760px) {
+  /* The mono nav earns its width on a desktop; on a phone it was three rows
+     of display face before the headline. One size down and tighter gaps buy
+     back a row without changing the voice. */
+  .lp-nav { gap: var(--gap-4); }
+  .lp-nav a { font-size: var(--fs-chip); }
+  .lp-hero h1 { font-size: 38px; letter-spacing: -1px; }
   .sp-header { padding: var(--gap-4) 24px; }
   .sp-main { padding: 0 24px 40px; }
   .sp-intro h1 { font-size: 30px; letter-spacing: -1px; }
