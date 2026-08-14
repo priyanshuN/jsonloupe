@@ -1868,12 +1868,19 @@ interface SpecObj { kind: 'obj'; fields: Map<string, Spec>; extra: number }
 interface SpecArr { kind: 'arr'; len: number; elem: Spec | null }
 type Spec = SpecPrim | SpecObj | SpecArr;
 
-const SCHEMA_DEPTH = 6;
+// Raised from 6: a level elided here is a level the Ask model cannot see, and
+// measurement showed it guesses field names rather than stopping. Two more
+// levels cost nothing on ordinary documents and make deep ones answerable.
+const SCHEMA_DEPTH = 8;
 const SCHEMA_KEYS = 60;
 const SCHEMA_SAMPLE = 30;
+const SCHEMA_CHARS = 4000;
+// A bare "…" reads as decoration; both the model and the human reading the
+// disclosure panel have to be told it means "the shape stops here".
+const TRUNCATED = '… (shape truncated here)';
 
 function specOf(v: unknown, depth: number): Spec {
-  if (depth >= SCHEMA_DEPTH) return { kind: 'prim', types: new Set(['…']) };
+  if (depth >= SCHEMA_DEPTH) return { kind: 'prim', types: new Set([TRUNCATED]) };
   if (Array.isArray(v)) {
     let elem: Spec | null = null;
     for (const item of v.slice(0, SCHEMA_SAMPLE)) {
@@ -1915,6 +1922,22 @@ function mergeSpec(a: Spec, b: Spec): Spec {
   return { kind: 'prim', types: new Set(['mixed']) };
 }
 
+const SCHEMA_KEY_CHARS = 120;
+
+// A field name is text the document's author chose, and this schema is pasted
+// verbatim into the Ask feature's system prompt and into the disclosure panel.
+// Left raw, a key containing newlines forges headings and role markers inside
+// that prompt — a hostile document then steers what the model returns, and the
+// user is shown the attacker's sentence as jsonloupe's own suggested query.
+// Flattening line structure and capping length keeps a key a key: it can still
+// say anything, but only on one line, beside its own type annotation. Format
+// and control characters go too — zero-width and bidi overrides reorder what a
+// reader sees without changing the bytes.
+function safeKey(k: string): string {
+  const flat = k.replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, ' ').replace(/ {2,}/g, ' ').trim();
+  return flat.length > SCHEMA_KEY_CHARS ? `${flat.slice(0, SCHEMA_KEY_CHARS)}…` : flat;
+}
+
 function renderSpec(s: Spec, indent: string): string {
   if (s.kind === 'prim') return [...s.types].join('|');
   if (s.kind === 'arr') {
@@ -1923,7 +1946,7 @@ function renderSpec(s: Spec, indent: string): string {
   }
   const pad = indent + '  ';
   const lines: string[] = ['{'];
-  for (const [k, f] of s.fields) lines.push(`${pad}${k}: ${renderSpec(f, pad)}`);
+  for (const [k, f] of s.fields) lines.push(`${pad}${safeKey(k)}: ${renderSpec(f, pad)}`);
   if (s.extra) lines.push(`${pad}… +${s.extra} more keys`);
   lines.push(indent + '}');
   return lines.join('\n');
@@ -1974,12 +1997,20 @@ type SchemaResult = { text: string } | { ok: false; error: string; pos: number }
 // The shape of the whole document, or — given a query — of just what it selects,
 // merged across matches so `$.tasks[*]` describes the element rather than the
 // first element. Values never appear either way. Only the document-wide answer
+// A schema cut off mid-shape is read as a complete one — by the Ask model,
+// which then invents the fields it cannot see, and by the person reading the
+// disclosure. Say when the text ends early rather than ending silently.
+function capSchema(text: string): string {
+  if (text.length <= SCHEMA_CHARS) return text;
+  return `${text.slice(0, SCHEMA_CHARS)}\n${TRUNCATED} — the document has more fields than are shown`;
+}
+
 // is cached; it is the one asked for repeatedly.
 function buildSchema(path?: string): SchemaResult {
   const root = nodes.get(rootId);
   if (!root) return { text: '(no document)' };
   if (!path?.trim()) {
-    if (schemaCache === null) schemaCache = renderSpec(specOf(root.value, 0), '').slice(0, 4000);
+    if (schemaCache === null) schemaCache = capSchema(renderSpec(specOf(root.value, 0), ''));
     return { text: schemaCache };
   }
   const scanned = scanQuery(root.value, path);
@@ -1992,7 +2023,7 @@ function buildSchema(path?: string): SchemaResult {
     if (++sampled >= SCHEMA_SAMPLE) break;
   }
   if (!spec) return { ok: false, error: `no match for ${path}`, pos: 0 };
-  return { text: renderSpec(spec!, '').slice(0, 4000) };
+  return { text: capSchema(renderSpec(spec!, '')) };
 }
 
 // A blank Run editor should teach against the document that is actually open,

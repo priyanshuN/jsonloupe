@@ -195,7 +195,7 @@ describe('runQuery', () => {
     const r = runQuery(engine, '$.tasks[?(@.status = 1)]') as { ok: false; error: string; hint: string };
     expect(r.ok).toBe(false);
     expect(r.hint).toContain('comparison is `==`, not `=`');
-    expect(r.hint).toContain('Pipes (append one)');
+    expect(r.hint).toContain('Pipes: append AT MOST ONE');
     expect(r.hint).toContain('^'); // a caret under the offending position
   });
 
