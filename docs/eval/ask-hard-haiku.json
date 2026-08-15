@@ -1,0 +1,39 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T09:12:56.843Z",
+  "model": "anthropic/claude-haiku-4.5",
+  "repetitions": 3,
+  "totals": {
+    "total": 60,
+    "passed": 60,
+    "failed": 0,
+    "silentZeros": 0
+  },
+  "families": {
+    "hard": {
+      "total": 30,
+      "passed": 30,
+      "failed": 0,
+      "outcomes": {
+        "pass": 30
+      },
+      "passRate": 1
+    },
+    "hard-injection": {
+      "total": 30,
+      "passed": 30,
+      "failed": 0,
+      "outcomes": {
+        "held": 30
+      },
+      "passRate": 1
+    }
+  },
+  "usage": {
+    "input": 83544,
+    "output": 1108,
+    "calls": 60,
+    "estimatedCostUsd": 0.0891
+  },
+  "failures": []
+}

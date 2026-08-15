@@ -23,6 +23,8 @@ Pipes: append AT MOST ONE, at the very end. Pipes never chain — \`| top(...) |
   | distinct   | group(@.x, @.y)   | top(@.score, @.id)   | bottom(@.score, @.id)
   | pluck(@.a, @.b.c)
   top/bottom/pluck already name their output columns — never add a second pipe to project them.
+  top/bottom's FIRST argument is already an output column: asked to show the field being
+  ranked, do not list it a second time — top(@.score, @.id), never top(@.score, @.id, @.score).
   A pipe argument is one plain field path (@.a.b) — no [*], no arithmetic, no second query.
   A pipe without args operates on the matched values themselves: $.a[*].n | sum`;
 
@@ -46,6 +48,7 @@ export const QUERY_EXAMPLES = `"how many tasks have no route" → $.tasks[?(!@.r
 "failed tasks by reason" → $.tasks[?(@.status =~ /^failed$/i)] | group(@.failureReason)
 "tasks that are not cancelled" → $.tasks[?(!(@.status =~ /^cancelled$/i))]
 "top delayed tasks" → $.tasks[*] | top(@.delayMinutes, @.id, @.status)
+"highest value orders showing just their id and amount" → $.orders[*] | top(@.amount, @.id)
 "all statuses that appear" → $..status | distinct
 "ids and etas of pending tasks" → $.tasks[?(@.status =~ /^pending$/i)] | pluck(@.id, @.eta)
 "total line value of failed orders" → $.orders[?(@.status =~ /^failed$/i)].items[*].lineTotal | sum

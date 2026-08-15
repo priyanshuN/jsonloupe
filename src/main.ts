@@ -4469,7 +4469,7 @@ function askModelLabel(): string {
   if (modelProvider === 'anthropic') return 'shape only · Anthropic';
   return openRouterModelChoice() === OPENROUTER_FREE_MODEL
     ? 'shape only · OpenRouter free'
-    : 'shape only · OpenRouter Haiku';
+    : 'shape only · OpenRouter Sonnet 5';
 }
 
 /** Which step is next, dressed as rule 6's one accent control. */
@@ -4506,8 +4506,8 @@ function modelProviderName(): string {
  * model that will really run rather than echoing a control that is inert.
  */
 function connectedModelLabel(): string {
-  if (modelProvider === 'anthropic') return 'Claude Haiku 4.5 · direct';
-  return openRouterModelChoice() === OPENROUTER_FREE_MODEL ? 'Free models' : 'Claude Haiku 4.5';
+  if (modelProvider === 'anthropic') return 'Claude Sonnet 5 · direct';
+  return openRouterModelChoice() === OPENROUTER_FREE_MODEL ? 'Free models' : 'Claude Sonnet 5';
 }
 
 /**

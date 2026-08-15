@@ -1,0 +1,30 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T09:38:52.428Z",
+  "model": "anthropic/claude-sonnet-5",
+  "repetitions": 50,
+  "totals": {
+    "total": 50,
+    "passed": 50,
+    "failed": 0,
+    "silentZeros": 0
+  },
+  "families": {
+    "brutal": {
+      "total": 50,
+      "passed": 50,
+      "failed": 0,
+      "outcomes": {
+        "pass": 50
+      },
+      "passRate": 1
+    }
+  },
+  "usage": {
+    "input": 97150,
+    "output": 1350,
+    "calls": 50,
+    "estimatedCostUsd": 0.2078
+  },
+  "failures": []
+}

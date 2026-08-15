@@ -363,6 +363,7 @@ npm run check:site-headers # verify the live OpenSSF hardening headers
 npm run check:reproducible-build  # clean locked installs must produce identical bytes
 npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture
 npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
+npm run eval:ask -- --dry-run  # Ask correctness/injection suite; --dry-run costs nothing
 ```
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). Architecture and internals are

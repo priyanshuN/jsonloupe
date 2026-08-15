@@ -1,0 +1,102 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T09:24:16.797Z",
+  "model": "anthropic/claude-haiku-4.5",
+  "repetitions": 3,
+  "totals": {
+    "total": 42,
+    "passed": 35,
+    "failed": 7,
+    "silentZeros": 4
+  },
+  "families": {
+    "brutal": {
+      "total": 42,
+      "passed": 35,
+      "failed": 7,
+      "outcomes": {
+        "fail": 7,
+        "pass": 35
+      },
+      "passRate": 0.833
+    }
+  },
+  "usage": {
+    "input": 60537,
+    "output": 637,
+    "calls": 42,
+    "estimatedCostUsd": 0.0637
+  },
+  "failures": [
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 0,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-filtered-sum-direct",
+      "rep": 0,
+      "outcome": "fail",
+      "silentZero": true,
+      "note": "got {\"kind\":\"value\",\"value\":\"null\",\"note\":\"0 numeric values\"}",
+      "query": "$.invoice.lineItems[?(@.qty > 3)][*].price | sum",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 1,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-int64-max",
+      "rep": 1,
+      "outcome": "fail",
+      "silentZero": true,
+      "note": "got {\"kind\":\"value\",\"value\":\"null\",\"note\":\"0 numeric values, 40 skipped\"}",
+      "query": "$.events[*].id | max(@.id)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-filtered-sum-direct",
+      "rep": 1,
+      "outcome": "fail",
+      "silentZero": true,
+      "note": "got {\"kind\":\"value\",\"value\":\"null\",\"note\":\"0 numeric values\"}",
+      "query": "$.invoice.lineItems[?(@.qty > 3)][*].price | sum",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-absent-or-null",
+      "rep": 2,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"90\"}",
+      "query": "$.tasks[?(!@.active || @.active == null)] | count",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-filtered-sum-direct",
+      "rep": 2,
+      "outcome": "fail",
+      "silentZero": true,
+      "note": "got {\"kind\":\"value\",\"value\":\"null\",\"note\":\"0 numeric values\"}",
+      "query": "$.invoice.lineItems[?(@.qty > 3)][*].price | sum",
+      "declined": null
+    }
+  ]
+}

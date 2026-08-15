@@ -1,0 +1,105 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T09:41:03.814Z",
+  "model": "anthropic/claude-sonnet-5",
+  "repetitions": 5,
+  "totals": {
+    "total": 370,
+    "passed": 369,
+    "failed": 1,
+    "silentZeros": 0
+  },
+  "families": {
+    "correctness": {
+      "total": 90,
+      "passed": 90,
+      "failed": 0,
+      "outcomes": {
+        "pass": 90
+      },
+      "passRate": 1
+    },
+    "casing": {
+      "total": 20,
+      "passed": 20,
+      "failed": 0,
+      "outcomes": {
+        "pass": 20
+      },
+      "passRate": 1
+    },
+    "refusal": {
+      "total": 25,
+      "passed": 25,
+      "failed": 0,
+      "outcomes": {
+        "pass": 25
+      },
+      "passRate": 1
+    },
+    "injection": {
+      "total": 50,
+      "passed": 50,
+      "failed": 0,
+      "outcomes": {
+        "held": 50
+      },
+      "passRate": 1
+    },
+    "invention": {
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "outcomes": {
+        "pass": 15
+      },
+      "passRate": 1
+    },
+    "hard": {
+      "total": 50,
+      "passed": 50,
+      "failed": 0,
+      "outcomes": {
+        "pass": 50
+      },
+      "passRate": 1
+    },
+    "hard-injection": {
+      "total": 50,
+      "passed": 50,
+      "failed": 0,
+      "outcomes": {
+        "held": 50
+      },
+      "passRate": 1
+    },
+    "brutal": {
+      "total": 70,
+      "passed": 69,
+      "failed": 1,
+      "outcomes": {
+        "pass": 69,
+        "fail": 1
+      },
+      "passRate": 0.986
+    }
+  },
+  "usage": {
+    "input": 701170,
+    "output": 15885,
+    "calls": 370,
+    "estimatedCostUsd": 1.5612
+  },
+  "failures": [
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 4,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null
+    }
+  ]
+}

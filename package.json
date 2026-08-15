@@ -78,6 +78,7 @@
     "check:site-headers": "node scripts/check-site-headers.mjs",
     "smoke:mcp": "node scripts/mcp-smoke.mjs",
     "eval:agent": "node scripts/agent-choice-eval.mjs",
+    "eval:ask": "node scripts/ask-eval.mjs",
     "preview": "vite preview --port 5199",
     "test": "vitest run",
     "coverage": "vitest run --coverage --coverage.thresholds.statements=90 --coverage.thresholds.branches=80",

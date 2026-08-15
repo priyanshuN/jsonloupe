@@ -2,6 +2,35 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Ask runs Claude Sonnet 5, and there is now a suite that says why.** The
+  previous paid choice was Haiku 4.5, picked on tier rather than on measurement.
+  A repeatable evaluation (`npm run eval:ask`, documented in
+  [docs/ask-eval.md](docs/ask-eval.md)) puts numbers on it: over the same
+  questions Haiku answers 7 of 15 questions the grammar cannot express by
+  emitting an approximate query instead of declining, and loses 6 of 30
+  injection cases — two of them by returning a confidently EMPTY answer, which a
+  user cannot tell apart from the truth. Sonnet 5 declines every inexpressible
+  question and holds every payload. Per translation that is roughly a quarter of
+  a cent more. The Anthropic-direct path moved too, so the answer does not
+  depend on which provider a key belongs to.
+- **`top` and `bottom` no longer repeat the ranked field as a column.** Asked to
+  show "the most delayed tasks with their ref and delay", the model produced
+  `top(@.delayMinutes, @.ref, @.delayMinutes)` — the sort field listed twice, and
+  a duplicated column in the result table. The grammar said pipes never chain and
+  that these functions name their own columns; it never said the first argument
+  is already one of them. It says so now, with an example. This was not a rare
+  slip: fifty repetitions put it at 10/50, and every one of the ten was the same
+  query. After the change it is 0/50, and a full 74-case pass is unaffected.
+- **The Ask evaluation grades by execution, not by judgement.** Each case carries
+  the query a maintainer would write; the model's query and that reference both
+  run through the real engine and the results are compared, so no second model
+  scores anything and a grade costs nothing beyond the translation being
+  measured. It bundles `src/nl.ts` at run time, so the prompt, the reply gate and
+  the provider routing under test are the ones that ship. `--dry-run` verifies
+  the corpus and every reference query without making a single model call.
+
 ## 1.5.0 — 2026-08-15
 
 - **A document's field names are treated as untrusted input.** Those names are

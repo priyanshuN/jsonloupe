@@ -1,0 +1,202 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T09:33:24.856Z",
+  "model": "anthropic/claude-sonnet-5",
+  "repetitions": 50,
+  "totals": {
+    "total": 700,
+    "passed": 683,
+    "failed": 17,
+    "silentZeros": 0
+  },
+  "families": {
+    "brutal": {
+      "total": 700,
+      "passed": 683,
+      "failed": 17,
+      "outcomes": {
+        "pass": 683,
+        "fail": 17
+      },
+      "passRate": 0.976
+    }
+  },
+  "usage": {
+    "input": 1284800,
+    "output": 33564,
+    "calls": 700,
+    "estimatedCostUsd": 2.9052
+  },
+  "failures": [
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 1,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: $.matrix[*][*",
+      "query": null,
+      "declined": "$.matrix[*][*"
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 4,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 3,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing"
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 10,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: $.matrix[*][",
+      "query": null,
+      "declined": "$.matrix[*]["
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 11,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 20,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 26,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 30,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing"
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 31,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 32,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 34,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 35,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 36,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 37,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 40,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-int64-max",
+      "rep": 43,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"matches\",\"total\":1,\"matches\":[\"$.log[11].note\"]}",
+      "query": "$.log[-1].note",
+      "declined": null
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 48,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing"
+    }
+  ]
+}
