@@ -95,7 +95,7 @@ like scattered one-offs and were written up as stochastic. They are not:
 | case | rate | 95% CI | mode |
 |---|---|---|---|
 | `brutal-no-pipe-chain` | 10/50 | 11–33% | one identical query, every time |
-| `brutal-nested-arrays` | 5/50 | 4–21% | empty or truncated reply |
+| `brutal-nested-arrays` | 9/50 | 10–31% | reply truncated at the token ceiling |
 | `brutal-array-not-elements` | 1/50 | 0.4–11% | the `\| count` = 1 trap |
 | `brutal-int64-max` | 1/50 | 0.4–11% | answered a different question |
 
@@ -105,17 +105,66 @@ Asked to show "ref and delay", the model listed the sort field a second time as
 an output column. The grammar said pipes never chain and that `top` names its
 own columns — it did not say the FIRST argument is already one of them.
 
-**Fixed** in `query-grammar.ts`, by an example plus a prose clause naming the
-first argument as an output column. Re-measured at 50 repetitions: **0/50
-failures, down from 10/50** (Fisher exact p ≈ 6e-4; the 11–33% and 0–7.1%
-intervals do not overlap). A full 74-case regression pass at five repetitions
-came back 369/370 with every other family at 100%, so the added example cost
-nothing elsewhere.
+The first fix added **two** things to `query-grammar.ts`: an example, and a prose
+clause naming the first argument as an output column. Together they took the case
+to 0/50, and a 74-case regression pass at five repetitions came back 369/370. That
+pass was not enough to see what the clause was doing.
 
-`brutal-nested-arrays` fails differently and is worth watching: the reply comes
-back empty or cut mid-token (`$.matrix[*][*`, `$.matrix[*][`). That surfaces to
-the user as an error rather than a wrong answer, so it is the less harmful
-shape, but a tenth of nested-array questions failing is not a rounding error.
+### The prose clause was a net regression, and five repetitions hid it
+
+Re-running the whole `brutal` family at fifty repetitions put
+`brutal-array-not-elements` at **28/50 (42–69%)**, up from 1/50 before the fix.
+Every one of the 28 was byte-identical — `$.invoice.lineItems | count`, answering
+**1** to "how many line items does the invoice have". A confidently wrong scalar
+on an ordinary question, and the clause was the cause:
+
+| variant | `array-not-elements` | `no-pipe-chain` | `top-delay` |
+|---|---|---|---|
+| neither example nor clause | 1/50 | 10/50 | — |
+| example only | **3/100** | **4/100** | 5/50 |
+| example + clause (shipped in #45) | 28/50 | 0/50 | 0/50 |
+
+Removing the clause and keeping the example: `array-not-elements` 28/50 → 3/100
+(Fisher exact **p ≈ 1.2e-13**). The example alone still carries the original win,
+10/50 → 4/100 (p ≈ 2.6e-3). What the clause added on top of the example — 4/100 →
+0/50 — is **not significant** (p ≈ 0.30).
+
+The clause was not inert, though, and the table says so honestly: it also
+suppressed an extra output column on `top-delay`, 5/50 → 0/50. That is a real
+effect, and it is the effect the clause was written to have. It is simply not
+worth a 42–69% wrong-answer rate elsewhere — an extra descriptive column names
+the same rows, while `| count` = 1 is just wrong. `top-delay` now carries
+`accept` for the three-column form, because it is the form the grammar's own
+example teaches for that question.
+
+**This restates the project's earlier finding rather than discovering a new one:
+examples beat prose rules.** A prose rule is applied wherever the model thinks it
+fits, and here "already an output column, do not add it again" appears to have
+generalised into not adding the `[*]` step either. That mechanism is a hypothesis;
+the rates are not.
+
+### `brutal-nested-arrays` was a token ceiling, not a comprehension gap
+
+The reply came back empty or cut mid-token (`$.matrix[*][*`, `$.matrix[*][`).
+Recording `finish_reason` and per-call output tokens named the cause immediately:
+of nine failures in fifty, **seven had `finish_reason: length` at exactly 300
+output tokens** — the `max_tokens` the request was built with. This case has by
+far the widest replies in the corpus (median 197 tokens; the next case's *maximum*
+is 170), so it was the only one crowding the ceiling.
+
+Raising `max_tokens` to 700 (`MAX_REPLY_TOKENS` in `src/nl.ts`): **2/50, down from
+9/50**, with **zero** `length` finishes and an observed maximum of 534 tokens —
+i.e. replies that would previously have been truncated now complete. The p-value
+for the rate alone is marginal (Fisher p ≈ 0.05); the mechanism is not, and the
+mechanism is what the instrumentation was added to see. Raising a cap costs
+nothing when it is not reached, since only generated tokens are billed.
+
+The remaining 2/50 are a different failure: an honest refusal — "the grammar
+cannot express flattening a nested array" — for a question `$.matrix[*][*] | sum`
+answers fine. Chained wildcards work in the engine but appear nowhere in the
+grammar text. That gap is **unfixed**, deliberately: the fix would be another
+grammar addition, and this section is the argument for measuring one of those at
+fifty repetitions across the whole family before believing it.
 
 Ten of the fourteen cases never failed once (each under 7.1% at 95%).
 

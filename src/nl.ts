@@ -68,6 +68,16 @@ Output ONLY the query string. No explanation, no backticks, no quotes around it.
 
 const MAX_QUERY_CHARS = 400;
 
+// A reply budget, not a query budget — the query itself is bounded by
+// MAX_QUERY_CHARS above. 300 was too tight and it cost real answers: over fifty
+// runs of a nested-array question ("sum every number in the matrix") the model
+// spent a median of 197 output tokens and hit the ceiling on the tail — seven of
+// its nine failures came back with finish_reason 'length' at exactly 300, as a
+// query cut mid-token ($.matrix[*][*) or as nothing at all. Both reach the user
+// as an error on a question the grammar can express. Raising the cap costs
+// nothing when it is not reached: only generated tokens are billed.
+const MAX_REPLY_TOKENS = 700;
+
 /**
  * The reply is untrusted text. A hostile document's field names are embedded in
  * the system prompt, and red-teaming showed a document can make the model put an
@@ -138,7 +148,7 @@ export function buildSentPayload(
       question,
       body: {
         model: ANTHROPIC_MODEL,
-        max_tokens: 300,
+        max_tokens: MAX_REPLY_TOKENS,
         system,
         messages: [{ role: 'user', content: question }],
       },
@@ -153,7 +163,7 @@ export function buildSentPayload(
     question,
     body: {
       model: openRouterModel,
-      max_tokens: 300,
+      max_tokens: MAX_REPLY_TOKENS,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: question },

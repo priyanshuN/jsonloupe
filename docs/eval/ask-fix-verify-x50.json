@@ -1,0 +1,145 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T10:19:22.613Z",
+  "model": "anthropic/claude-sonnet-5",
+  "repetitions": 50,
+  "totals": {
+    "total": 150,
+    "passed": 142,
+    "failed": 8,
+    "silentZeros": 0
+  },
+  "families": {
+    "brutal": {
+      "total": 150,
+      "passed": 142,
+      "failed": 8,
+      "outcomes": {
+        "pass": 142,
+        "fail": 8
+      },
+      "passRate": 0.947
+    }
+  },
+  "tokenStats": {
+    "brutal-no-pipe-chain": {
+      "n": 50,
+      "median": 27,
+      "max": 103
+    },
+    "brutal-array-not-elements": {
+      "n": 50,
+      "median": 17,
+      "max": 37
+    },
+    "brutal-nested-arrays": {
+      "n": 50,
+      "median": 210,
+      "max": 534
+    }
+  },
+  "usage": {
+    "input": 280800,
+    "output": 13442,
+    "calls": 150,
+    "estimatedCostUsd": 0.696
+  },
+  "failures": [
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 9,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 22,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: The grammar cannot express summing over a nested array of arrays like matrix — this isn't expressible.",
+      "query": null,
+      "declined": "The grammar cannot express summing over a nested array of arrays like matrix — this isn't expressible.",
+      "finish": "stop",
+      "outputTokens": 138
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 26,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 25,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: This can't be expressed: the grammar has no way to flatten a nested array (matrix rows) into individual numbers for summ",
+      "query": null,
+      "declined": "This can't be expressed: the grammar has no way to flatten a nested array (matrix rows) into individual numbers for summation.",
+      "finish": "stop",
+      "outputTokens": 126
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 27,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 31,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 36
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 41,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 62
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-no-pipe-chain",
+      "rep": 42,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"rows\",\"cols\":[\"delayMinutes\",\"ref\",\"delayMinutes\"],\"total\":120,\"rows\":[\"[\\\"80\\\",\\\"k-80\\\",\\\"80\\\"]\",\"[\\\"81\\\",\\\"k-81\\\",\\\"81\\\"]\",\"[\\\"82\\\",\\\"k-82\\\",\\\"82\\\"]\"",
+      "query": "$.tasks[*] | top(@.delayMinutes, @.ref, @.delayMinutes)",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 36
+    }
+  ]
+}

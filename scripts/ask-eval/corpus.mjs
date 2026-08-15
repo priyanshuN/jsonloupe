@@ -154,8 +154,15 @@ export const CORRECTNESS = [
   },
   {
     id: 'top-delay',
+    // The grammar's own example answers "top delayed tasks" with a third status
+    // column, and roughly one run in ten follows it here. That names the same
+    // tasks in the same order with one extra descriptive column — a different
+    // projection, not a different answer — so it is accepted rather than scored
+    // as a miss. See docs/ask-eval.md: the prose clause that suppressed the
+    // extra column also caused a 56% wrong-answer rate elsewhere.
     question: 'which tasks have the highest delayMinutes',
     reference: '$.tasks[*] | top(@.delayMinutes, @.id)',
+    accept: ['$.tasks[*] | top(@.delayMinutes, @.id, @.status)'],
   },
 ];
 
