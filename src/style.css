@@ -2748,8 +2748,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 button.ask-meta {
   /* Long enough for the longest label the connection can produce
-     (`shape only · OpenRouter Haiku`) and no longer: past that the fact starts
-     competing with the question for the row. */
+     (`shape only · OpenRouter Sonnet 5`) and no longer: past that the fact
+     starts competing with the question for the row. 30ch still clears it —
+     `ch` is the width of `0`, so mixed-case text runs narrower than its
+     character count suggests. */
   max-width: 30ch;
   overflow: hidden;
   text-overflow: ellipsis;

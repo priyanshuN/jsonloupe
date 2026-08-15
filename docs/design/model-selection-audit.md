@@ -43,7 +43,7 @@ Use two states in one modal:
    - Status row: **OpenRouter connected · this tab only**.
    - Show the model choices here:
      - **Automatic free** — No credits required; OpenRouter chooses an available free model; limited availability.
-     - **Claude Haiku 4.5** — Uses OpenRouter credits; more consistent.
+     - **Claude Sonnet 5** — Uses OpenRouter credits; more consistent.
    - Use **Done** as the primary action and a quiet **Disconnect** action in the footer.
 
 The Query toolbar should show the current state as a compact chip, for example **OpenRouter · Free**, which reopens Model settings. Split and Functions remain unrelated to model authentication.

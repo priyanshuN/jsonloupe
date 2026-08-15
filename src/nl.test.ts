@@ -55,7 +55,7 @@ describe('buildSentPayload', () => {
 
   it('lets an OpenRouter user explicitly choose the paid Claude model', () => {
     const s = buildSentPayload('sk-or-v1-xyz', SCHEMA, QUESTION, OPENROUTER_PAID_MODEL);
-    expect(s.model).toBe('anthropic/claude-haiku-4.5');
+    expect(s.model).toBe('anthropic/claude-sonnet-5');
     expect(s.body.model).toBe(OPENROUTER_PAID_MODEL);
   });
 

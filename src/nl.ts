@@ -13,9 +13,17 @@ import { parseQuery } from './query';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from './query-grammar';
 
 export const OPENROUTER_FREE_MODEL = 'openrouter/free';
-export const OPENROUTER_PAID_MODEL = 'anthropic/claude-haiku-4.5';
+// Sonnet 5 rather than Haiku 4.5 on measured evidence, not on tier. Over the
+// 40-case Ask suite (docs/ask-eval.md, three repetitions each) Haiku scored
+// 7/15 on questions the grammar cannot express — emitting an approximate query
+// instead of declining — and lost 6/30 injection cases, two of them by
+// returning a confidently EMPTY answer. Sonnet 5 scored 120/120: it declined
+// every inexpressible question and held every steer payload. The per-query
+// difference is about a quarter of a cent; the failure it removes is the silent
+// wrong answer, which a user cannot tell from the truth.
+export const OPENROUTER_PAID_MODEL = 'anthropic/claude-sonnet-5';
 export type OpenRouterModel = typeof OPENROUTER_FREE_MODEL | typeof OPENROUTER_PAID_MODEL;
-const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
+const ANTHROPIC_MODEL = 'claude-sonnet-5';
 
 // Two measured constraints shape this text, and both are load-bearing.
 //
@@ -180,7 +188,7 @@ async function viaOpenRouter(
     // the privacy-minded user, who is exactly this feature's audience.
     if (resp.status === 404 && sent.model === OPENROUTER_FREE_MODEL) {
       throw new Error(
-        'Free models are unavailable on this OpenRouter account: they all train on prompts, which your privacy settings disallow. Switch to Claude Haiku, or allow training providers at openrouter.ai/settings/privacy',
+        'Free models are unavailable on this OpenRouter account: they all train on prompts, which your privacy settings disallow. Switch to Claude Sonnet 5, or allow training providers at openrouter.ai/settings/privacy',
       );
     }
     throw new Error(`OpenRouter ${resp.status}: ${body}`);
