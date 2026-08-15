@@ -23,8 +23,6 @@ Pipes: append AT MOST ONE, at the very end. Pipes never chain — \`| top(...) |
   | distinct   | group(@.x, @.y)   | top(@.score, @.id)   | bottom(@.score, @.id)
   | pluck(@.a, @.b.c)
   top/bottom/pluck already name their output columns — never add a second pipe to project them.
-  top/bottom's FIRST argument is already an output column: asked to show the field being
-  ranked, do not list it a second time — top(@.score, @.id), never top(@.score, @.id, @.score).
   A pipe argument is one plain field path (@.a.b) — no [*], no arithmetic, no second query.
   A pipe without args operates on the matched values themselves: $.a[*].n | sum`;
 

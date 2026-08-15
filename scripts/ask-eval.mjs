@@ -260,13 +260,25 @@ function installFetchProbe() {
       seen.raw = text;
       seen.usage = null;
       try {
-        const u = JSON.parse(text).usage ?? null;
+        const parsed = JSON.parse(text);
+        const u = parsed.usage ?? null;
         if (u) {
           seen.usage = {
             input: u.input_tokens ?? u.prompt_tokens ?? 0,
             output: u.output_tokens ?? u.completion_tokens ?? 0,
           };
         }
+        // Why the model stopped, kept alongside what it said. A reply that comes
+        // back empty or cut mid-token is indistinguishable from a considered
+        // refusal once extractQuery has turned both into a thrown message — and
+        // that ambiguity cost a diagnosis: `brutal-nested-arrays` failures were
+        // filed as "the model returned nothing" with no way to tell a token
+        // ceiling ('length') from a model that genuinely stopped ('stop').
+        seen.finish =
+          parsed.choices?.[0]?.finish_reason ??
+          parsed.choices?.[0]?.native_finish_reason ??
+          parsed.stop_reason ??
+          null;
       } catch {
         /* a non-JSON error body is still a status we can act on */
       }
@@ -283,13 +295,13 @@ const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504, 529]);
  * recorded HTTP status is what separates the two.
  */
 async function translateOnce(nl, apiKey, schema, question, model) {
-  const seen = { status: 0, usage: null, raw: '' };
+  const seen = { status: 0, usage: null, raw: '', finish: null };
   return callStore.run(seen, async () => {
     for (let attempt = 0; ; attempt++) {
       const sent = nl.buildSentPayload(apiKey, schema, question, model);
       try {
         const query = await nl.translateToQuery(apiKey, sent);
-        return { query, declined: null, usage: seen.usage, status: seen.status };
+        return { query, declined: null, usage: seen.usage, status: seen.status, finish: seen.finish };
       } catch (err) {
         const status = seen.status;
         if (RETRYABLE.has(status) && attempt < 4) {
@@ -301,7 +313,7 @@ async function translateOnce(nl, apiKey, schema, question, model) {
         }
         // 200 with no usable query: the model declined, and its own sentence is
         // the message extractQuery threw.
-        return { query: null, declined: String(err.message), usage: seen.usage, status };
+        return { query: null, declined: String(err.message), usage: seen.usage, status, finish: seen.finish };
       }
     }
   });
@@ -567,6 +579,8 @@ async function main() {
         silentZero,
         query: out.query ?? null,
         declined: out.declined ? out.declined.slice(0, 200) : null,
+        finish: out.finish ?? null,
+        outputTokens: out.usage?.output ?? null,
         note: graded.note,
       });
       process.stdout.write(graded.pass ? '.' : 'F');
@@ -704,7 +718,7 @@ function summarize(results, usage, model, options) {
 
   const failures = results
     .filter((r) => !r.pass)
-    .map(({ family, id, rep, outcome, note, query, declined, silentZero }) => ({
+    .map(({ family, id, rep, outcome, note, query, declined, silentZero, finish, outputTokens }) => ({
       family,
       id,
       rep,
@@ -713,7 +727,25 @@ function summarize(results, usage, model, options) {
       note,
       query,
       declined,
+      finish,
+      outputTokens,
     }));
+
+  // Per-case output-token headroom. A case whose replies crowd max_tokens is one
+  // bad sample away from a truncated query, and truncation is indistinguishable
+  // from a refusal by the time extractQuery has thrown. Reported for every case
+  // so the margin is visible BEFORE it starts costing failures, not after.
+  const tokens = {};
+  for (const r of results) {
+    if (typeof r.outputTokens !== 'number') continue;
+    (tokens[r.id] ??= []).push(r.outputTokens);
+  }
+  const tokenStats = Object.fromEntries(
+    Object.entries(tokens).map(([id, xs]) => {
+      const sorted = [...xs].sort((a, b) => a - b);
+      return [id, { n: sorted.length, median: sorted[sorted.length >> 1], max: sorted[sorted.length - 1] }];
+    }),
+  );
 
   return {
     tool: 'ask-eval',
@@ -727,6 +759,7 @@ function summarize(results, usage, model, options) {
       silentZeros: results.filter((r) => r.silentZero).length,
     },
     families,
+    tokenStats,
     usage: (() => {
       const spend = estimateCost(usage, model);
       return { ...usage, estimatedCostUsd: spend === null ? null : +spend.toFixed(4) };

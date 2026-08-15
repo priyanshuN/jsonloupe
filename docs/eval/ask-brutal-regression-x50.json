@@ -1,0 +1,548 @@
+{
+  "tool": "ask-eval",
+  "generatedAt": "2026-08-15T10:14:53.911Z",
+  "model": "anthropic/claude-sonnet-5",
+  "repetitions": 50,
+  "totals": {
+    "total": 700,
+    "passed": 663,
+    "failed": 37,
+    "silentZeros": 0
+  },
+  "families": {
+    "brutal": {
+      "total": 700,
+      "passed": 663,
+      "failed": 37,
+      "outcomes": {
+        "pass": 663,
+        "fail": 37
+      },
+      "passRate": 0.947
+    }
+  },
+  "tokenStats": {
+    "brutal-recursive-status": {
+      "n": 50,
+      "median": 9,
+      "max": 9
+    },
+    "brutal-zero-is-set": {
+      "n": 50,
+      "median": 26,
+      "max": 26
+    },
+    "brutal-last-element": {
+      "n": 50,
+      "median": 23,
+      "max": 37
+    },
+    "brutal-array-not-elements": {
+      "n": 50,
+      "median": 14,
+      "max": 17
+    },
+    "brutal-slice": {
+      "n": 50,
+      "median": 51,
+      "max": 143
+    },
+    "brutal-absent-or-null": {
+      "n": 50,
+      "median": 65,
+      "max": 122
+    },
+    "brutal-int64-compare": {
+      "n": 50,
+      "median": 40,
+      "max": 59
+    },
+    "brutal-int64-max": {
+      "n": 50,
+      "median": 25,
+      "max": 82
+    },
+    "brutal-no-pipe-chain": {
+      "n": 50,
+      "median": 27,
+      "max": 44
+    },
+    "brutal-nested-odd-key": {
+      "n": 50,
+      "median": 11,
+      "max": 11
+    },
+    "brutal-operator-named-field": {
+      "n": 50,
+      "median": 9,
+      "max": 9
+    },
+    "brutal-filtered-sum-direct": {
+      "n": 50,
+      "median": 32,
+      "max": 32
+    },
+    "brutal-numeric-membership": {
+      "n": 50,
+      "median": 71,
+      "max": 170
+    },
+    "brutal-nested-arrays": {
+      "n": 50,
+      "median": 197,
+      "max": 300
+    }
+  },
+  "usage": {
+    "input": 1356200,
+    "output": 30800,
+    "calls": 700,
+    "estimatedCostUsd": 3.0204
+  },
+  "failures": [
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 0,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 1,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 2,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 4,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 5,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 7,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 6,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 7,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 9,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 10,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 12,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 11,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: The grammar can't flatten a nested array (array of arrays) to sum all individual numbers, so this question can't be expr",
+      "query": null,
+      "declined": "The grammar can't flatten a nested array (array of arrays) to sum all individual numbers, so this question can't be expressed.",
+      "finish": "stop",
+      "outputTokens": 230
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 13,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 15,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 14,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: $.",
+      "query": null,
+      "declined": "$.",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 16,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 17,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 20,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 21,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 22,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 24,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 23,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 25,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 26,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 28,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 29,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 30,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 29,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 31,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 40,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 41,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 42,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 44,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 43,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: the model returned nothing",
+      "query": null,
+      "declined": "the model returned nothing",
+      "finish": "length",
+      "outputTokens": 300
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 45,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-array-not-elements",
+      "rep": 49,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "got {\"kind\":\"value\",\"value\":\"1\"}",
+      "query": "$.invoice.lineItems | count",
+      "declined": null,
+      "finish": "stop",
+      "outputTokens": 14
+    },
+    {
+      "family": "brutal",
+      "id": "brutal-nested-arrays",
+      "rep": 48,
+      "outcome": "fail",
+      "silentZero": false,
+      "note": "declined: The grammar cannot express flattening a nested array (array of arrays) to sum all values, so this cannot be queried.",
+      "query": null,
+      "declined": "The grammar cannot express flattening a nested array (array of arrays) to sum all values, so this cannot be queried.",
+      "finish": "stop",
+      "outputTokens": 224
+    }
+  ]
+}

@@ -4,6 +4,29 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **A wrong answer to "how many line items does the invoice have" is fixed, and
+  it was self-inflicted.** The prose clause added with the `top` fix above —
+  naming the first pipe argument as an output column — also pushed the model
+  toward dropping the `[*]` step, so `$.invoice.lineItems | count` answered **1**
+  instead of the element count. Fifty repetitions put that at 28/50; without the
+  clause it is 3/100 (Fisher exact p ≈ 1.2e-13). The clause's own benefit, on top
+  of the example that shipped with it, was not statistically significant
+  (p ≈ 0.30). The example stays, the clause is gone. The five-repetition
+  regression pass that cleared the original change could not have caught this —
+  [docs/ask-eval.md](docs/ask-eval.md) records why.
+- **Ask no longer truncates its own answer on questions that need thinking room.**
+  Replies were capped at 300 tokens. A nested-array question ("sum every number in
+  the matrix") uses a median of 197 output tokens, so the tail of the distribution
+  ran into the ceiling and the query came back cut mid-token (`$.matrix[*][*`) or
+  empty — surfacing as an error on a question the grammar answers fine. Seven of
+  its nine failures in fifty runs stopped for `length` at exactly 300. The cap is
+  now 700, which takes the case to 2/50 with no truncation at all. Raising it
+  costs nothing when it is not reached: only generated tokens are billed.
+- **The evaluation records `finish_reason` and per-case output-token headroom.**
+  A truncated reply and a considered refusal are indistinguishable once the reply
+  gate has turned both into a thrown message, and that ambiguity is what hid the
+  bug above.
+
 - **Ask runs Claude Sonnet 5, and there is now a suite that says why.** The
   previous paid choice was Haiku 4.5, picked on tier rather than on measurement.
   A repeatable evaluation (`npm run eval:ask`, documented in
@@ -22,7 +45,8 @@ Notable changes to jsonloupe. Dates are UTC.
   that these functions name their own columns; it never said the first argument
   is already one of them. It says so now, with an example. This was not a rare
   slip: fifty repetitions put it at 10/50, and every one of the ten was the same
-  query. After the change it is 0/50, and a full 74-case pass is unaffected.
+  query. The example alone takes it to 4/100 (Fisher exact p ≈ 2.6e-3). A prose
+  clause shipped alongside the example has since been **removed** — see below.
 - **The Ask evaluation grades by execution, not by judgement.** Each case carries
   the query a maintainer would write; the model's query and that reference both
   run through the real engine and the results are compared, so no second model
