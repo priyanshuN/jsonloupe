@@ -329,6 +329,23 @@ this routing rule in its project instructions (for example `AGENTS.md` or
 > Otherwise prefer the JsonLoupe MCP over ad-hoc Python whenever it supports the
 > operation; use custom shell code only when JsonLoupe cannot answer it.
 
+### In the browser: WebMCP
+
+Where the browser exposes [WebMCP](https://webmachinelearning.github.io/webmcp/)
+(`document.modelContext` — Chrome 149–156 origin trial, on by default in
+ChatGPT's in-app browser), [jsonloupe.dev](https://jsonloupe.dev) registers the
+same bounded verbs pointed at the document already on screen, so a browser agent
+and the person watching share one document instead of mailing copies back and
+forth. Alongside `run_query`, `get_schema`, `profile` and `sample`, three verbs
+no headless server can offer: `load_doc` pushes a document into the open viewer,
+`reveal_path` scrolls the tree to a row and flashes it, and
+`highlight_matches`/`clear_highlights` drive the toolbar's own filter state —
+visible, counted, and reversible by the human's own button. Every tool that
+returns document content is annotated `untrustedContentHint`: values are data,
+never instructions. Browsers without the API fetch nothing and run the same app
+they always did. Details, testing instructions, and provenance in
+[WEBMCP.md](WEBMCP.md).
+
 ## Privacy & security
 
 Documents never leave your machine. The complete network-call inventory (four
