@@ -17,6 +17,9 @@ import { SemanticCompareView, type CompareRow } from './compare-view';
 import { ConvertView } from './convert-view';
 import type { ConvertReport, ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
 import { onlyStoredZipEntry } from './one-file-zip';
+// Type only — the module itself is loaded lazily, and only where the browser
+// has `document.modelContext`.
+import type { ModelContextLike } from './webmcp';
 import {
   buildLargeSample,
   LARGE_SAMPLE_ELEMENTS,
@@ -6947,6 +6950,55 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+
+// ---------- WebMCP ----------
+
+// Chrome 149+ exposes `document.modelContext`, through which the page can hand
+// an in-browser agent the same bounded verbs the stdio MCP server exposes —
+// pointed at the document already on screen, and able to move the view so the
+// agent can show its work. Feature-detected and lazily imported: where the API
+// is absent nothing is fetched and the app is byte-for-byte what it was.
+const modelContext = (document as unknown as { modelContext?: unknown }).modelContext;
+if (modelContext) {
+  void import('./webmcp').then(({ registerWebMcp }) => {
+    registerWebMcp(
+      {
+        call,
+        openText: (text, title) => openText(text, title, null),
+        deriveTitle,
+        documentToken: () => currentDocumentToken,
+        // The token is bumped only by a successful open, so zero means the
+        // worker has never held a document — the landing state.
+        hasDocument: () => currentDocumentToken > 0,
+        currentTitle: () => currentTitle,
+        revealRow: (rowIndex, totalRows) => {
+          showPane('tree');
+          tree.setTotal(totalRows);
+          if (rowIndex >= 0) tree.scrollToIndex(rowIndex);
+        },
+        // A tool that revealed or expanded nodes changed the worker's row count
+        // without touching the view; resync so the scrollbar still describes it.
+        syncTotalRows: (totalRows) => tree.setTotal(totalRows),
+        // The same dance the "filter tree to these" button does, for the same
+        // reason: this enters the toolbar's filtered state rather than a private
+        // one, so the filter button lights up with the count and pressing it
+        // puts back the expansion the user came from.
+        applyFilterUi: (matches, totalRows) => {
+          if (!filterOn) filterScrollSnapshot = treeViewport.scrollTop;
+          filterOn = true;
+          filterBtn.classList.add('on');
+          paintFilterBtn(matches);
+          showPane('tree');
+          tree.resetSelection();
+          tree.setTotal(totalRows);
+          treeViewport.scrollTop = 0;
+        },
+        clearFilterUi: () => setFilter(''),
+      },
+      modelContext as ModelContextLike,
+    );
+  });
+}
 
 // Dev-only debug hook.
 if (import.meta.env.DEV) {
