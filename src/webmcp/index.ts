@@ -11,7 +11,7 @@
 // instead of describing coordinates the user has to find.
 
 import type { ProfileResult } from '../profile';
-import type { Row } from '../protocol';
+import type { NodeType } from '../protocol';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from '../query-grammar';
 import {
   capResponse,
@@ -36,8 +36,6 @@ export interface WebMcpDeps {
   currentTitle(): string;
   /** Scroll the tree to a row and flash it, switching to the tree pane first. */
   revealRow(rowIndex: number, totalRows: number): void;
-  /** Row count only — for tools that moved the worker's tree without moving the view. */
-  syncTotalRows(totalRows: number): void;
   applyFilterUi(matches: number, totalRows: number): void;
   clearFilterUi(): void | Promise<void>;
 }
@@ -259,7 +257,8 @@ function buildTools(deps: WebMcpDeps): WebMcpTool[] {
           'Read n real values at a path of the open document, exactly as they were parsed (int64 and decimal ' +
           'digits intact). A path that selects one container samples its children; a path that selects many ' +
           'nodes samples those nodes. Use this when you need whole values rather than the previews run_query ' +
-          'returns.' +
+          'returns. Reads the document itself, so it answers the same whether or not the tree is filtered, and ' +
+          'never moves what the user is looking at.' +
           UNTRUSTED_NOTE,
         inputSchema: {
           type: 'object',
@@ -355,13 +354,23 @@ function buildTools(deps: WebMcpDeps): WebMcpTool[] {
         const r = await deps.call<{ rowIndex: number; totalRows: number }>({ type: 'queryReveal', i: 0 });
         const after = guard();
         if (after) return after;
+        const pathText = found.matches[0]?.pathText ?? path;
+        if (r.rowIndex < 0) {
+          // The node matched, so it exists; it simply has no row. Saying
+          // `ok: true, revealed: false` let an agent report a highlight the
+          // human never saw, so name the reason and the way out of it.
+          const { filtered } = await deps.call<{ filtered: boolean }>({ type: 'viewState' });
+          const checked = guard();
+          if (checked) return checked;
+          if (filtered) {
+            return fail(
+              `${pathText} exists but is not on screen: the user's tree is filtered, and this node is not in the filtered set`,
+              'call clear_highlights to put their whole document back, then reveal_path again.',
+            );
+          }
+        }
         deps.revealRow(r.rowIndex, r.totalRows);
-        return {
-          ok: true,
-          pathText: found.matches[0]?.pathText ?? path,
-          matches: found.total,
-          revealed: r.rowIndex >= 0,
-        };
+        return { ok: true, pathText, matches: found.total, revealed: r.rowIndex >= 0 };
       },
     ),
 
@@ -436,10 +445,23 @@ async function matchesFor(
   return r;
 }
 
+/** The worker's `querySample` reply: the matched values, never a row list. */
+type SampleResp =
+  | { ok: true; type: NodeType; total: number; values: { path: string; json: string }[] }
+  | { ok: false; error: string };
+
 /**
  * n real values at a path. The path is a query, so `$.tasks` samples the array's
  * elements while `$.tasks[*].id` samples the ids themselves; either way the
- * values come back through `nodeValue`, digit-for-digit as they were parsed.
+ * values come back from the query's own match list, already stringified by the
+ * worker, digit-for-digit as they were parsed.
+ *
+ * They deliberately do NOT come back through the visible tree. `sample` is
+ * annotated read-only, and the tree is a view: while highlight_matches has it
+ * filtered, most of the document has no row at all, and a row walk answered
+ * either with a hard "could not resolve" or — worse — with ok:true and an empty
+ * value list. The match list has no such state, so this reads the same under any
+ * filter or expansion, and moves nothing on the human's screen.
  */
 async function sampleValues(
   deps: WebMcpDeps,
@@ -450,110 +472,26 @@ async function sampleValues(
   const path = str(input.path);
   if (!path) return fail('sample needs a path');
   const n = integer(input.n, 1, MAX_SAMPLE, DEFAULT_SAMPLE);
-  const found = await matchesFor(deps, 'sample', path, undefined);
+  // The query is windowed to what is about to be sampled: querySample reads the
+  // values the query recorded, and there is no reason to record 5000 of them.
+  const found = await matchesFor(deps, 'sample', path, n);
   if (!found.ok) return found;
-
-  if (found.total > 1) {
-    const values: { path: string; json: string }[] = [];
-    let type = 'null';
-    let totalRows = -1;
-    for (let i = 0; i < Math.min(n, found.matches.length); i++) {
-      const stopped = guard();
-      if (stopped) return stopped;
-      const row = await rowAtMatch(deps, i);
-      if (!row) continue;
-      type = row.row.type;
-      totalRows = row.totalRows;
-      values.push({ path: found.matches[i].pathText, json: await valueOf(deps, row.row.id) });
-    }
-    const stopped = guard();
-    if (stopped) return stopped;
-    if (totalRows >= 0) deps.syncTotalRows(totalRows);
-    return { ok: true, path, type, total: found.total, values };
-  }
-
   const stopped = guard();
   if (stopped) return stopped;
-  const first = await rowAtMatch(deps, 0);
-  if (!first) return fail(`could not resolve ${path} in the document tree`);
-  const check = guard();
-  if (check) return check;
-  if (!first.row.hasChildren) {
-    deps.syncTotalRows(first.totalRows);
-    return {
-      ok: true,
-      path,
-      type: first.row.type,
-      total: 1,
-      values: [{ path, json: await valueOf(deps, first.row.id) }],
-    };
-  }
-  const children = await childValues(deps, first.row, n, guard);
-  if ('ok' in children) return children;
-  deps.syncTotalRows(children.totalRows >= 0 ? children.totalRows : first.totalRows);
-  return { ok: true, path, type: first.row.type, total: first.row.childCount, values: children.values };
-}
-
-/** Reveal the i-th match of the last query and read the row it landed on. */
-async function rowAtMatch(deps: WebMcpDeps, i: number): Promise<{ row: Row; totalRows: number } | null> {
-  const { rowIndex, totalRows } = await deps.call<{ rowIndex: number; totalRows: number }>({
-    type: 'queryReveal',
-    i,
-  });
-  if (rowIndex < 0) return null;
-  const { rows } = await deps.call<{ rows: Row[] }>({ type: 'rows', start: rowIndex, count: 1 });
-  return rows[0] ? { row: rows[0], totalRows } : null;
-}
-
-/**
- * Expand a container, read its first n children, then put the tree back exactly
- * as it was — only what this call opened is closed again. Huge arrays expand
- * into synthetic `[0 … 9999]` chunk rows, so descend through the first chunk to
- * reach real elements. A document swapped mid-flight abandons the restore: the
- * ids no longer name anything, and the new tree is not ours to fold.
- */
-async function childValues(
-  deps: WebMcpDeps,
-  container: Row,
-  n: number,
-  guard: Guard,
-): Promise<{ values: { path: string; json: string }[]; totalRows: number } | Fail> {
-  const opened: Row[] = [];
-  let parent = container;
-  let children: Row[] = [];
-  let totalRows = -1;
-  for (let depth = 0; depth < 2; depth++) {
-    const stopped = guard();
-    if (stopped) return stopped;
-    if (!parent.expanded) {
-      totalRows = (await deps.call<{ totalRows: number }>({ type: 'toggle', id: parent.id, index: parent.index })).totalRows;
-      opened.push(parent);
-    }
-    children = (await deps.call<{ rows: Row[] }>({ type: 'rows', start: parent.index + 1, count: n })).rows;
-    if (children[0]?.type !== 'chunk') break;
-    parent = children[0];
-  }
-  const values: { path: string; json: string }[] = [];
-  for (const child of children.filter((c) => c.depth === parent.depth + 1)) {
-    const stopped = guard();
-    if (stopped) return stopped;
-    values.push({ path: await pathOf(deps, child.id), json: await valueOf(deps, child.id) });
-  }
-  for (const row of opened.reverse()) {
-    const stopped = guard();
-    if (stopped) return stopped;
-    totalRows = (await deps.call<{ totalRows: number }>({ type: 'toggle', id: row.id, index: row.index })).totalRows;
-  }
-  return { values, totalRows };
-}
-
-async function valueOf(deps: WebMcpDeps, id: number): Promise<string> {
-  const { text } = await deps.call<{ text: string }>({ type: 'nodeValue', id });
-  return clip(text, SAMPLE_VALUE_CHARS);
-}
-
-async function pathOf(deps: WebMcpDeps, id: number): Promise<string> {
-  return (await deps.call<{ text: string }>({ type: 'nodePath', id })).text;
+  // `q` is checked against the query the worker actually holds: the human's Ask
+  // panel shares that state, so a sample that arrived after someone else's query
+  // is refused rather than answered from the wrong match list.
+  const r = await deps.call<SampleResp>({ type: 'querySample', n, chars: SAMPLE_VALUE_CHARS, q: path });
+  const after = guard();
+  if (after) return after;
+  if (!r.ok) return fail(`could not sample ${path}: ${r.error}`);
+  return {
+    ok: true,
+    path,
+    type: r.type,
+    total: r.total,
+    values: r.values.map((v) => ({ path: v.path, json: clip(v.json, SAMPLE_VALUE_CHARS) })),
+  };
 }
 
 function str(v: unknown): string | undefined {

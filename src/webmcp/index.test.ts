@@ -6,34 +6,17 @@
 // human's view, and when it refuses.
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Row } from '../protocol';
 import { registerWebMcp, type ModelContextLike, type WebMcpDeps, type WebMcpTool } from './index';
-import { RESPONSE_CAP } from './render';
+import { RESPONSE_CAP, SAMPLE_VALUE_CHARS } from './render';
 
 type Msg = Record<string, unknown>;
 type Result = Record<string, unknown>;
-
-function row(over: Partial<Row> = {}): Row {
-  return {
-    id: 7,
-    index: 5,
-    depth: 1,
-    key: 0,
-    type: 'number',
-    preview: '1',
-    hasChildren: false,
-    childCount: 0,
-    expanded: false,
-    ...over,
-  };
-}
 
 /** A scripted worker plus a record of everything the bridge did to the view. */
 class Fake {
   sent: Msg[] = [];
   revealed: [number, number][] = [];
   filtered: [number, number][] = [];
-  totals: number[] = [];
   opened: [string, string][] = [];
   cleared = 0;
   token = 1;
@@ -74,7 +57,6 @@ class Fake {
       hasDocument: () => this.hasDoc,
       currentTitle: () => this.title,
       revealRow: (rowIndex, totalRows) => this.revealed.push([rowIndex, totalRows]),
-      syncTotalRows: (totalRows) => this.totals.push(totalRows),
       applyFilterUi: (matches, totalRows) => this.filtered.push([matches, totalRows]),
       clearFilterUi: () => {
         this.cleared++;
@@ -358,25 +340,24 @@ describe('profile', () => {
 });
 
 describe('sample', () => {
-  it('composes query → queryReveal → rows → nodeValue for every match', async () => {
-    fake
-      .reply('query', MATCHES(3))
-      .reply('queryReveal', { rowIndex: 5, totalRows: 100 })
-      .reply('rows', { rows: [row()] })
-      .reply('nodeValue', { text: '1' });
+  const SAMPLED = (over: Partial<Result> = {}): Result => ({
+    ok: true,
+    type: 'number',
+    total: 3,
+    values: [
+      { path: '$.a[0]', json: '1' },
+      { path: '$.a[1]', json: '2' },
+    ],
+    ...over,
+  });
+
+  it('composes query → querySample, and reads the values, never the rows', async () => {
+    fake.reply('query', MATCHES(3)).reply('querySample', SAMPLED());
     const r = await run('sample', { path: '$.a[*]' });
-    expect(fake.typesSent()).toEqual([
-      'query',
-      'queryReveal',
-      'rows',
-      'nodeValue',
-      'queryReveal',
-      'rows',
-      'nodeValue',
-      'queryReveal',
-      'rows',
-      'nodeValue',
-    ]);
+    // Two messages, neither of which walks or moves the tree.
+    expect(fake.typesSent()).toEqual(['query', 'querySample']);
+    expect(fake.sent[0]).toEqual({ type: 'query', q: '$.a[*]', limit: 5 });
+    expect(fake.sent[1]).toEqual({ type: 'querySample', n: 5, chars: SAMPLE_VALUE_CHARS, q: '$.a[*]' });
     expect(r).toEqual({
       ok: true,
       path: '$.a[*]',
@@ -384,61 +365,49 @@ describe('sample', () => {
       total: 3,
       values: [
         { path: '$.a[0]', json: '1' },
-        { path: '$.a[1]', json: '1' },
-        { path: '$.a[2]', json: '1' },
+        { path: '$.a[1]', json: '2' },
       ],
     });
-    // Revealing expanded ancestors, so the view's row count is resynced.
-    expect(fake.totals).toEqual([100]);
   });
 
-  it('honours n, clamped to the response budget', async () => {
-    fake
-      .reply('query', MATCHES(40))
-      .reply('queryReveal', { rowIndex: 5, totalRows: 100 })
-      .reply('rows', { rows: [row()] })
-      .reply('nodeValue', { text: '1' });
-    expect(((await run('sample', { path: '$.a[*]', n: 2 })).values as unknown[]).length).toBe(2);
+  it('answers a multi-match sample while the tree is filtered to something else', async () => {
+    // The regression: a filtered tree has no row for most of the document, and
+    // the old row walk returned ok:true with an empty value list. querySample
+    // reads the match list, which a filter cannot reshape.
+    fake.reply('query', MATCHES(80, 5)).reply(
+      'querySample',
+      SAMPLED({ type: 'string', total: 80, values: [{ path: '$.a[0].id', json: '"D001"' }] }),
+    );
+    const r = await run('sample', { path: '$.a[*].id', n: 1 });
+    expect(r).toMatchObject({ ok: true, total: 80, values: [{ path: '$.a[0].id', json: '"D001"' }] });
+    expect(fake.typesSent()).toEqual(['query', 'querySample']);
+    // Nothing on the human's screen was touched by a read-only tool.
+    expect(fake.revealed).toEqual([]);
+    expect(fake.filtered).toEqual([]);
+    expect(fake.sent.some((m) => m.type === 'toggle' || m.type === 'queryReveal')).toBe(false);
+  });
+
+  it('honours n, clamped to the response budget, and windows the query to it', async () => {
+    fake.reply('query', MATCHES(40)).reply('querySample', SAMPLED());
+    await run('sample', { path: '$.a[*]', n: 2 });
+    expect(fake.sent[0]).toMatchObject({ limit: 2 });
+    expect(fake.sent[1]).toMatchObject({ n: 2 });
     fake.sent = [];
-    expect(((await run('sample', { path: '$.a[*]', n: 999 })).values as unknown[]).length).toBe(40);
-  });
-
-  it('skips a match the tree could not resolve', async () => {
-    fake
-      .reply('query', MATCHES(2))
-      .reply('queryReveal', { rowIndex: -1, totalRows: 100 }, { rowIndex: 5, totalRows: 100 })
-      .reply('rows', { rows: [row()] })
-      .reply('nodeValue', { text: '1' });
-    const r = await run('sample', { path: '$.a[*]' });
-    expect((r.values as unknown[]).length).toBe(1);
+    await run('sample', { path: '$.a[*]', n: 999 });
+    expect(fake.sent[1]).toMatchObject({ n: 50 });
   });
 
   it('samples the children of a path that selects one container', async () => {
-    fake
-      .reply('query', MATCHES(1))
-      .reply('queryReveal', { rowIndex: 2, totalRows: 10 })
-      .reply(
-        'rows',
-        { rows: [row({ id: 3, index: 2, depth: 0, key: 'a', type: 'array', hasChildren: true, childCount: 2 })] },
-        { rows: [row({ id: 4, index: 3, depth: 1 }), row({ id: 5, index: 4, depth: 1 })] },
-      )
-      .reply('toggle', { totalRows: 12 }, { totalRows: 10 })
-      .reply('nodePath', { text: '$.a[0]' }, { text: '$.a[1]' })
-      .reply('nodeValue', { text: '10' }, { text: '20' });
-    const r = await run('sample', { path: '$.a' });
-    expect(fake.typesSent()).toEqual([
-      'query',
-      'queryReveal',
-      'rows',
-      'toggle',
-      'rows',
-      'nodePath',
-      'nodeValue',
-      'nodePath',
-      'nodeValue',
-      'toggle',
-    ]);
-    expect(r).toEqual({
+    fake.reply('query', MATCHES(1)).reply('querySample', {
+      ok: true,
+      type: 'array',
+      total: 2,
+      values: [
+        { path: '$.a[0]', json: '10' },
+        { path: '$.a[1]', json: '20' },
+      ],
+    });
+    expect(await run('sample', { path: '$.a' })).toEqual({
       ok: true,
       path: '$.a',
       type: 'array',
@@ -448,36 +417,15 @@ describe('sample', () => {
         { path: '$.a[1]', json: '20' },
       ],
     });
-    // The container was folded back exactly as it was found.
-    expect(fake.totals).toEqual([10]);
-  });
-
-  it('descends through the first chunk row of a huge array', async () => {
-    fake
-      .reply('query', MATCHES(1))
-      .reply('queryReveal', { rowIndex: 0, totalRows: 10 })
-      .reply(
-        'rows',
-        { rows: [row({ id: 3, index: 0, depth: 0, type: 'array', hasChildren: true, childCount: 90_000 })] },
-        { rows: [row({ id: 4, index: 1, depth: 1, type: 'chunk', hasChildren: true, expanded: true })] },
-        { rows: [row({ id: 5, index: 2, depth: 2 })] },
-      )
-      .reply('toggle', { totalRows: 20 }, { totalRows: 10 })
-      .reply('nodePath', { text: '$.a[0]' })
-      .reply('nodeValue', { text: '7' });
-    const r = await run('sample', { path: '$.a' });
-    expect(r.total).toBe(90_000);
-    expect(r.values).toEqual([{ path: '$.a[0]', json: '7' }]);
-    // Only the container was opened, so only the container is closed again.
-    expect(fake.sent.filter((m) => m.type === 'toggle').length).toBe(2);
   });
 
   it('returns a scalar leaf as its own single value', async () => {
-    fake
-      .reply('query', MATCHES(1))
-      .reply('queryReveal', { rowIndex: 4, totalRows: 10 })
-      .reply('rows', { rows: [row({ type: 'string' })] })
-      .reply('nodeValue', { text: '"done"' });
+    fake.reply('query', MATCHES(1)).reply('querySample', {
+      ok: true,
+      type: 'string',
+      total: 1,
+      values: [{ path: '$.a.status', json: '"done"' }],
+    });
     expect(await run('sample', { path: '$.a.status' })).toEqual({
       ok: true,
       path: '$.a.status',
@@ -487,7 +435,22 @@ describe('sample', () => {
     });
   });
 
-  it('refuses an aggregate, an empty result, and an unresolvable path', async () => {
+  it('clips a value the worker did not, and keeps the response under the cap', async () => {
+    fake.reply('query', MATCHES(2)).reply('querySample', {
+      ok: true,
+      type: 'string',
+      total: 2,
+      values: Array.from({ length: 2 }, (_, i) => ({ path: `$.a[${i}]`, json: 'x'.repeat(9_000) })),
+    });
+    const r = await run('sample', { path: '$.a[*]' });
+    expect(JSON.stringify(r).length).toBeLessThanOrEqual(RESPONSE_CAP);
+    for (const value of r.values as { json: string }[]) {
+      expect(value.json).toHaveLength(SAMPLE_VALUE_CHARS + 1);
+      expect(value.json.endsWith('…')).toBe(true);
+    }
+  });
+
+  it('refuses an aggregate and an empty result, and reports a worker refusal', async () => {
     fake.reply('query', { ok: true, kind: 'value', label: 'count', value: 3 });
     expect((await run('sample', { path: '$.a | count' })).error).toBe(
       'sample takes a path or predicate, not an aggregate pipe',
@@ -500,8 +463,8 @@ describe('sample', () => {
 
     fake = new Fake();
     tools = register(fake);
-    fake.reply('query', MATCHES(1)).reply('queryReveal', { rowIndex: -1, totalRows: 10 });
-    expect((await run('sample', { path: '$.a' })).error).toBe('could not resolve $.a in the document tree');
+    fake.reply('query', MATCHES(1)).reply('querySample', { ok: false, error: 'no path query result' });
+    expect((await run('sample', { path: '$.a' })).error).toBe('could not sample $.a: no path query result');
   });
 
   it('needs a path', async () => {
@@ -555,10 +518,26 @@ describe('reveal_path', () => {
     expect(r).toEqual({ ok: true, pathText: '$.a[0]', matches: 4, revealed: true });
   });
 
-  it('still repaints the tree when the row could not be located, and says so', async () => {
-    fake.reply('query', MATCHES(1)).reply('queryReveal', { rowIndex: -1, totalRows: 90 });
+  it('still repaints the tree when an unfiltered view could not locate the row', async () => {
+    fake
+      .reply('query', MATCHES(1))
+      .reply('queryReveal', { rowIndex: -1, totalRows: 90 })
+      .reply('viewState', { filtered: false });
     expect((await run('reveal_path', { path: '$.a' })).revealed).toBe(false);
     expect(fake.revealed).toEqual([[-1, 90]]);
+  });
+
+  it('refuses honestly when a filter is what hides the node, and names the way out', async () => {
+    fake
+      .reply('query', MATCHES(1))
+      .reply('queryReveal', { rowIndex: -1, totalRows: 5 })
+      .reply('viewState', { filtered: true });
+    const r = await run('reveal_path', { path: '$.a' });
+    expect(r.ok).toBe(false);
+    expect(String(r.error)).toContain('$.a[0] exists but is not on screen');
+    expect(String(r.hint)).toContain('clear_highlights');
+    // No claim of a highlight the human never saw, and no view movement.
+    expect(fake.revealed).toEqual([]);
   });
 
   it('refuses a path with no matches without moving anything', async () => {
@@ -641,37 +620,27 @@ describe('staleness and abort', () => {
     expect(fake.filtered).toEqual([]);
   });
 
-  it('abandons sample between matches rather than mixing two documents', async () => {
-    fake
-      .reply('query', MATCHES(3))
-      .reply('queryReveal', { rowIndex: 5, totalRows: 100 })
-      .reply('rows', { rows: [row()] })
-      .reply('nodeValue', { text: '1' });
+  it('abandons sample before it samples a document it did not query', async () => {
+    fake.reply('query', MATCHES(3)).reply('querySample', { ok: true, type: 'number', total: 3, values: [] });
     fake.afterCall = (msg) => {
-      if (msg.type === 'nodeValue') fake.token++;
+      if (msg.type === 'query') fake.token++;
     };
     expect(await run('sample', { path: '$.a[*]' })).toEqual({ ok: false, error: STALE });
-    expect(fake.totals).toEqual([]);
+    // The check sits between the two calls, so the sample was never sent.
+    expect(fake.typesSent()).toEqual(['query']);
   });
 
-  it('abandons the child expansion rather than folding a document it did not open', async () => {
-    fake
-      .reply('query', MATCHES(1))
-      .reply('queryReveal', { rowIndex: 2, totalRows: 10 })
-      .reply(
-        'rows',
-        { rows: [row({ id: 3, index: 2, depth: 0, type: 'array', hasChildren: true, childCount: 2 })] },
-        { rows: [row({ id: 4, index: 3, depth: 1 })] },
-      )
-      .reply('toggle', { totalRows: 12 })
-      .reply('nodePath', { text: '$.a[0]' })
-      .reply('nodeValue', { text: '1' });
+  it('abandons values that arrived after the swap rather than returning them', async () => {
+    fake.reply('query', MATCHES(3)).reply('querySample', {
+      ok: true,
+      type: 'number',
+      total: 3,
+      values: [{ path: '$.a[0]', json: '1' }],
+    });
     fake.afterCall = (msg) => {
-      if (msg.type === 'nodePath') fake.token++;
+      if (msg.type === 'querySample') fake.token++;
     };
-    expect(await run('sample', { path: '$.a' })).toEqual({ ok: false, error: STALE });
-    // One toggle out, none back: the ids no longer name anything to restore.
-    expect(fake.sent.filter((m) => m.type === 'toggle').length).toBe(1);
+    expect(await run('sample', { path: '$.a[*]' })).toEqual({ ok: false, error: STALE });
   });
 
   it('stops before it starts on an already-aborted signal', async () => {
