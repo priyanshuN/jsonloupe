@@ -16,6 +16,7 @@
     "jsonpath",
     "mcp",
     "mcp-server",
+    "webmcp",
     "lossless",
     "int64",
     "zstd",
