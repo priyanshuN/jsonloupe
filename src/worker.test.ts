@@ -976,6 +976,140 @@ describe('filter keeps expansion state (W3)', () => {
   });
 });
 
+// ---------- querySample reads the match list, not the visible tree ----------
+
+describe('querySample', () => {
+  interface SampleRes {
+    ok: boolean;
+    error?: string;
+    type?: string;
+    total?: number;
+    values?: { path: string; json: string }[];
+  }
+  // Two int64 amounts no double can hold: if a sample ever round-trips through
+  // a native number, these are the digits that change.
+  const FIXTURE =
+    '{"deliveries":[' +
+    '{"id":"D001","status":"DONE","amount":9007199254740993},' +
+    '{"id":"D002","status":"FAILED","amount":9007199254740995},' +
+    '{"id":"D003","status":"DONE","amount":9007199254740997}]}';
+  const sample = (n = 5): SampleRes => h<SampleRes>({ type: 'querySample', n, chars: 2000 });
+
+  it('returns the matched values with their real paths, digits intact', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: '$.deliveries[*].amount' });
+    expect(sample()).toEqual({
+      ok: true,
+      type: 'number',
+      total: 3,
+      values: [
+        { path: '$.deliveries[0].amount', json: '9007199254740993' },
+        { path: '$.deliveries[1].amount', json: '9007199254740995' },
+        { path: '$.deliveries[2].amount', json: '9007199254740997' },
+      ],
+    });
+  });
+
+  // The regression this verb exists for: queryFilter rebuilds the visible rows
+  // down to the previous query's matches, and the row-walking sample then found
+  // nothing for anything outside that set. The match list has no view state.
+  it('answers identically while the tree is filtered to something else', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: "$.deliveries[?(@.status == 'FAILED')]" });
+    h({ type: 'queryFilter' });
+    const visibleWhileFiltered = rows().map((r) => r.key);
+
+    h({ type: 'query', q: '$.deliveries[*].amount' });
+    const filtered = sample();
+    expect(filtered.total).toBe(3);
+    expect(filtered.values).toHaveLength(3);
+    expect(filtered.values?.[0]).toEqual({ path: '$.deliveries[0].amount', json: '9007199254740993' });
+    // A read-only sample moved nothing: the human's rows are what they were.
+    expect(rows().map((r) => r.key)).toEqual(visibleWhileFiltered);
+
+    h({ type: 'filter', query: '' });
+    h({ type: 'query', q: '$.deliveries[*].amount' });
+    expect(sample()).toEqual(filtered);
+  });
+
+  it('samples the children of a path that selects exactly one container', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: '$.deliveries[1]' });
+    expect(sample()).toEqual({
+      ok: true,
+      type: 'object',
+      total: 3,
+      values: [
+        { path: '$.deliveries[1].id', json: '"D002"' },
+        { path: '$.deliveries[1].status', json: '"FAILED"' },
+        { path: '$.deliveries[1].amount', json: '9007199254740995' },
+      ],
+    });
+  });
+
+  it('reports the container child count as the total and honours n', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: '$.deliveries' });
+    const r = sample(2);
+    expect(r).toMatchObject({ ok: true, type: 'array', total: 3 });
+    expect(r.values).toHaveLength(2);
+    expect(r.values?.[0].path).toBe('$.deliveries[0]');
+    // The whole element comes back, so its int64 survives inside the container.
+    expect(r.values?.[0].json).toContain('9007199254740993');
+  });
+
+  it('returns a single scalar match as itself', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: '$.deliveries[2].amount' });
+    expect(sample()).toEqual({
+      ok: true,
+      type: 'number',
+      total: 1,
+      values: [{ path: '$.deliveries[2].amount', json: '9007199254740997' }],
+    });
+  });
+
+  it('clips an oversized value rather than shipping the whole subtree', () => {
+    parse(`{"blob":"${'x'.repeat(5000)}"}`);
+    h({ type: 'query', q: '$.blob' });
+    const value = h<SampleRes>({ type: 'querySample', n: 1, chars: 100 }).values?.[0].json ?? '';
+    expect(value).toHaveLength(101);
+    expect(value.endsWith('…')).toBe(true);
+  });
+
+  it('refuses when the last query matched nothing or was an aggregate', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: '$.nope[*]' });
+    expect(sample()).toEqual({ ok: false, error: 'no matches' });
+    h({ type: 'query', q: '$.deliveries[*] | count' });
+    expect(sample()).toEqual({ ok: false, error: 'no path query result' });
+  });
+
+  // The worker's last-query state is shared with the human's own Ask panel.
+  it('refuses to sample a query other than the one the caller names', () => {
+    parse(FIXTURE);
+    h({ type: 'query', q: '$.deliveries[*].id' });
+    expect(h({ type: 'querySample', n: 2, chars: 2000, q: '$.deliveries[*].id' })).toMatchObject({ ok: true });
+    // Someone else queried in between; the values on hand are no longer ours.
+    expect(h({ type: 'querySample', n: 2, chars: 2000, q: '$.deliveries[*].amount' })).toEqual({
+      ok: false,
+      error: 'another query replaced this one; run it again',
+    });
+  });
+});
+
+describe('viewState', () => {
+  it('reports whether the tree the human sees is a filtered derivation', () => {
+    parse('{"a":{"x":1},"b":{"z":3}}');
+    expect(h({ type: 'viewState' })).toEqual({ filtered: false });
+    h({ type: 'query', q: '$.b.z' });
+    h({ type: 'queryFilter' });
+    expect(h({ type: 'viewState' })).toEqual({ filtered: true });
+    h({ type: 'filter', query: '' });
+    expect(h({ type: 'viewState' })).toEqual({ filtered: false });
+  });
+});
+
 // ---------- query rows stay lossless across the worker boundary ----------
 
 describe('query row transport', () => {

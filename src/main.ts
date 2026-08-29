@@ -6976,9 +6976,6 @@ if (modelContext) {
           tree.setTotal(totalRows);
           if (rowIndex >= 0) tree.scrollToIndex(rowIndex);
         },
-        // A tool that revealed or expanded nodes changed the worker's row count
-        // without touching the view; resync so the scrollbar still describes it.
-        syncTotalRows: (totalRows) => tree.setTotal(totalRows),
         // The same dance the "filter tree to these" button does, for the same
         // reason: this enters the toolbar's filtered state rather than a private
         // one, so the filter button lights up with the count and pressing it

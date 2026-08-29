@@ -1847,6 +1847,81 @@ function queryCopy(): { text: string; count: number } {
   return { text: llStringify(lastQueryValues, undefined, 2) ?? '', count: lastQueryValues.length };
 }
 
+interface QuerySampleValue {
+  path: string;
+  json: string;
+}
+type QuerySampleResult =
+  | { ok: true; type: NodeType; total: number; values: QuerySampleValue[] }
+  | { ok: false; error: string };
+
+/**
+ * The first n matched VALUES of the last query, read straight off the match
+ * list. The visible tree is a VIEW — a filter is a derived row list, and a node
+ * that matched perfectly well may have no row in it at all — so resolving a
+ * read-only sample through rows makes its answer depend on what the human
+ * happens to be looking at. These values and paths are what the query engine
+ * produced, so they are the same under any filter or expansion state, and no
+ * part of answering touches the view.
+ *
+ * A path that selects exactly one container samples that container's CHILDREN,
+ * matching what the tree walk did; anything else samples the matches themselves.
+ * Values are stringified here with llStringify, so int64 and decimal digits
+ * reach the caller exactly as they were parsed.
+ */
+function querySample(n: number, chars: number, q?: string): QuerySampleResult {
+  const result = lastQueryResult;
+  if (!result || !result.ok || result.kind !== 'matches') {
+    return { ok: false, error: 'no path query result' };
+  }
+  // The caller names the query it just ran. Anyone else — the human's own Ask
+  // panel, another tool — can overwrite this state between the two messages, and
+  // sampling the wrong query's values silently would be worse than refusing.
+  if (typeof q === 'string' && q !== lastQueryText) {
+    return { ok: false, error: 'another query replaced this one; run it again' };
+  }
+  if (result.total === 0 || lastQueryValues.length === 0) return { ok: false, error: 'no matches' };
+  const take = Math.max(0, Math.floor(n));
+  const json = (v: unknown): string => {
+    const text = llStringify(v, undefined, 2) ?? 'null';
+    return chars > 0 && text.length > chars ? `${text.slice(0, chars)}…` : text;
+  };
+
+  if (result.total > 1) {
+    const values: QuerySampleValue[] = [];
+    let type: NodeType = 'null';
+    for (let i = 0; i < Math.min(take, lastQueryValues.length); i++) {
+      type = typeOf(lastQueryValues[i]);
+      values.push({ path: formatPath(lastQueryPaths[i] ?? []), json: json(lastQueryValues[i]) });
+    }
+    return { ok: true, type, total: result.total, values };
+  }
+
+  const only = lastQueryValues[0];
+  const path = lastQueryPaths[0] ?? [];
+  if (!isContainer(only)) {
+    return { ok: true, type: typeOf(only), total: 1, values: [{ path: formatPath(path), json: json(only) }] };
+  }
+  const entries: [PathSeg, unknown][] = Array.isArray(only)
+    ? only.map((v, i) => [i, v])
+    : Object.entries(only as Record<string, unknown>);
+  return {
+    ok: true,
+    type: typeOf(only),
+    total: entries.length,
+    values: entries.slice(0, take).map(([key, v]) => ({ path: formatPath([...path, key]), json: json(v) })),
+  };
+}
+
+/**
+ * Whether the tree the human is looking at is a filtered derivation rather than
+ * the document. A tool that cannot land on a row needs to tell the agent which
+ * of the two it is: a path that does not exist, or one the current view hides.
+ */
+function viewState(): { filtered: boolean } {
+  return { filtered: filterSnapshot !== null };
+}
+
 type QueryRowsCopyResult =
   | { ok: true; text: string; count: number }
   | { ok: false; error: string };
@@ -2381,6 +2456,10 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return queryFilter();
     case 'queryCopy':
       return queryCopy();
+    case 'querySample':
+      return querySample(msg.n as number, (msg.chars as number) ?? 0, msg.q as string | undefined);
+    case 'viewState':
+      return viewState();
     case 'queryRowsCopy':
       return queryRowsCopy();
     case 'schema':
