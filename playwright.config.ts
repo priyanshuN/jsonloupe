@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: MIT
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * The WebMCP bridge needs Chromium launched with the origin-trial flags, and
+ * everything else needs a Chromium launched WITHOUT them — webmcp-absent.e2e.ts
+ * exists precisely to prove the app is inert when the API is missing. Launch
+ * args are per-project, so the flagged browser gets its own project and the two
+ * default projects skip the one file that needs it.
+ */
+const WEBMCP_SPEC = '**/webmcp.e2e.ts';
+
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.e2e.ts',
@@ -17,11 +26,24 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium-light',
+      testIgnore: WEBMCP_SPEC,
       use: { ...devices['Desktop Chrome'], colorScheme: 'light' },
     },
     {
       name: 'chromium-dark',
+      testIgnore: WEBMCP_SPEC,
       use: { ...devices['Desktop Chrome'], colorScheme: 'dark' },
+    },
+    {
+      // Chrome 149+ only, and only behind the flags: WebMCP exposes
+      // document.modelContext, WebMCPTesting lets a driver call the tools the
+      // page registered. One colour scheme is enough — nothing here is visual.
+      name: 'chromium-webmcp',
+      testMatch: WEBMCP_SPEC,
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: { args: ['--enable-features=WebMCP,WebMCPTesting'] },
+      },
     },
   ],
   webServer: {
