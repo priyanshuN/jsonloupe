@@ -5354,6 +5354,84 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   }
 }
 
+/* ---------- glass (PROTOTYPE, opt-in) ---------- */
+
+/* A MATERIAL, not a third theme: [data-glass] layers over light or dark, so
+   every contrast floor the two palettes already pass still holds where text
+   is read. The split is rule 11's, followed to its end:
+     CANVAS stays SOLID. The tree, the editor and the table are where dense
+     mono text is read, and anything showing through behind 13.5px digits is
+     noise on the one surface this tool exists for. Sticky column headers also
+     sit on the canvas and scroll rows underneath them.
+     CHROME goes translucent over an ambient wash — sidebar, toolbar, every
+     strip, the status line. They hold short labels at fixed positions, so a
+     soft tint behind them costs nothing.
+     FLOATS frost for real — menus, dialogs, popovers, the toast. These are the
+     only surfaces with live content behind them, which is where blur earns its
+     cost and where the material is most recognisable.
+   prefers-reduced-transparency and prefers-contrast: more both keep the solid
+   palette: prepaint.js and main.ts never set the attribute under either. */
+:root[data-glass][data-theme='dark'] {
+  --bg-chrome: rgba(33, 38, 47, 0.52);
+  --bg-chrome-2: rgba(42, 48, 59, 0.58);
+  --glass-float: rgba(30, 35, 44, 0.66);
+  --glass-edge: rgba(255, 255, 255, 0.09);
+  --glass-sheen: rgba(255, 255, 255, 0.05);
+  --glass-amb-1: rgba(55, 113, 138, 0.55);
+  --glass-amb-2: rgba(129, 72, 181, 0.32);
+  --glass-amb-3: rgba(134, 200, 220, 0.18);
+  --glass-blur: blur(22px) saturate(1.5);
+}
+
+:root[data-glass][data-theme='light'] {
+  --bg-chrome: rgba(255, 255, 255, 0.5);
+  --bg-chrome-2: rgba(255, 255, 255, 0.62);
+  --glass-float: rgba(255, 255, 255, 0.7);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-sheen: rgba(255, 255, 255, 0.4);
+  --glass-amb-1: rgba(55, 113, 138, 0.3);
+  --glass-amb-2: rgba(129, 72, 181, 0.18);
+  --glass-amb-3: rgba(40, 103, 165, 0.16);
+  --glass-blur: blur(22px) saturate(1.6);
+}
+
+/* The wash the chrome is glass OVER. Without something behind it, a
+   translucent strip is just a slightly different flat colour. */
+:root[data-glass] body {
+  background:
+    radial-gradient(60vw 50vh at 0% 0%, var(--glass-amb-1), transparent 70%),
+    radial-gradient(50vw 60vh at 100% 100%, var(--glass-amb-2), transparent 70%),
+    radial-gradient(40vw 40vh at 70% 10%, var(--glass-amb-3), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Chrome: the tokens above already made it translucent; the blur is for the
+   moments something does scroll beneath a strip, and the sheen is the 1px
+   highlight that sells the material at the top edge. */
+:root[data-glass] :is(#sidebar, #toolbar, #status-bar) {
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+:root[data-glass] :is(#sidebar, #toolbar, #status-bar) {
+  border-color: var(--glass-edge);
+}
+/* backdrop-filter makes the toolbar a stacking context, which would trap the
+   ⋯ menu's z-index inside it and let the pane bars below paint over it. */
+:root[data-glass] #toolbar { position: relative; z-index: 20; }
+
+/* The prototype's own switch rides a second footer row: the first is already
+   full at 250px, and glass is a material, not a fourth theme segment. */
+.side-foot:has(#glass-toggle:not([hidden])) { flex-wrap: wrap; }
+
+/* Floats: the real frosted panels. */
+:root[data-glass] :is(.menu, #toast, dialog, [popover]) {
+  background: var(--glass-float);
+  backdrop-filter: var(--glass-blur);
+  border-color: var(--glass-edge);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--glass-sheen);
+}
+
 /* ---------- reduced motion ---------- */
 
 /* Rule 13. Every transition and keyframe in this file is decoration over a
