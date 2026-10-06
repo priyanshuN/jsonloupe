@@ -23,11 +23,9 @@
     // Glass (prototype) is a material over either theme, not a third theme,
     // so it is its own attribute. Presence-only: nothing from the query
     // string becomes an attribute VALUE here.
-    // A reduced-transparency or more-contrast preference outranks it.
-    if (
-      (new URLSearchParams(location.search).has('glass') || localStorage.getItem('wb-glass') === '1') &&
-      !matchMedia('(prefers-reduced-transparency: reduce), (prefers-contrast: more)').matches
-    )
+    // Reduced transparency / more contrast are handled in CSS: the shapes
+    // stay, the see-through goes.
+    if (new URLSearchParams(location.search).has('glass') || localStorage.getItem('wb-glass') === '1')
       document.documentElement.dataset.glass = '';
 
     var script = document.currentScript;

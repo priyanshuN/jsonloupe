@@ -6851,9 +6851,6 @@ paintThemeSwitch();
 // Glass (prototype): a material over either theme. prepaint.js applies it
 // before first paint; this only flips and persists it.
 const glassToggle = $<HTMLButtonElement>('#glass-toggle');
-// Someone who asked the OS for less transparency or more contrast does not get
-// offered it at all.
-glassToggle.hidden = window.matchMedia?.('(prefers-reduced-transparency: reduce), (prefers-contrast: more)').matches ?? false;
 function paintGlass(): void {
   const on = document.documentElement.dataset.glass !== undefined;
   glassToggle.classList.toggle('on', on);
