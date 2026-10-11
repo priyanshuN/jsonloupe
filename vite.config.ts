@@ -15,7 +15,8 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 // bundle, the repo, or any transcript. Search order:
 //   1. WB_KEY_FILE env var — raw key, or a .env file
 //   2. <project>/.api-key — raw key (gitignored)
-//   3. ~/.config/api-keys/anthropic then openrouter — the user's common
+//   3. ~/.config/api-keys/anthropic-jsonloupe (this project's own key, so the
+//      Console shows its usage separately), then anthropic, then openrouter — the user's common
 //      per-provider key files, kept outside any repo and shared with
 //      `jsonloupe --key-file` and other tools
 // parseKeyFile decides raw-vs-.env by content, so any filename works.
@@ -26,6 +27,7 @@ function readKey(): string | null {
     process.env.WB_KEY_FILE,
     join(root, '.api-key'),
     join(root, '.anthropic-key'),
+    join(homedir(), '.config', 'api-keys', 'anthropic-jsonloupe'),
     join(homedir(), '.config', 'api-keys', 'anthropic'),
     join(homedir(), '.config', 'api-keys', 'openrouter'),
   ].filter((p): p is string => !!p);
