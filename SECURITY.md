@@ -112,7 +112,7 @@ A key can also come from a local file instead of the clipboard, three ways with
 one parser ([src/key-file.ts](src/key-file.ts) — a raw key, or an
 `OPENROUTER_API_KEY`/`ANTHROPIC_API_KEY` line): the manual-key form's **load
 key from file…** picker reads the chosen file in the page and never uploads it;
-dev mode reads `.api-key`, `WB_KEY_FILE`, or `~/.config/api-keys/anthropic` /
+dev mode reads `.api-key`, `WB_KEY_FILE`, or `~/.config/api-keys/anthropic-jsonloupe` / `anthropic` /
 `openrouter` (all outside version control) and serves it over
 localhost only; and `npx jsonloupe --key-file <path>` does the same for the
 packaged server — opt-in only, so without the flag that server never reads a
