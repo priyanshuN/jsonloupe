@@ -239,6 +239,38 @@ describe('sniffPayloadText', () => {
   });
 });
 
+describe('stringified JSON documents', () => {
+  // Inner text carries an int64 and its own whitespace: both must survive.
+  const inner = '{"id": 7241590238164561921, "items": [1, 2]}';
+
+  it('opens a document stringified once as the JSON it holds, exactly', async () => {
+    const once = JSON.stringify(inner);
+    expect(sniffPayloadText(once)).toEqual({
+      recognized: true, format: 'json-text', wrapper: 'json-string', requiresWasm: false,
+    });
+    const decoded = unwrap(await decodeJsonPayload(once));
+    expect(decoded.text).toBe(inner);
+    expect(decoded.metadata.wrapper).toBe('json-string');
+    expect(decoded.metadata.layers[0]).toMatchObject({ kind: 'json-string', detail: 'stringified JSON' });
+  });
+
+  it('peels a document stringified more than once in one go', async () => {
+    const twice = JSON.stringify(JSON.stringify(inner));
+    expect(sniffPayloadText(twice)).toMatchObject({ recognized: true, wrapper: 'json-string' });
+    const decoded = unwrap(await decodeJsonPayload(twice));
+    expect(decoded.text).toBe(inner);
+    expect(decoded.metadata.layers[0].detail).toBe('stringified JSON ×2');
+  });
+
+  it('leaves an ordinary string document, or one that only looks like JSON, alone', async () => {
+    for (const text of ['"hello"', '"{not json"', JSON.stringify('"just a quoted word"'), '"[1, 2"']) {
+      expect(sniffPayloadText(text)).toMatchObject({ wrapper: 'none' });
+      const decoded = await decodeJsonPayload(text);
+      if (decoded.ok) expect(decoded.text).toBe(text);
+    }
+  });
+});
+
 describe('decodeJsonPayload limits and structured errors', () => {
   it('rejects a declared decoded size before adding a Zstd decode layer', async () => {
     const text = JSON.stringify({ data: 'x'.repeat(2048) });

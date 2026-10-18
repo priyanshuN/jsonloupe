@@ -1163,6 +1163,7 @@ function decodedDocumentTitle(sourceTitle: string): string {
 
 function payloadTransformLabel(kind: string): string {
   if (kind === 'sql-cell') return 'SQL cell';
+  if (kind === 'json-string') return 'JSON string';
   if (kind === 'postgres-bytea-hex') return 'PostgreSQL bytea';
   if (kind === 'base64') return 'Base64';
   if (kind === 'zstd') return 'Zstd';
@@ -2146,7 +2147,9 @@ async function openText(
   // Only a payload decoded out of another stored document can be traced back.
   originalBtn.hidden = !provenance?.sourceDocId;
   if (provenance) {
-    payloadBadge.textContent = `decoded · ${provenance.format}`;
+    payloadBadge.textContent = provenance.wrapper === 'json-string'
+      ? 'decoded · stringified JSON'
+      : `decoded · ${provenance.format}`;
     payloadBadge.title = `${provenance.sourceTitle}${provenance.sourcePath ? ` · ${provenance.sourcePath}` : ''}\n${provenanceTrace(provenance)}`;
   }
   if (res.repaired) {
