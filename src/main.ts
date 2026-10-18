@@ -4199,7 +4199,7 @@ semCloseBtn.addEventListener('click', () => {
 
 // Must equal .trow's height in style.css (contract rule 8b: one row rhythm
 // across every scrolling list). Virtualized, so the two cannot drift apart.
-const TROW_H = 28;
+const TROW_H = 22;
 let tableCols: string[] = [];
 let tableTotal = 0;
 let currentTablePath = '';
@@ -4207,13 +4207,22 @@ let sortCol: string | null = null;
 let sortDir = 1;
 let tEpoch = 0;
 
+const TIDX_W = 70;
+const TCOL_MAX = 220;
 function tGrid(): string {
-  return `70px repeat(${tableCols.length}, minmax(120px, 220px))`;
+  return `${TIDX_W}px repeat(${tableCols.length}, minmax(120px, ${TCOL_MAX}px))`;
 }
 
 function renderTableHeader(): void {
   tableHeader.replaceChildren();
   tableHeader.style.gridTemplateColumns = tGrid();
+  // The header sizes to its max-content (every column at TCOL_MAX), but the
+  // rows live in an absolutely positioned layer that contributes no width, so
+  // they used to resolve the same template against the PANE's width and shrink
+  // toward 120px — header and cells drifted apart column by column. The spacer
+  // carries the header's width into the viewport, so both grids resolve
+  // against the same box and every column lines up.
+  tableSpacer.style.width = `${TIDX_W + TCOL_MAX * tableCols.length}px`;
   const idx = document.createElement('span');
   idx.className = 'tcell th tidx';
   idx.textContent = '#';

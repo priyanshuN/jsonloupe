@@ -13,6 +13,17 @@ Notable changes to jsonloupe. Dates are UTC.
   string that is just a string still opens as a string.
 - **`{…}` reaches a field stringified more than once.** The button now appears
   on such values and one click peels every layer, where before it did not appear.
+- **Denser rows: 35 fit where 27 did.** Rows are 22px (were 28) and documents
+  read at 13.5px, the size every other list already used; the code pane takes
+  the same pitch, so in split view a row on the left sits beside its line on
+  the right. An open object reads `{ 10 keys }` instead of repeating the keys
+  listed under it, a value cut short shows in full on hover, and the row's
+  `key · path · copy` buttons sit next to the value instead of at the far
+  window edge. In a narrow tree pane (a phone, or split view's left side) those
+  buttons float over the row end, so values get the whole width.
+- **Table view's columns line up with its header.** The header sized every
+  column to 220px while the rows fit the window, so once a table was wider than
+  the screen each column drifted further from its title and long ids were cut.
 - **The tree and code panes draw a document more carefully.** An object row
   keeps its key count visible when its preview truncates; indent guides drop from
   the caret that opened them; the split-synced code line is banded like the

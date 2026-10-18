@@ -30,7 +30,7 @@ export interface TreeCallbacks {
   onEditCommit?(id: number, index: number, text: string): Promise<{ ok: boolean; error?: string }>;
 }
 
-const ROW_H = 28;
+const ROW_H = 22; // = --row-h in style.css (rule 8b)
 const OVERSCAN = 12;
 
 function fmtBytes(n: number): string {
@@ -55,6 +55,14 @@ export class VirtualTree {
     private cbs: TreeCallbacks,
   ) {
     viewport.addEventListener('scroll', () => this.schedule());
+    // A value cut short by the pane shows its whole preview on hover. Measured
+    // at the moment of hover, so a row that fits never carries a tooltip.
+    layer.addEventListener('mouseover', (e) => {
+      const t = (e.target as HTMLElement).closest('.val') as HTMLElement | null;
+      if (!t) return;
+      if (t.scrollWidth > t.clientWidth) t.title = t.textContent ?? '';
+      else t.removeAttribute('title');
+    });
     layer.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       const rowEl = t.closest('.row') as HTMLElement | null;
@@ -349,9 +357,13 @@ export class VirtualTree {
     val.className = `val ${r.unpacked ? 'string' : r.type}`;
     // An object preview ends in its key count (`{ a, b, … } · 10 keys`). The
     // count goes in its own span so a narrow pane truncates the key list, not
-    // the one number the row exists to show.
-    const tail = r.type === 'object' && !r.unpacked ? r.preview.lastIndexOf(' · ') : -1;
-    val.textContent = tail < 0 ? r.preview : r.preview.slice(0, tail);
+    // the one number the row exists to show. Once the object is OPEN its keys
+    // are the rows right below, so the list would only repeat them: the row
+    // reads `{ 10 keys }`, the same shape an array's `[ 2 items ]` has.
+    const isObject = r.type === 'object' && !r.unpacked;
+    const tail = isObject && !r.expanded ? r.preview.lastIndexOf(' · ') : -1;
+    if (isObject && r.expanded) val.textContent = `{ ${r.childCount} key${r.childCount === 1 ? '' : 's'} }`;
+    else val.textContent = tail < 0 ? r.preview : r.preview.slice(0, tail);
     el.appendChild(val);
     if (tail >= 0) {
       const count = document.createElement('span');

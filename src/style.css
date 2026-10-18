@@ -253,7 +253,9 @@
        ("Select a row to see its path.") is part of the view's job.
    20. HOVER REVEALS, IT NEVER REFLOWS. A control that appears on a row —
        .actions in the tree — sits in a gutter that is reserved on every row of
-       that list, always (112px there, the two-action width), and fades in
+       that list, always (112px there, the two-action width; it follows the
+       row's content, and in a narrow tree pane it floats over the row end
+       instead of reserving anything), and fades in
        (opacity + visibility) rather than entering the flex line. Actions that
        arrive at full width push the value aside, so the content moves under
        the pointer at the exact moment the pointer arrives, and a value that
@@ -499,17 +501,22 @@
      a mono would be hostile at paragraph length. */
   --display: 'Martian Mono', var(--mono);
   --display-prose: 'Space Grotesk', var(--sans);
-  --row-h: 28px;
+  /* Rule 8b's one row rhythm. 22px since 2026-10-18 (was 28): this is a
+     viewer for LARGE documents, and at 28 a third of every row was air — 27
+     rows filled a 1440×900 window, where 22 fits 35. Documents read at
+     --fs-body (13.5px) in it, the size every other list of rows already used,
+     so the tree, the code pane and the lists now share one size and one
+     pitch. Mirrored as a virtualization constant in tree.ts, compare-view.ts
+     and main.ts (TROW_H) — change all four together. */
+  --row-h: 22px;
 
   /* Contract rules 1, 3 and 4 — the only control sizes and gaps in the app.
      Stepped up 2026-08-09 with the type ramp below: 12.5px body in a 28px
      control was a size the app had inherited rather than chosen, and it read
      small against every desktop tool it sits beside (VS Code's chrome is 13,
      GitHub's 14). The metrics move WITH the ramp — a bigger label in the same
-     box is not a scale, it is a crowded box. --row-h deliberately does NOT
-     move: row height is a density decision, its value is mirrored as a
-     virtualization constant in three TS files, and 14px in 28px is a
-     comfortable ratio already. */
+     box is not a scale, it is a crowded box. --row-h is a separate density
+     decision (see its own note above). */
   --ctl-h: 30px;
   --ctl-h-mini: 22px;
   --icon: 15px;
@@ -3446,6 +3453,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 
 #tree-pane { display: flex; flex-direction: column; min-height: 0; }
 #tree-viewport {
+  container: tree / inline-size;
   flex: 1;
   overflow: auto;
   position: relative;
@@ -3492,7 +3500,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   align-items: center;
   height: var(--row-h);
   padding-right: var(--gap-4);
-  font: var(--fs-code)/1 var(--mono);
+  font: var(--fs-body)/1 var(--mono);
   white-space: nowrap;
   cursor: default;
 }
@@ -3642,15 +3650,15 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    is a property of the row and never of where the pointer happens to be. 112px
    is the common path · copy set; optional key/table actions grow their own
    gutter past that, which is fine — what must not change is a single row's
-   gutter, and it never does. The actions right-align inside it, so the common
-   rows line up. visibility, not display, because a
+   gutter, and it never does. The gutter FOLLOWS the row's content rather than
+   sitting at the pane's right edge (2026-10-18): on a wide window the edge was
+   ~1000px from the value the buttons act on. A long value still pushes them to
+   the edge, because the value is what shrinks. visibility, not display, because a
    display:none control cannot be tabbed to — and opacity alone would leave an
    invisible tab stop sitting in the order. */
 .actions {
   display: flex;
-  justify-content: flex-end;
   gap: var(--gap-1);
-  margin-left: auto;
   padding-left: var(--gap-3);
   min-width: 112px;
   flex-shrink: 0;
@@ -3663,6 +3671,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   opacity: 1;
   visibility: visible;
 }
+/* A mini control is --row-h tall, so on a row it would fill the row edge to
+   edge; 2px of the row shows above and below it instead. */
+.row .actions button,
+.row .btn-unpack { min-height: calc(var(--row-h) - 4px); line-height: 1; }
 .actions button {
   border-radius: var(--r-sm);
   color: var(--text-dim);
@@ -3671,6 +3683,26 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   box-shadow: none;
 }
 .actions button:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* Rule 20's reserved gutter costs ~140px on every row — a third of a phone's
+   width, spent on buttons that only ever show on the one row you tapped. On a
+   narrow pane they float over that row's end instead, so values get the whole
+   width. There is no pointer to wander here, so the truncation point that rule
+   20 protects only moves on the row you chose. A CONTAINER query, not a media
+   query: the left pane of split view is just as narrow on a wide screen. */
+@container tree (max-width: 560px) {
+  .row { position: relative; }
+  .actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    align-items: center;
+    min-width: 0;
+    padding: 0 var(--gap-2) 0 var(--gap-4);
+    background: linear-gradient(to right, transparent, var(--bg-sel) var(--gap-3));
+  }
+}
 
 @keyframes rowflash {
   0% { background: var(--accent-soft); }
@@ -3832,7 +3864,9 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 #code-host { flex: 1; min-height: 0; overflow: hidden; position: relative; }
 #code-host .cm-editor { height: 100%; }
-#code-host .cm-scroller { font: var(--fs-code)/1.6 var(--mono); }
+/* The tree's size and pitch (rule 8b), so split view reads as one surface:
+   a line on the left sits at the height of a row on the right. */
+#code-host .cm-scroller { font: var(--fs-body)/var(--row-h) var(--mono); }
 
 /* The pane while it is still becoming itself. Rule 17 states the one treatment
    for a surface with nothing IN it; this is the neighbouring case — a surface
@@ -3862,8 +3896,8 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .code-skeleton .cs-lines {
   display: flex;
   flex-direction: column;
-  /* .cm-content's own 6px, so the first bar sits where the first line will. */
-  padding-top: 6px;
+  /* .cm-content has no top inset, so the first bar sits flush too. */
+  padding-top: 0;
 }
 .code-skeleton .cs-gutter {
   /* CodeMirror's line-number column: 32px of digits inside 12/10 of padding. */
@@ -3886,7 +3920,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
      height as something the editor will not use. */
   flex: 0 0 auto;
   height: 7px;
-  margin: calc((var(--fs-code) * 1.6 - 7px) / 2) 0;
+  margin: calc((var(--row-h) - 7px) / 2) 0;
   border-radius: var(--r-xs);
   /* Mixed INTO the canvas, not toward transparent: the opaque-wash rule the
      editor's search fills already follow. Faint enough to read as absence. */
@@ -4823,7 +4857,9 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   grid-template-columns: auto minmax(104px, 0.8fr) 116px minmax(130px, 1fr) repeat(3, var(--ctl-h-mini));
   align-items: center;
   gap: var(--gap-2);
-  min-height: var(--row-h);
+  /* A form row, not a list row: its mini controls need 3px either side, which
+     --row-h no longer leaves now it equals --ctl-h-mini. */
+  min-height: calc(var(--ctl-h-mini) + 6px);
 }
 .convert-col.off { opacity: 0.45; }
 .convert-source { min-width: 0; width: 100%; padding: 0 var(--gap-2); }

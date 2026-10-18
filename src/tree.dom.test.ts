@@ -171,7 +171,7 @@ describe('VirtualTree rendering and selection', () => {
     expect(tree.selectedIndex()).toBe(-1);
 
     tree.setTotal(4);
-    expect(spacer.style.height).toBe('112px');
+    expect(spacer.style.height).toBe('88px');
   });
 
   it('scrolls bounded selections and restores focus after a repaint', async () => {
@@ -187,7 +187,7 @@ describe('VirtualTree rendering and selection', () => {
     expect(tree.selectedIndex()).toBe(0);
     expect(viewport.scrollTop).toBe(0);
     tree.scrollToIndex(2);
-    expect(viewport.scrollTop).toBe(28);
+    expect(viewport.scrollTop).toBe(16);
 
     (layer.children[0] as HTMLElement).focus();
     await inner.render();
@@ -220,5 +220,35 @@ describe('VirtualTree inline editing', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.waitFor(() => expect(onEditCommit).toHaveBeenCalledTimes(2));
     expect(onEditCommit).toHaveBeenLastCalledWith(3, 2, '"after"');
+  });
+});
+
+describe('VirtualTree object summaries and truncation', () => {
+  it('reads an open object as its key count, and keeps a closed one’s count apart', () => {
+    const { inner } = harness();
+    const open = inner.rowEl({ ...objectRow, childCount: 10 });
+    expect(open.querySelector('.val')?.textContent).toBe('{ 10 keys }');
+    expect(open.querySelector('.val-count')).toBeNull();
+
+    const closed = inner.rowEl({ ...objectRow, expanded: false, preview: '{ a, b, c, d, e, … } · 10 keys' });
+    expect(closed.querySelector('.val')?.textContent).toBe('{ a, b, c, d, e, … }');
+    expect(closed.querySelector('.val-count')?.textContent).toBe(' · 10 keys');
+    // The accessible name still carries the whole preview.
+    expect(closed.getAttribute('aria-label')).toBe('payload: { a, b, c, d, e, … } · 10 keys');
+  });
+
+  it('titles a value only while it is cut short', () => {
+    const { layer, inner } = harness();
+    const row = inner.rowEl({ ...leafRow, unpacked: false, maybeJson: false, preview: '"a long value"' });
+    layer.appendChild(row);
+    const val = row.querySelector('.val') as HTMLElement;
+    Object.defineProperty(val, 'clientWidth', { configurable: true, value: 40 });
+    Object.defineProperty(val, 'scrollWidth', { configurable: true, value: 120 });
+    val.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(val.title).toBe('"a long value"');
+
+    Object.defineProperty(val, 'scrollWidth', { configurable: true, value: 40 });
+    val.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(val.hasAttribute('title')).toBe(false);
   });
 });

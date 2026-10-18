@@ -231,7 +231,9 @@ export class CodeEditor {
         {
           '&': { color: p.text, backgroundColor: p.bg, height: '100%' },
           '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.6' },
-          '.cm-content': { caretColor: p.cursor, padding: '6px 0' },
+          // No top inset: line 1 starts flush with the pane, as the tree's row 1
+          // does, so split view's rows sit at the same heights on both sides.
+          '.cm-content': { caretColor: p.cursor, padding: '0 0 6px' },
           '.cm-cursor, .cm-dropCursor': { borderLeftColor: p.cursor, borderLeftWidth: '2px' },
           '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
             backgroundColor: p.sel,
@@ -246,7 +248,7 @@ export class CodeEditor {
           // the smaller digits still sit on the code's vertical centre.
           '.cm-lineNumbers .cm-gutterElement': {
             padding: '0 10px 0 12px', minWidth: '32px',
-            fontSize: 'var(--fs-chip)', lineHeight: 'calc(var(--fs-code) * 1.6)',
+            fontSize: 'var(--fs-chip)', lineHeight: 'var(--row-h)',
             fontVariantNumeric: 'tabular-nums',
           },
           '.cm-activeLineGutter': { backgroundColor: p.activeGutter, color: p.dim },
