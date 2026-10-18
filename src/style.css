@@ -316,6 +316,22 @@
        same rule in the same commit, or the rule is prose. Every control in
        every tier/state/theme is on one page: /styleguide.html, the stare
        page — check it after any token change.
+   25. THE SIDEBAR HIDES WHOLE, OR NOT AT ALL (2026-10-18). At desktop widths
+       the documents column collapses to a 0 track — never an icon rail: a
+       document has no favicon, so a rail is a column of identical file glyphs
+       that names nothing. Closed, it is visibility: hidden and inert, so its
+       controls leave the tab order and the accessibility tree in the frame
+       they leave the screen. ONE toggle place: the window's top-left corner —
+       #sidebar-hide leads the sidebar header, #sidebar-show takes the first
+       control slot of whichever view is up, and the view's top strip reserves
+       its room through --sidebar-lead rather than having it laid over its
+       content. That reserved slot is window chrome, not a fourth toolbar group
+       (rule 10): the three groups keep their order and their gaps. State is
+       presence-only (wb-sidebar = 'closed', or no key) and applied by
+       prepaint.js before the first frame, as theme is. The column moves at
+       rule 12's one speed; below 900px the drawer owns the sidebar and none
+       of this applies. The linter holds the 0 track, the hidden state and
+       both toggles' aria wiring.
    ========================================================================== */
 
 :root,
@@ -327,6 +343,10 @@
      durations. Mode-invariant, so it lives here rather than per theme. */
   --dur: 0.12s;
   --ease: ease;
+
+  /* Rule 25: the documents column's one width. The hidden sidebar animates
+     this track to 0, and the sidebar's rows hold it while they slide out. */
+  --sidebar-w: 250px;
 
   --bg: #191d24;
   /* Rule 11: the document reading surface. Same value as --bg here — dark was
@@ -608,7 +628,7 @@ html.returning #landing { display: none; }
 
 #app {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr;
   height: 100vh;
   height: 100dvh;
 }
@@ -617,7 +637,8 @@ html.returning #landing { display: none; }
    behavior do not depend on generated content. They stay completely out of
    desktop layout; the <=900px shell block turns them on. */
 #mobile-shell-bar,
-#sidebar-close { display: none; }
+#sidebar-close,
+#sidebar-show { display: none; }
 
 /* ---------- buttons & inputs ---------- */
 
@@ -1006,6 +1027,50 @@ select:focus {
   min-height: 0;
 }
 
+/* ---------- hidden sidebar (contract rule 25) ----------
+   Desktop only: the compact shell's drawer (<=900px) owns the sidebar there and
+   none of this applies. Closed means GONE — a 0 track, not an icon rail, because
+   documents have no favicons and a rail would be a column of identical file
+   glyphs. Hidden by visibility, so it leaves the tab order and the
+   accessibility tree in the same frame (main.ts adds inert on top). */
+@media (width > 900px) {
+  #app { transition: grid-template-columns var(--dur) var(--ease); }
+  #sidebar { overflow: hidden; }
+  /* The rows keep the open width while the track closes over them, so they
+     slide out whole instead of re-wrapping at every width on the way to 0. */
+  #sidebar > * { min-width: calc(var(--sidebar-w) - 1px); }
+  :root[data-sidebar-closed] #app {
+    grid-template-columns: 0 1fr;
+    /* What a view's top strip reserves for #sidebar-show: one icon button and
+       the in-group gap after it. Unset while the sidebar is open. */
+    --sidebar-lead: calc(var(--ctl-h) + var(--gap-2));
+  }
+  /* The transition lives on the CLOSED state only, so visibility lags on the
+     way out (the column stays painted while it slides) and flips at once on
+     the way in — a visibility transition starts at `hidden`, and focus()
+     refuses a hidden target, so opening could not hand focus to the toggle. */
+  :root[data-sidebar-closed] #sidebar {
+    visibility: hidden;
+    transition: visibility var(--dur) var(--ease);
+  }
+  #content { position: relative; }
+  /* Pinned to the toolbar's first control slot (rule 11's 8/12 strip inset),
+     so on the viewer it reads as the bar's leading control. */
+  :root[data-sidebar-closed] #sidebar-show {
+    display: inline-flex;
+    position: absolute;
+    top: var(--gap-2);
+    left: var(--gap-3);
+    z-index: 1;
+  }
+  :root[data-sidebar-closed] #toolbar { padding-left: calc(var(--gap-3) + var(--sidebar-lead)); }
+  :root[data-sidebar-closed] .codec-head { padding-left: var(--sidebar-lead); }
+  /* The toggle leads the header; brand follows it, `new` stays right. */
+  .side-head { gap: var(--gap-2); }
+  .side-head .brand { margin-right: auto; }
+}
+#sidebar-hide { flex-shrink: 0; }
+
 .side-head {
   display: flex;
   align-items: center;
@@ -1174,7 +1239,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    here restyles the workbench. */
 
 #app:has(#landing:not([hidden]):not(.landing--app)) { grid-template-columns: 1fr; }
-#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar { display: none; }
+#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar,
+#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar-show { display: none; }
 
 #landing {
   flex: 1;
@@ -5123,6 +5189,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
     transform: translateX(0);
   }
   #sidebar-close { display: inline-flex; }
+  #sidebar-hide { display: none; }
   #sidebar-scrim {
     position: fixed;
     inset: 0;

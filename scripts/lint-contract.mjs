@@ -33,6 +33,9 @@
 //  10. rule 15 — the named tier-2 recipes keep their hairline and stay off the
 //      -soft fills, so tier 2 and tier 3 cannot quietly converge into one
 //      device the reader has to know the domain to decode.
+//  11. rule 25 — the hidden sidebar is a 0 track (no icon rail) and
+//      visibility: hidden, both desktop-only, and both toggles carry
+//      aria-controls="sidebar" and aria-expanded.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -340,6 +343,36 @@ if (/flex-basis:\s*100%/.test(ruleIn(compactBodies(420), '.tb-search'))) {
   errors.push('style.css: .tb-search must keep its 760px basis below 420px — full width strands #ask-btn on its own row');
 }
 
+// ---------- hidden sidebar (rule 25) ----------
+
+// Desktop only: the compact drawer owns the sidebar below 900px, and a closed
+// rule outside this block would hide the drawer's contents with it.
+const desktopShell = (() => {
+  const at = css.indexOf('@media (width > 900px)');
+  if (at < 0) return '';
+  const [open, end] = blockRange(at);
+  return css.slice(open + 1, end - 1);
+})();
+if (!desktopShell) {
+  errors.push('style.css: the @media (width > 900px) block is missing — rule 25 lives there');
+} else {
+  const closedApp = ruleIn(desktopShell, ':root[data-sidebar-closed] #app');
+  // A first track other than 0 is an icon rail, which rule 25 rules out.
+  if (!/grid-template-columns:\s*0\s+1fr/.test(closedApp)) {
+    errors.push('style.css: :root[data-sidebar-closed] #app must close the column to a 0 track (rule 25 — no icon rail)');
+  }
+  if (!/visibility:\s*hidden/.test(ruleIn(desktopShell, ':root[data-sidebar-closed] #sidebar'))) {
+    errors.push('style.css: :root[data-sidebar-closed] #sidebar must be visibility: hidden, so its controls leave the tab order (rule 25)');
+  }
+}
+for (const id of ['sidebar-hide', 'sidebar-show']) {
+  const tag = html.match(new RegExp(`<button id="${id}"[^>]*>`))?.[0] ?? '';
+  if (!tag) errors.push(`index.html: #${id} is missing — rule 25's toggle pair`);
+  else if (!/aria-controls="sidebar"/.test(tag) || !/aria-expanded="(?:true|false)"/.test(tag)) {
+    errors.push(`index.html: #${id} must carry aria-controls="sidebar" and aria-expanded (rule 25)`);
+  }
+}
+
 // ---------- dead tokens ----------
 
 const definedTokens = new Set();
@@ -367,4 +400,4 @@ if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
   process.exit(1);
 }
-console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, type ramp, restatements, dead tokens, status layout)');
+console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, type ramp, restatements, hidden sidebar, dead tokens, status layout)');

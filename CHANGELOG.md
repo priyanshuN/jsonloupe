@@ -4,6 +4,11 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **The documents sidebar hides.** On a desktop-width window the sidebar
+  toggle at the top-left corner (or ⌘B / Ctrl B) hides the documents column
+  whole and gives its 250px to the document; the toggle stays in the same
+  corner, now leading the toolbar. The choice survives a reload, and a hidden
+  sidebar leaves the tab order. Phones keep their drawer.
 - **The toolbar holds one row on a laptop.** In tree view it needed ~1300px,
   so every window narrower than about 1500px (1280, 1366, 1440) wrapped it onto
   a second row — 46px off the document — while the search field stretched to

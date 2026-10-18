@@ -20,6 +20,12 @@
       theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     document.documentElement.dataset.theme = theme;
 
+    // The hidden sidebar (contract rule 25) must be hidden in the FIRST frame,
+    // or every reload of a closed sidebar opens it and animates it shut.
+    // Presence-only, like the stored value: 'closed' or no key at all.
+    if (localStorage.getItem('wb-sidebar') === 'closed')
+      document.documentElement.dataset.sidebarClosed = '';
+
     var script = document.currentScript;
     if (
       script &&
