@@ -1632,6 +1632,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-tag-key { color: var(--c-key); }
 .lp-tag-warn { color: var(--warn); }
 .lp-cell h3 { margin: 10px 0 var(--gap-2); font: 600 18px var(--display); }
+/* A key named in a heading is drawn as the key, like the shortcut sheet's. */
+.lp-cell h3 kbd {
+  padding: 0 6px;
+  font: inherit;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-bottom-color: var(--border-strong);
+  border-radius: var(--r-xs);
+}
 .lp-cell p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.6; text-wrap: pretty; }
 .lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
 /* Evidence on the flagship card: the same int64 twice, exact then as a float
