@@ -2651,6 +2651,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 @container viewer (max-width: 1280px) {
   .tb-tools .tb-named-action { width: var(--ctl-h); padding: 0; justify-content: center; }
   .tb-named-action .tb-label { display: none; }
+  /* And the mode switch's segments step in from 12px to 8px a side: the 32px
+     goes to the search field, whose `press /` hint was cut to `press`. */
+  #mode-switch button { padding: 0 var(--gap-2); }
 }
 
 /* Quiet utilities — toolbar, code bar, split strip, ask row, codec label rows,
