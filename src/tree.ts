@@ -347,8 +347,18 @@ export class VirtualTree {
 
     const val = document.createElement('span');
     val.className = `val ${r.unpacked ? 'string' : r.type}`;
-    val.textContent = r.preview;
+    // An object preview ends in its key count (`{ a, b, … } · 10 keys`). The
+    // count goes in its own span so a narrow pane truncates the key list, not
+    // the one number the row exists to show.
+    const tail = r.type === 'object' && !r.unpacked ? r.preview.lastIndexOf(' · ') : -1;
+    val.textContent = tail < 0 ? r.preview : r.preview.slice(0, tail);
     el.appendChild(val);
+    if (tail >= 0) {
+      const count = document.createElement('span');
+      count.className = 'val-count';
+      count.textContent = r.preview.slice(tail);
+      el.appendChild(count);
+    }
 
     if (r.maybeJson) {
       const b = document.createElement('button');

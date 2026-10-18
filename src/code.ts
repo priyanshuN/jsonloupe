@@ -148,6 +148,8 @@ export class CodeEditor {
     /** Scroll a 1-based line into view and pulse it — see the flash block below. */
     readonly flashLine: (line: number) => void,
     private cancelFlash: () => void,
+    /** Split-view sync: band a 1-based line and scroll to it — see the sync block below. */
+    readonly revealLine: (line: number) => void,
   ) {}
 
   static async create(opts: CreateOpts): Promise<CodeEditor> {
@@ -240,7 +242,13 @@ export class CodeEditor {
             backgroundColor: p.gutterBg, color: p.faint, border: 'none',
             borderRight: `1px solid ${p.border}`,
           },
-          '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 12px', minWidth: '32px' },
+          // Numbers at the tree gutter's size, on the code line's own line box so
+          // the smaller digits still sit on the code's vertical centre.
+          '.cm-lineNumbers .cm-gutterElement': {
+            padding: '0 10px 0 12px', minWidth: '32px',
+            fontSize: 'var(--fs-chip)', lineHeight: 'calc(var(--fs-code) * 1.6)',
+            fontVariantNumeric: 'tabular-nums',
+          },
           '.cm-activeLineGutter': { backgroundColor: p.activeGutter, color: p.dim },
           '.cm-foldGutter .cm-gutterElement': { color: p.faint, cursor: 'pointer' },
           '.cm-foldPlaceholder': {
@@ -304,6 +312,21 @@ export class CodeEditor {
       },
       provide: (f) => EditorView.decorations.from(f),
     });
+    // Split-view sync: the tree's selected node, banded across the whole line
+    // the way the tree bands its selected row (a text selection hugged only the
+    // characters and stopped at the comma). The band is the tree's place, not
+    // yours: any edit or caret move of your own in this pane retires it.
+    const syncMark = Decoration.line({ class: 'cm-sync-line' });
+    const setSync = StateEffect.define<number>();
+    const syncField = StateField.define({
+      create: () => Decoration.none,
+      update(deco, tr) {
+        if (tr.docChanged || tr.selection) deco = Decoration.none;
+        for (const e of tr.effects) if (e.is(setSync)) deco = Decoration.set([syncMark.range(e.value)]);
+        return deco;
+      },
+      provide: (f) => EditorView.decorations.from(f),
+    });
 
     const editor = new EditorView({
       parent: opts.host,
@@ -340,6 +363,7 @@ export class CodeEditor {
             if (u.docChanged && !u.transactions.some((tr) => tr.annotation(setDocA))) opts.onChange();
           }),
           flashField,
+          syncField,
           searchCount,
           caretReporter,
           EditorView.contentAttributes.of({
@@ -392,8 +416,18 @@ export class CodeEditor {
       flashTimer = setTimeout(() => editor.dispatch({ effects: setFlash.of(-1) }), FLASH_MS);
     };
 
+    // The caret goes to the line's start (no text selection) so focusing the
+    // pane afterwards lands you on the tree's node.
+    const revealLine = (line: number): void => {
+      const doc = editor.state.doc;
+      const from = doc.line(Math.min(Math.max(1, Math.floor(line)), doc.lines)).from;
+      editor.dispatch({ selection: { anchor: from }, effects: setSync.of(from), scrollIntoView: true });
+    };
+
     opts.onCaret(1, 1);
-    return new CodeEditor(editor, makeTheme, makeHl, themeComp, hlComp, setDocA, flashLine, cancelFlash);
+    return new CodeEditor(
+      editor, makeTheme, makeHl, themeComp, hlComp, setDocA, flashLine, cancelFlash, revealLine,
+    );
   }
 
   setDoc(text: string): void {
@@ -420,16 +454,6 @@ export class CodeEditor {
 
   focus(): void {
     this.view.focus();
-  }
-
-  // Split-view sync: select a 1-based line and scroll it into view. Selection
-  // (not focus) so the tree stays the active surface; the selection background
-  // shows even while unfocused.
-  revealLine(line: number): void {
-    const doc = this.view.state.doc;
-    const l = Math.min(Math.max(1, Math.floor(line)), doc.lines);
-    const lo = doc.line(l);
-    this.view.dispatch({ selection: { anchor: lo.from, head: lo.to }, scrollIntoView: true });
   }
 
   destroy(): void {

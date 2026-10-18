@@ -3522,15 +3522,20 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 .row:hover .rownum { color: var(--text-dim); }
 
+/* One 16px slot per depth. The guide sits at 9→10px of its slot, which is the
+   centre of the parent's 20px .caret one level up — so each line drops straight
+   down from the caret that opened it, instead of 5px to its right. */
 .indent {
   flex-shrink: 0;
   align-self: stretch;
   background-image: repeating-linear-gradient(
     to right,
     transparent 0,
-    transparent 15px,
-    var(--border-soft) 15px,
-    var(--border-soft) 16px
+    transparent 9px,
+    var(--border-soft) 9px,
+    var(--border-soft) 10px,
+    transparent 10px,
+    transparent 16px
   );
 }
 .caret {
@@ -3556,6 +3561,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .val.boolean { color: var(--c-boolean); }
 .val.null { color: var(--c-null); font-style: italic; }
 .val.object, .val.array { color: var(--text-dim); }
+/* The key count after an object preview (tree.ts splits it off): it never
+   shrinks, so truncation eats the key list first, and it sits one rank quieter
+   than the preview it counts. white-space:pre keeps its leading space. */
+.val-count { flex-shrink: 0; color: var(--text-faint); white-space: pre; }
 /* Primitive values are double-click editable — hint it with a text cursor. */
 .row[data-children='0'] .val.string,
 .row[data-children='0'] .val.number,
@@ -3895,6 +3904,9 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    The .cm-line prefix is the usual one, to outrank the editor's own generated
    theme (an active line, say, under the same wash). */
 #code-host .cm-line.cm-flash-line { animation: cmlineflash 1s ease-out; }
+/* Split-view sync: the tree's selected row, drawn on this surface with the
+   tree's own .row.sel treatment so the two panes mark the node the same way. */
+#code-host .cm-line.cm-sync-line { background: var(--bg-sel); box-shadow: inset 2px 0 0 var(--accent); }
 @keyframes cmlineflash {
   from { background: var(--accent-soft); }
   to { background: transparent; }
