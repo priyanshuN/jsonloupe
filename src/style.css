@@ -4931,6 +4931,14 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    ellipsizes, and #convert-title is built for that — but only a little, because
    an ellipsis loses words for good while a wrapped sentence loses nothing. */
 .convert-bar > .sem-heading { flex-shrink: 1; }
+/* In a narrow viewer (a 1120px window with the documents column open) the
+   heading's ellipsis left "to spreadsheet…" AND broke the outcome sentence
+   over two lines — both texts damaged, neither readable. The descriptor is
+   decoration; the sentence is the bar's news. Below 1000px of viewer the
+   descriptor goes and the sentence keeps its one line. */
+@container viewer (max-width: 1000px) {
+  #convert-title { display: none; }
+}
 /* Below the layout's own breakpoint there is no width left to shrink into, and
    a bar that overflows is worse than one that wraps. */
 @media (max-width: 900px) {

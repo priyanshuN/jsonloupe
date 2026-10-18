@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/priyanshuN/jsonloupe/main/.github/assets/demo.gif">
-    <img src=".github/assets/demo.gif" width="820" alt="Demo: inspecting nested exact-number JSON, running a local query, previewing linked spreadsheet tables, and encoding the document as Base64-Zstd. Click to view full size." />
+    <img src=".github/assets/demo.gif" width="820" alt="Demo: the sample opens unfolded with exact int64 ids, the command palette finds compare, the comparison opens on the changed values, a local query runs, the document previews as linked spreadsheet tables, and it encodes as Base64-Zstd. Click to view full size." />
   </a>
 </p>
 
@@ -84,14 +84,20 @@ flagged, with the original bytes preserved.
 
 - **Tree / Code / Split views** — virtualized tree, editable CodeMirror code
   view (fold, search, apply-with-`⌘S`), or both side by side with click-to-line
-  sync. Inline-edit primitives in the tree; full undo/redo across edits.
+  sync. Inline-edit primitives in the tree; full undo/redo across edits. A small
+  document opens unfolded to fill the screen, and scrolling deep keeps the
+  parent keys you are inside pinned at the top of the tree.
+- **Command palette** — `⌘K` / `Ctrl K` from anywhere: type a few letters of a
+  view, an action, a theme or a recent document's name, and press Enter.
 - **Search & filter** — `/` to search (literal or `/regex/i`), filter mode
   prunes the tree to matching branches and restores your expansion state after.
 - **Path & identity** — breadcrumb with one-click copy as JSONPath, JSON
   Pointer, or JS accessor; "same value" jumps to every node holding a value
   (schema-free correlation-ID tracing).
-- **Value lenses** — epoch → local date, lat/lng, uuid/url/base64 flags, byte
-  weight on collapsed containers so the heavy node is findable at a glance.
+- **Value lenses** — epoch → your local date and "3 days ago", the same
+  relative time on ISO timestamps, a colour chip on colour strings,
+  latitude/longitude, uuid/url/base64 flags, and byte weight on collapsed
+  containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
 - **Functions — a library of your own scripts** — write JavaScript for the
