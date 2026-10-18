@@ -11,6 +11,10 @@ Notable changes to jsonloupe. Dates are UTC.
   their icons only when the viewer is under 1280px, the parse time moved into
   the size's tooltip, a long document name truncates (full name on hover)
   instead of wrapping, and the search field's floor is 120px.
+- **A narrow window's toolbar is two rows, not three.** In a side pane or
+  half-screen window the copy / download / compress icons took a row of their
+  own, right-aligned under an empty left half; they now sit on the document
+  name's row, and the mode switch and search share the row below.
 - **The phone landing page opens on its headline.** Focusing the paste box on
   load scrolled the page 540px down to it, so a first-time phone visitor never
   saw the hero; the paste card's title also collapsed to nothing beside its

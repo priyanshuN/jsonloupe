@@ -5166,13 +5166,31 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 @media (max-width: 760px) {
   #toolbar {
     align-items: center;
-    gap: var(--gap-2) var(--gap-3);
+    /* Half a row gap: the line break below sits on a zero-height line of its
+       own, so rows 1 and 2 are two of these apart — the usual --gap-2. */
+    gap: var(--gap-1) var(--gap-3);
     overflow: visible;
   }
   #toolbar > * { max-width: 100%; }
+  /* The document row and the tools share the FIRST row when they fit (a
+     side-pane or half-screen window): the tools used to take a whole row of
+     their own, right-aligned under an empty left half, while the name row
+     above them was mostly empty too. order moves the tools ahead of the mode
+     switch; when the row is too narrow for both they still wrap to a row of
+     their own. */
   .tb-doc {
-    flex: 1 1 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     flex-wrap: wrap;
+  }
+  #mode-switch, .tb-search, #ask-btn { order: 2; }
+  /* A zero-height line break, so the mode switch always STARTS the second row
+     instead of squeezing in after the tools when a 700-760px row has room. */
+  #toolbar::before {
+    content: '';
+    order: 1;
+    flex-basis: 100%;
+    height: 0;
   }
   #doc-title {
     flex: 1 1 140px;
@@ -5189,12 +5207,11 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   }
   #ask-btn { flex-shrink: 0; }
   .tb-tools {
-    flex: 1 1 100%;
+    flex: 0 0 auto;
     flex-wrap: wrap;
     justify-content: flex-end;
-    padding-top: var(--gap-2);
+    margin-left: auto;
     padding-left: 0;
-    border-top: 1px solid var(--border);
     border-left: 0;
   }
 
