@@ -3817,6 +3817,11 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   user-select: none;
 }
 .row:hover .rownum { color: var(--text-dim); }
+/* Rule 18's inset marker lands under the opaque gutter, so on its own the
+   selected row showed only its band. The line number carries the accent too —
+   what an editor does for its active line — and the eye finds the row from
+   the gutter as fast as from the band. */
+.row.sel .rownum { color: var(--accent); }
 
 /* One 16px slot per depth. The guide sits at 9→10px of its slot, which is the
    centre of the parent's 20px .caret one level up — so each line drops straight
