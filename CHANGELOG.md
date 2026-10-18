@@ -4,6 +4,23 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **Comparing a document with itself says so.** Semantic compare now opens
+  with one line, "Documents are identical", and says whether the text matched
+  too or only formatting and key order differ; "Same values, different order"
+  when only array items moved. Before, comparing the sample with a copy of
+  itself showed 50 rows of "=", a banner saying some arrays "stayed
+  positional", a plan button asking for "1 need review" (while the needs-review
+  filter said 0), and a ⚠ on equal `tags` rows. An array that matches exactly
+  no longer carries an alignment warning, because no alignment mode could
+  change an exact match, and one array's warning no longer paints its equal
+  sibling at the same wildcard path. Pasting a baseline that matches the open
+  document exactly now opens the comparison instead of a toast; so does picking
+  a different recent with the same text.
+- **Compare reads JSON inside strings.** A field like `gatewayResponse` that
+  holds stringified JSON used to show as changed whenever its key order or
+  spacing did. Compare now decodes it: the gutter says `same json` when only the
+  text differs, and `json` with the decoded diff as children when the content
+  really changed. The string still counts as one change in the totals.
 - **The toolbar holds one row on a laptop.** In tree view it needed ~1300px,
   so every window narrower than about 1500px (1280, 1366, 1440) wrapped it onto
   a second row — 46px off the document — while the search field stretched to

@@ -230,6 +230,7 @@ const semFilters = $('#sem-filters');
 const semPlanBtn = $<HTMLButtonElement>('#sem-plan-btn');
 const semPlanBody = $('#sem-plan-body');
 const semWarning = $('#sem-warning');
+const semVerdict = $('#sem-verdict');
 const semLeftTitle = $('#sem-left-title');
 const semRightTitle = $('#sem-right-title');
 const semViewport = $('#sem-viewport');
@@ -1998,10 +1999,9 @@ baselinePasteBtn.addEventListener('click', async () => {
     return;
   }
   if (documentRevision !== currentDocumentRevision) return;
-  if (text === currentText) {
-    showToast('the clipboard matches the open document exactly');
-    return;
-  }
+  // An exact match used to be refused with a toast. "Is my clipboard the same
+  // as this?" is a fair question and compare answers it: the verdict line says
+  // identical, and whether the text matched byte for byte too.
   baselinePicker.close();
   await compareWith(text, 'pasted baseline', null, null);
 });
@@ -3765,10 +3765,9 @@ async function compareRecent(otherId: string): Promise<void> {
     showToast('baseline body missing', 'bad');
     return;
   }
-  if (text === currentText) {
-    showToast('that is the open document — pick a different baseline');
-    return;
-  }
+  // Another recent with the same text is a real comparison (an earlier save,
+  // a re-download); the verdict line answers it. Only the open document itself
+  // is refused, by activateRecentTarget.
   const meta = (await store.listDocs()).find((m) => m.id === otherId);
   if (documentRevision !== currentDocumentRevision) return;
   await compareWith(text, meta?.title ?? 'baseline', otherId, meta?.provenance ?? null);
@@ -3985,7 +3984,7 @@ function renderSemanticSummary(res: CompareOk): void {
   const bits = [
     `${uniquePlans.length} array${uniquePlans.length === 1 ? '' : 's'}`,
     identities ? `${identities} identity-aligned` : '',
-    conservative ? `${conservative} need review` : '',
+    conservative ? `${conservative} uncertain` : '',
   ].filter(Boolean);
   semPlanBtn.textContent = `alignment plan · ${bits.join(' · ')}`;
 
@@ -4005,6 +4004,39 @@ function renderSemanticSummary(res: CompareOk): void {
   }
   semWarning.hidden = warnings.length === 0;
   semWarning.textContent = warnings.join(' ');
+}
+
+// The whole-document answer, so nobody has to read 50 rows of "=" to learn
+// that nothing changed. Shown only when it is good news: a document with real
+// differences is answered by the filter counts and the rows themselves. Rule 15
+// tier 1 (ink only): identical is transient and expected, not a notice.
+function renderSemanticVerdict(res: CompareOk, baselineText: string): void {
+  const sameText = baselineText.trim() === currentText.trim();
+  let line = '';
+  let hint = '';
+  if (res.verdict === 'identical') {
+    line = 'Documents are identical';
+    hint = sameText
+      ? 'The text matches too. Nothing to review.'
+      : 'Every key and value matches. Only formatting or key order differs.';
+  } else if (res.verdict === 'reordered') {
+    const moved = res.summary.moved;
+    line = 'Same values, different order';
+    hint = `${moved.toLocaleString()} array item${moved === 1 ? '' : 's'} moved. No value changed.`;
+  }
+  semVerdict.hidden = !line;
+  semVerdict.dataset.verdict = res.verdict;
+  semVerdict.replaceChildren();
+  if (!line) return;
+  const strong = document.createElement('span');
+  strong.className = 'sem-verdict-line';
+  strong.textContent = line;
+  const sub = document.createElement('span');
+  sub.className = 'sem-verdict-hint';
+  sub.textContent = hint;
+  semVerdict.append(strong, sub);
+  // The resting status line says the same thing in the diff view's words.
+  if (res.verdict === 'identical') setStatusLead('no differences');
 }
 
 function renderSemanticPlan(plans: AlignmentPlan[]): void {
@@ -4080,8 +4112,11 @@ function renderSemanticPlan(plans: AlignmentPlan[]): void {
 
     const meta = document.createElement('div');
     meta.className = 'sem-plan-meta';
-    const metrics =
-      plan.mode === 'identity'
+    const metrics = instances.every((entry) => entry.equal)
+      ? instances.length > 1
+        ? 'identical on both sides'
+        : `identical on both sides · ${plan.counts.left} item${plan.counts.left === 1 ? '' : 's'}`
+      : plan.mode === 'identity'
         ? `coverage ${Math.round(plan.coverage * 100)}% · unique ${Math.round(plan.uniqueness * 100)}% · overlap ${Math.round(plan.overlap * 100)}%`
         : `${plan.inferredKind} · ${plan.counts.left} baseline / ${plan.counts.right} current`;
     const warning = [...new Set(instances.flatMap((entry) => entry.warnings))].join(' ');
@@ -4103,6 +4138,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   semLeftTitle.textContent = `${diffOtherTitle} · baseline`;
   semRightTitle.textContent = `${currentTitle} · current`;
   semWarning.hidden = true;
+  semVerdict.hidden = true;
   closeSemPlan();
   semanticCompare.reset();
   searchPanel.hidden = true;
@@ -4130,6 +4166,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
 
   semTitle.textContent = `${diffOtherTitle} → ${currentTitle}`;
   renderSemanticSummary(res);
+  renderSemanticVerdict(res, diffBaselineText);
   renderSemanticPlan(res.plans);
   semanticCompare.setTotal(res.totalRows);
   semViewport.scrollTop = 0;

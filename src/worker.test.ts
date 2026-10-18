@@ -5,6 +5,7 @@ import { handle } from './worker';
 import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';
 import type { CompareRow } from './protocol';
 import { EXPORT_CHUNK_BYTES } from './export-policy';
+import { SAMPLE_DOC } from './sample-doc';
 
 // Drive the worker exactly as the UI thread does — real protocol messages through
 // the exported dispatch seam, over the module's own state. Each test re-parses,
@@ -1410,6 +1411,57 @@ describe('fixture sanity', () => {
 describe('semantic compare worker RPC', () => {
   const compareRows = (start = 0, count = 200): CompareRow[] =>
     h<{ rows: CompareRow[] }>({ type: 'compareRows', start, count }).rows;
+
+  const expandAll = (): CompareRow[] => {
+    for (let guard = 0; guard < 100; guard++) {
+      const closed = compareRows(0, 10_000).find((row) => row.hasChildren && !row.expanded);
+      if (!closed) break;
+      h({ type: 'compareToggle', id: closed.id, index: closed.index });
+    }
+    return compareRows(0, 10_000);
+  };
+
+  it('reports the sample compared with a reformatted copy of itself as identical, with no row warnings', () => {
+    parse(SAMPLE_DOC);
+    // 41.30 → 41.3 is a real change of digits, so it must not read identical.
+    const init = h<{ verdict: string }>({
+      type: 'compareInit',
+      baselineText: SAMPLE_DOC.replace('41.30', '41.3'),
+    });
+    expect(init.verdict).toBe('different');
+    const same = h<{ ok: boolean; verdict: string; plans: { warnings: string[] }[] }>({
+      type: 'compareInit',
+      baselineText: SAMPLE_DOC.replace(/\n\s*/g, ''),
+    });
+    expect(same.ok).toBe(true);
+    expect(same.verdict).toBe('identical');
+    expect(same.plans.every((plan) => plan.warnings.length === 0)).toBe(true);
+    const visible = expandAll();
+    expect(visible.length).toBeGreaterThan(40);
+    expect(visible.every((row) => row.status === 'equal' && !row.warning)).toBe(true);
+  });
+
+  it('paints a plan warning only on the array instance that earned it', () => {
+    parse('{"rows":[{"tags":["b","a"]},{"tags":["x"]}]}');
+    const init = h<{ verdict: string }>({
+      type: 'compareInit',
+      baselineText: '{"rows":[{"tags":["a","b"]},{"tags":["x"]}]}',
+    });
+    expect(init.verdict).toBe('different');
+    const tags = expandAll().filter((row) => row.pathText.endsWith('.tags'));
+    expect(tags).toHaveLength(2);
+    expect(tags[0].warning).toMatch(/unknowable/);
+    expect(tags[1].warning).toBeUndefined();
+  });
+
+  it('marks rows whose JSON string was decoded', () => {
+    parse('{"a":"{\\"x\\":1,\\"y\\":2}","b":"[1,3]"}');
+    h({ type: 'compareInit', baselineText: '{"a":"{\\"y\\":2,\\"x\\":1}","b":"[1,2]"}' });
+    const visible = expandAll();
+    expect(visible.find((row) => row.pathText === '$.a')).toMatchObject({ status: 'changed', embedded: 'same', hasChildren: false });
+    expect(visible.find((row) => row.pathText === '$.b')).toMatchObject({ status: 'changed', embedded: 'differs', hasChildren: true });
+    expect(visible.find((row) => row.pathText === '$.b[1]')).toMatchObject({ status: 'changed', leftPreview: '2', rightPreview: '3' });
+  });
 
   it('aligns shuffled entities and preserves ancestors in status filters', () => {
     const baseline = {

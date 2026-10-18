@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { isLosslessNumber } from 'lossless-json';
+import { lparse } from './lossless';
 
 /**
  * A schema-free comparison mode for a JSON array.
@@ -91,7 +92,14 @@ export interface AlignmentPlan {
   uniqueness: number;
   overlap: number;
   typeConsistency: number;
+  /**
+   * Review notes about how this array was aligned. Empty when the array came
+   * out equal on both sides: no alignment mode can change an exact match, so a
+   * warning there would ask for a review of nothing.
+   */
   warnings: string[];
+  /** Both sides compared equal (the chosen mode could not change the outcome). */
+  equal: boolean;
   candidates: IdentityCandidate[];
   counts: {
     left: number;
@@ -137,6 +145,12 @@ export interface SemanticNode {
   childCount: number;
   arrayMode?: Exclude<ArrayMode, 'auto'>;
   truncated?: boolean;
+  /**
+   * Set when at least one side is a string holding a JSON object or array
+   * (for example a stringified API response). `same`: the decoded values match
+   * and only the text differs. `differs`: the children are the decoded diff.
+   */
+  embedded?: 'same' | 'differs';
 }
 
 export interface SemanticSummary {
@@ -149,8 +163,17 @@ export interface SemanticSummary {
   equal: number;
 }
 
+/**
+ * The whole-document answer. `identical`: every key and value matches (object
+ * key order and formatting are never compared). `reordered`: the same values,
+ * but some array elements sit at another index. `different`: anything else,
+ * including a capped comparison, which cannot vouch for what it did not see.
+ */
+export type SemanticVerdict = 'identical' | 'reordered' | 'different';
+
 export interface SemanticCompareResult {
   root: SemanticNode;
+  verdict: SemanticVerdict;
   summary: SemanticSummary;
   plans: AlignmentPlan[];
   nodeCount: number;
@@ -247,6 +270,9 @@ const RELIABLE_COVERAGE = 0.75;
 const RELIABLE_UNIQUENESS = 0.9;
 const RELIABLE_OVERLAP = 0.6;
 const RELIABLE_TYPE_CONSISTENCY = 0.9;
+// Embedded JSON strings above this size are compared as text only, so one huge
+// string cannot double the comparison's parse cost.
+const EMBEDDED_JSON_MAX_CHARS = 1_000_000;
 const naturalCollator = new Intl.Collator('en', {
   numeric: true,
   sensitivity: 'base',
@@ -306,6 +332,8 @@ export function compareSemantic(
 
   return {
     root,
+    verdict:
+      root.status === 'equal' ? 'identical' : root.status === 'moved' ? 'reordered' : 'different',
     summary: ctx.summary,
     plans: ctx.plans,
     nodeCount: ctx.nextId - 1,
@@ -438,6 +466,7 @@ function buildNode(
   if (leftType !== rightType) {
     node.status = 'typeChanged';
     if (flags.countSummary !== false) ctx.summary.typeChanged++;
+    buildEmbeddedChildren(ctx, node, left, right, location);
     finishNode(node);
     return node;
   }
@@ -459,9 +488,68 @@ function buildNode(
   } else {
     node.status = 'changed';
     if (flags.countSummary !== false) ctx.summary.changed++;
+    buildEmbeddedChildren(ctx, node, left, right, location);
   }
   finishNode(node);
   return node;
+}
+
+/**
+ * A string that holds JSON (a stringified gateway response, a payload column)
+ * differs as text whenever its key order or spacing does, which says nothing
+ * about its content. When one or both sides are such strings, decode them and
+ * say which it is: the same content (`embedded: 'same'`, no children) or a real
+ * change, with the decoded comparison as children so the reader can see what
+ * changed inside. The node keeps its own status, because the text did change,
+ * and the decoded children never reach the summary or the alignment plans: the
+ * string is one change, not twenty.
+ */
+function buildEmbeddedChildren(
+  ctx: Context,
+  node: SemanticNode,
+  left: unknown,
+  right: unknown,
+  location: BuildLocation,
+): void {
+  if (typeof left !== 'string' && typeof right !== 'string') return;
+  const leftValue = typeof left === 'string' ? embeddedJson(left) : left;
+  const rightValue = typeof right === 'string' ? embeddedJson(right) : right;
+  if (!isContainer(leftValue) || !isContainer(rightValue)) return;
+  if (semanticValueEqual(leftValue, rightValue)) {
+    node.embedded = 'same';
+    return;
+  }
+  node.embedded = 'differs';
+  const status = node.status;
+  const summary = { ...ctx.summary };
+  const planCount = ctx.plans.length;
+  if (Array.isArray(leftValue) && Array.isArray(rightValue)) {
+    buildArrayChildren(ctx, node, leftValue, rightValue, location);
+  } else if (isJsonObject(leftValue) && isJsonObject(rightValue)) {
+    buildObjectChildren(ctx, node, leftValue, rightValue, location);
+  }
+  // An object on one side and an array on the other has no shared shape to
+  // pair children by; the row's own previews already say everything.
+  ctx.summary = summary;
+  ctx.plans.length = planCount;
+  if (node.status !== 'truncated') node.status = status;
+}
+
+function embeddedJson(text: string): unknown {
+  if (text.length > EMBEDDED_JSON_MAX_CHARS) return undefined;
+  const trimmed = text.trim();
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  if (!((first === '{' && last === '}') || (first === '[' && last === ']'))) return undefined;
+  try {
+    return lparse(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+function isContainer(value: unknown): boolean {
+  return Array.isArray(value) || isJsonObject(value);
 }
 
 function buildComparableChildren(
@@ -689,6 +777,7 @@ function buildArrayChildren(
     overlap: roundMetric(metrics?.overlap ?? (mode === 'identity' ? 0 : confidence)),
     typeConsistency: roundMetric(metrics?.typeConsistency ?? (mode === 'identity' ? 0 : confidence)),
     warnings,
+    equal: false,
     candidates: candidates.slice(0, MAX_PLAN_CANDIDATES),
     counts: {
       left: left.length,
@@ -724,6 +813,13 @@ function buildArrayChildren(
     );
   }
   node.status = aggregateStatus(node.children);
+  if (node.status === 'equal' && !node.truncated) {
+    // Every element matched where it stands. Identity, unordered and positional
+    // alignment all agree on an exact match, so "order is unknowable" and
+    // "low-confidence key" are true but moot: there is nothing to review.
+    plan.equal = true;
+    plan.warnings.length = 0;
+  }
 }
 
 function buildIdentityRows(
