@@ -203,3 +203,29 @@ test('desktop sidebar hides whole, by button and Mod+B, and stays hidden across 
   await page.getByRole('button', { name: 'documents', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Documents' })).toBeVisible();
 });
+
+test('the command palette is a named combobox, keyboard-driven end to end', async ({ page }) => {
+  await openSample(page);
+  const rows = page.getByRole('treeitem');
+  await rows.first().focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
+  const field = palette.getByRole('combobox');
+  await expect(field).toBeFocused();
+  await expectNoWcagViolations(page, '#palette');
+
+  await field.fill('split');
+  await expect(palette.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('button', { name: 'split', exact: true })).toHaveClass(/\bon\b/);
+
+  // Escape closes it and hands focus back to where it was.
+  await rows.first().focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(field).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(palette).toBeHidden();
+  await expect(rows.first()).toBeFocused();
+});

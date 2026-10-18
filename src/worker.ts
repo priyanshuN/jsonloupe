@@ -63,7 +63,9 @@ let sawUnsafeNumber = false;
 
 const trackedNumberParser = (v: string): unknown => {
   const parsed = numberParser(v);
-  if (isLosslessNumber(parsed) && !isSafeNumber(v)) sawUnsafeNumber = true;
+  // Once one unsafe number is seen the answer is known; skip the check for
+  // the rest of the document (31–88 ms of a 100 MB parse, measured).
+  if (!sawUnsafeNumber && isLosslessNumber(parsed) && !isSafeNumber(v)) sawUnsafeNumber = true;
   return parsed;
 };
 
@@ -423,6 +425,55 @@ function looksBase64(s: string): boolean {
   return /[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9]/.test(s);
 }
 
+// A moment in the reader's own clock and zone — the worker runs in their
+// browser, so it knows both. This was pinned to Asia/Kolkata + ' IST', which
+// told every reader outside India the wrong wall-clock time with confidence.
+// The relative tail ("3 days ago") is what a person actually wants from a
+// timestamp while scanning; the absolute form is there to check it against.
+const WHEN_FMT = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+  timeZoneName: 'short',
+});
+const REL_FMT = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+const REL_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['second', 60],
+  ['minute', 60],
+  ['hour', 24],
+  ['day', 30],
+  ['month', 12],
+  ['year', Infinity],
+];
+
+// An ISO string already shows its absolute time in the row, so its lens is
+// only the part the row cannot: how long ago that was.
+function relOnly(ms: number): string {
+  return fmtWhen(ms).split(' · ').pop()!;
+}
+
+export function fmtWhen(ms: number, now = Date.now()): string {
+  let delta = (ms - now) / 1000;
+  let rel = '';
+  for (const [unit, size] of REL_STEPS) {
+    if (Math.abs(delta) < size) {
+      rel = REL_FMT.format(Math.round(delta), unit);
+      break;
+    }
+    delta /= size;
+  }
+  return `${WHEN_FMT.format(ms)} · ${rel}`;
+}
+
+// ISO-8601 date-times as APIs actually write them: a date, a T or space, a
+// time, optional fraction, and a zone (Z or ±hh:mm). A bare date or a
+// zone-less time is ambiguous about which day it is, so it gets no lens.
+const ISO_DT_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
+
 // Passive value lenses — a dim annotation that speeds comprehension without
 // changing the value: epoch→date, lat/lng coordinate, uuid, url, base64.
 function hintOf(v: unknown, key: string | number | null): string | undefined {
@@ -431,25 +482,20 @@ function hintOf(v: unknown, key: string | number | null): string | undefined {
       let ms: number | null = null;
       if (v >= 1e12 && v < 3e12) ms = v;
       else if (v >= 1e9 && v < 3e9) ms = v * 1000;
-      if (ms !== null) {
-        return (
-          new Date(ms).toLocaleString('en-IN', {
-            timeZone: 'Asia/Kolkata',
-            hour12: false,
-            year: 'numeric',
-            month: 'short',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          }) + ' IST'
-        );
-      }
+      if (ms !== null) return fmtWhen(ms);
     }
     // Coordinates are usually floats — check independent of the integer guard.
-    if (typeof key === 'string' && LATLNG_KEY.test(key) && v >= -180 && v <= 180) return '📍 coordinate';
+    // Words, not 📍: rule 3 keeps colour emoji out of the chrome, and naming
+    // the axis says more than a pin did.
+    if (typeof key === 'string' && LATLNG_KEY.test(key) && v >= -180 && v <= 180) {
+      return /^lat/i.test(key) ? 'latitude' : 'longitude';
+    }
   }
   if (typeof v === 'string') {
+    if (ISO_DT_RE.test(v)) {
+      const ms = Date.parse(v);
+      if (Number.isFinite(ms)) return relOnly(ms);
+    }
     if (UUID_RE.test(v)) return 'uuid';
     if (/^https?:\/\/\S+$/.test(v)) return 'url';
     if (looksBase64(v)) return 'base64?';
@@ -552,6 +598,33 @@ function getRows(start: number, count: number): Row[] {
   return rows;
 }
 
+// The ancestors to pin over the top of the tree pane when `top` is the first
+// row scrolled into view — VS Code's sticky scroll, for a document that is
+// thousands of rows deep. Slot i holds the depth-(i+1) ancestor of the row
+// that slot covers (the root is never pinned: it is every row's ancestor and
+// says nothing). A slot is only filled while that ancestor has scrolled ABOVE
+// its slot; once the ancestor would sit there naturally, the stack ends and
+// the real row shows. Ancestors are found by scanning up the visible list to
+// the nearest shallower row, which is what document order makes them; the
+// scan is capped so a 5M-row expanded array can never stall a scroll frame.
+const STICKY_SCAN_CAP = 250_000;
+function stickyRows(topValue: unknown, maxValue: unknown): Row[] {
+  const top = Math.max(0, Math.trunc(Number(topValue) || 0));
+  const max = Math.max(0, Math.min(12, Math.trunc(Number(maxValue) || 0)));
+  const out: Row[] = [];
+  let budget = STICKY_SCAN_CAP;
+  for (let slot = 0; slot < max; slot++) {
+    const covered = top + slot;
+    if (covered >= visible.length) break;
+    const depth = slot + 1;
+    let j = covered;
+    while (j > 0 && budget-- > 0 && nodes.get(visible[j])!.depth > depth) j--;
+    if (budget <= 0 || j === covered || nodes.get(visible[j])!.depth !== depth) break;
+    out.push(rowFor(visible[j], j));
+  }
+  return out;
+}
+
 function errorInfo(text: string, err: Error, positionOffset = 0): ParseErr {
   const msg = err.message;
   const m = msg.match(/position (\d+)/);
@@ -598,11 +671,35 @@ function tryJsonl(text: string): unknown[] | null {
   return out;
 }
 
-function buildRoot(value: unknown): void {
+function buildRoot(value: unknown, expandRows = 0): void {
   const root = makeNode(null, value, 0, -1);
   rootId = root.id;
   visible = [rootId];
   expandNode(rootId);
+  if (expandRows > 0) expandToFit(expandRows);
+}
+
+// Open a small document already unfolded, so the first screen shows its shape
+// instead of three collapsed keys over an empty pane. Breadth-first, level by
+// level, in document order, and it STOPS at the first container whose children
+// would overflow `budget` rows: skipping it to open a smaller one further down
+// left order 0's items shut while order 1's were open, which reads as random.
+// What opens is always a prefix of the document, shallow before deep. A large
+// document stops at the root because its first level alone fills the budget —
+// chunk rows report their slice size, so a 5M-element array never unfolds here.
+function expandToFit(budget: number): void {
+  let level = expanded.has(rootId) ? ensureChildren(rootId) : [];
+  while (level.length) {
+    const next: number[] = [];
+    for (const id of level) {
+      const c = effChildCount(nodes.get(id)!);
+      if (c === 0) continue;
+      if (visible.length + c > budget) return;
+      expandNode(id);
+      next.push(...ensureChildren(id));
+    }
+    level = next;
+  }
 }
 
 // Only attempt repair on input that opens like a JSON object/array. This keeps
@@ -622,7 +719,7 @@ function looksJsonish(text: string): boolean {
 // completing an editor buffer would commit data the user never typed.
 // `isApply` distinguishes a code-view Apply (push a replaceDoc onto the undo
 // stack) from a fresh document open (clear both stacks).
-function doParse(text: string, isApply: boolean, allowRepair: boolean): ParseOk | ParseErr {
+function doParse(text: string, isApply: boolean, allowRepair: boolean, expandRows = 0): ParseOk | ParseErr {
   let prevText: string | null = null;
   if (isApply) {
     const prev = nodes.get(rootId);
@@ -663,7 +760,7 @@ function doParse(text: string, isApply: boolean, allowRepair: boolean): ParseOk 
   // Parsing is transactional: keep the current tree, compare state, and undo
   // history intact until the replacement text has been fully validated.
   clearState();
-  buildRoot(value);
+  buildRoot(value, expandRows);
   if (isApply) {
     if (prevText !== null) pushUndo({ kind: 'replaceDoc', oldText: prevText, newText: text });
   } else {
@@ -928,11 +1025,34 @@ function compareMeta(state: SemanticWorkerState): CompareMeta {
   };
 }
 
+// expandToFit's twin for a comparison: unfold breadth-first, but only into
+// branches that hold a difference, so the first screen of a compare lands on
+// what changed instead of a collapsed root whose one interesting row you then
+// have to go and find. Equal branches stay shut — they are the part you came
+// here to skip.
+function expandCompareToFit(state: SemanticWorkerState, budget: number): void {
+  let count = state.visible.length;
+  let level = state.result.root.children;
+  outer: while (level.length) {
+    const next: SemanticNode[] = [];
+    for (const node of level) {
+      if (!node.hasChildren || node.status === 'equal') continue;
+      if (count + node.children.length > budget) break outer;
+      state.expanded.add(node.id);
+      count += node.children.length;
+      next.push(...node.children);
+    }
+    level = next;
+  }
+  rebuildCompareVisible(state);
+}
+
 function doCompareInit(
   baselineText: string,
   rules: SemanticCompareOptions['rules'],
   displayModeValue: unknown,
   nodeCapValue: unknown,
+  expandRows = 0,
 ): ({ ok: true } & CompareMeta) | { ok: false; error: string } {
   const currentRoot = nodes.get(rootId);
   if (!currentRoot) return { ok: false, error: 'no document open' };
@@ -966,6 +1086,7 @@ function doCompareInit(
       nodeCap,
       displayMode,
     );
+    if (expandRows > 0) expandCompareToFit(semanticCompare, expandRows);
     return { ok: true, ...compareMeta(semanticCompare) };
   } catch (error) {
     clearCompareState();
@@ -2394,11 +2515,18 @@ function buildCsv(source: string): { ok: true; text: string } | { ok: false; err
 export function handle(msg: { type: string } & Record<string, unknown>): object {
   switch (msg.type) {
     case 'parse':
-      return doParse(msg.text as string, msg.apply === true, msg.repair !== false);
+      return doParse(
+        msg.text as string,
+        msg.apply === true,
+        msg.repair !== false,
+        typeof msg.expandRows === 'number' ? msg.expandRows : 0,
+      );
     case 'formatText':
       return formatStandalone(msg.text as string);
     case 'rows':
       return { rows: getRows(msg.start as number, msg.count as number) };
+    case 'sticky':
+      return { rows: stickyRows(msg.top, msg.max) };
     case 'toggle':
       return { totalRows: toggle(msg.id as number, msg.index as number) };
     case 'collapseAll':
@@ -2425,6 +2553,7 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
         msg.rules as SemanticCompareOptions['rules'],
         msg.displayMode,
         msg.nodeCap,
+        typeof msg.expandRows === 'number' ? msg.expandRows : 0,
       );
     case 'compareRows':
       return { rows: compareRows(msg.start, msg.count) };

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
-import { handle } from './worker';
+import { fmtWhen, handle } from './worker';
 import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';
 import type { CompareRow } from './protocol';
 import { EXPORT_CHUNK_BYTES } from './export-policy';
@@ -27,6 +27,7 @@ interface Row {
   childCount: number;
   expanded: boolean;
   maybeJson?: boolean;
+  hint?: string;
 }
 interface ParseRes {
   ok: boolean;
@@ -170,6 +171,115 @@ describe('parse', () => {
 });
 
 // ---------- lossless numbers ----------
+
+describe('parse with expandRows (open unfolded to fit)', () => {
+  const fit = (text: string, expandRows: number): ParseRes =>
+    h<ParseRes>({ type: 'parse', text, expandRows });
+
+  it('unfolds breadth-first while the children still fit', () => {
+    // root(1) + a,b(2) = 3; a's 2 children fit (5); b's 3 children do not (8 > 6)
+    const r = fit('{"a":{"x":1,"y":2},"b":[1,2,3]}', 6);
+    expect(r.totalRows).toBe(5);
+    expect(rows().map((x) => x.key)).toEqual([null, 'a', 'x', 'y', 'b']);
+  });
+
+  it('stops at the first container that does not fit, so what opens is a prefix', () => {
+    const r = fit('{"big":[1,2,3,4,5,6],"small":{"k":1}}', 5);
+    expect(rows().map((x) => x.key)).toEqual([null, 'big', 'small']);
+    expect(r.totalRows).toBe(3);
+  });
+
+  it('unfolds everything when the whole document fits', () => {
+    const r = fit('{"a":{"b":{"c":[1,2]}}}', 100);
+    expect(r.totalRows).toBe(6);
+  });
+
+  it('leaves a chunked array at its chunk rows', () => {
+    const big = JSON.stringify(Array.from({ length: 25_000 }, (_, i) => i));
+    const r = fit(big, 40);
+    // root + 3 chunk rows; a 10k-row chunk never fits a screen budget
+    expect(r.totalRows).toBe(4);
+  });
+
+  it('is off by default', () => {
+    expect(parse('{"a":{"b":1}}').totalRows).toBe(2);
+  });
+});
+
+describe('compareInit with expandRows (open on the changes)', () => {
+  it('unfolds only branches that hold a difference', () => {
+    parse('{"same":{"a":1,"b":2},"diff":{"x":1,"y":[1,2]}}');
+    const r = h<{ ok: boolean; totalRows: number }>({
+      type: 'compareInit',
+      baselineText: '{"same":{"a":1,"b":2},"diff":{"x":1,"y":[1,3]}}',
+      expandRows: 40,
+    });
+    expect(r.ok).toBe(true);
+    // root, same (shut: equal), diff, diff.x, diff.y, y[0], y[1]
+    expect(r.totalRows).toBe(7);
+  });
+
+  it('stays at the root without a budget', () => {
+    parse('{"diff":{"x":1}}');
+    const r = h<{ totalRows: number }>({ type: 'compareInit', baselineText: '{"diff":{"x":2}}' });
+    expect(r.totalRows).toBe(2);
+  });
+});
+
+describe('time lenses', () => {
+  const now = Date.parse('2026-10-19T12:00:00Z');
+
+  it('says how long ago, in the reader clock', () => {
+    expect(fmtWhen(now - 3 * 86_400_000, now)).toMatch(/3 days ago$/);
+    expect(fmtWhen(now + 2 * 3_600_000, now)).toMatch(/in 2 hours$/);
+    expect(fmtWhen(now - 70 * 86_400_000, now)).toMatch(/2 months ago$/);
+  });
+
+  it('is no longer pinned to IST', () => {
+    expect(fmtWhen(now, now)).not.toMatch(/IST$/);
+  });
+
+  it('gives a zoned ISO string a relative hint, and a zone-less one none', () => {
+    parse('{"a":"2026-08-05T09:12:00Z","b":"2026-08-04 14:22:10","c":1754385120}');
+    const rs = rows();
+    expect(rs[1].hint).toMatch(/ago|in /);
+    expect(rs[2].hint).toBeUndefined();
+    expect(rs[3].hint).toMatch(/ · /);
+  });
+});
+
+describe('sticky ancestors', () => {
+  const sticky = (top: number, max = 6): Row[] => h<{ rows: Row[] }>({ type: 'sticky', top, max }).rows;
+  // rows: 0 {root} 1 a 2 a.b 3 a.b.x 4 a.b.y 5 a.b.z 6 c
+  const open = () => {
+    h({ type: 'parse', text: '{"a":{"b":{"x":1,"y":2,"z":3}},"c":4}', expandRows: 100 });
+  };
+
+  it('pins nothing at the top of the document', () => {
+    open();
+    expect(sticky(0)).toEqual([]);
+  });
+
+  it('pins each ancestor that has scrolled above its slot', () => {
+    open();
+    // top = 3 (a.b.x): slot 0 covers row 3 → a (index 1); slot 1 covers row 4 → b (index 2)
+    expect(sticky(3).map((r) => [r.index, r.key])).toEqual([[1, 'a'], [2, 'b']]);
+  });
+
+  it('stops where an ancestor would sit in its own slot', () => {
+    open();
+    // top = 1: row 1 is a itself, so nothing needs pinning
+    expect(sticky(1)).toEqual([]);
+    // top = 2: slot 0 covers b, whose depth-1 ancestor a is above → pinned; slot 1 covers x: b is above → pinned
+    expect(sticky(2).map((r) => r.key)).toEqual(['a', 'b']);
+  });
+
+  it('never pins past max or past a shallower row', () => {
+    open();
+    expect(sticky(3, 1).map((r) => r.key)).toEqual(['a']);
+    expect(sticky(6)).toEqual([]);
+  });
+});
 
 describe('lossless numbers', () => {
   it('preserves a 19-digit int64 id exactly through tree + copy + stringify', () => {

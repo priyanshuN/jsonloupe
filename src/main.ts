@@ -89,6 +89,7 @@ import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './r
 import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
 import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
+import { CommandPalette, type PaletteCommand } from './palette';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
 // 404s on its first lazy import (e.g. the CodeMirror chunks). Vite surfaces
@@ -192,6 +193,13 @@ const searchBox = $<HTMLInputElement>('#search-box');
 const searchPanel = $('#search-panel');
 const treePane = $('#tree-pane');
 const treeViewport = $('#tree-viewport');
+// How many rows a freshly opened document may unfold into: one screen of the
+// pane it lands in. Before the first open the viewer is still hidden and the
+// pane measures 0, so fall back to the window less the toolbar and status line.
+function fitRows(pane: HTMLElement): number {
+  const h = pane.clientHeight || innerHeight - 80;
+  return Math.max(12, Math.floor(h / 22) - 1); // 22 = --row-h
+}
 const toast = $('#toast');
 const dropOverlay = $('#drop-overlay');
 const fileInput = $<HTMLInputElement>('#file-input');
@@ -1285,6 +1293,22 @@ function beginOpenRequest(): number {
   return ++openRequestToken;
 }
 
+// Resolves once the frame that shows the new rows has been painted: a task
+// queued from inside rAF runs after that frame. The timeout covers a hidden
+// tab, where rAF never fires and the save must still happen.
+function afterPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    requestAnimationFrame(() => setTimeout(go, 0));
+    setTimeout(go, 120);
+  });
+}
+
 function attachInitialSave(
   promise: Promise<store.DocMeta>,
   documentToken: number,
@@ -1436,7 +1460,9 @@ async function openNestedPayload(id: number, path: string): Promise<void> {
 // The strip's resting line in the tree: an empty bottom edge would be the one
 // view that still says nothing (rule 19 — every view carries a "where am I",
 // including "nowhere yet").
-const TREE_STATUS_RESTING = 'Select a row to see its path · press ? for shortcuts.';
+// The palette is the one shortcut worth teaching on the resting line: it is
+// the door to every other action, including the shortcut sheet itself.
+const TREE_STATUS_RESTING = `Select a row to see its path · ${MAC_KEYS ? '⌘K' : 'Ctrl K'} for commands · ? for shortcuts.`;
 
 // The crumb is debounced and then awaits the worker, so by the time it has an
 // answer the bottom edge may belong to another view. It only ever paints while
@@ -1534,6 +1560,10 @@ function updateCrumbSoon(): void {
 const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('#tree-spacer'), $('#tree-layer'), {
   fetchRows: async (start, count) => {
     const r = await call<{ rows: Row[] }>({ type: 'rows', start, count });
+    return r.rows;
+  },
+  fetchSticky: async (top, max) => {
+    const r = await call<{ rows: Row[] }>({ type: 'sticky', top, max });
     return r.rows;
   },
   onToggle: (id, index) => void doToggle(id, index),
@@ -2165,7 +2195,7 @@ async function openText(
     }
   }
 
-  const res = await call<ParseOk | ParseErr>({ type: 'parse', text });
+  const res = await call<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(treeViewport) });
   if (requestToken !== openRequestToken) return false;
   if (!res.ok) {
     if (keepCurrentOnFailure) {
@@ -2200,8 +2230,11 @@ async function openText(
     }
   } else {
     currentDocId = null;
+    // After the first rows paint, not before: the IndexedDB put of a 100 MB
+    // text is the one main-thread long task in a large open (50–100 ms,
+    // measured), and it landed between the parse and the first frame.
     attachInitialSave(
-      store.saveDoc(text, title, handle ?? undefined, provenance ?? undefined),
+      afterPaint().then(() => store.saveDoc(text, title, handle ?? undefined, provenance ?? undefined)),
       documentToken,
     );
   }
@@ -3511,6 +3544,7 @@ async function applyCode(): Promise<void> {
     type: 'parse',
     text,
     apply: true,
+    expandRows: fitRows(treeViewport),
     // Intake may repair pasted data; an editor must never invent and commit
     // bytes the user did not type.
     repair: false,
@@ -4234,6 +4268,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
     rules: semanticRules,
     displayMode: 'aligned',
     nodeCap: 50_000,
+    expandRows: fitRows(semViewport),
   });
   if (token !== semanticOpenToken) return;
   if (!res.ok) {
@@ -5875,6 +5910,10 @@ const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'
     const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start, count });
     return r?.rows ?? [];
   },
+  fetchSticky: async (top, max) => {
+    const r = await resultCall<{ rows: Row[] }>({ type: 'sticky', top, max });
+    return r?.rows ?? [];
+  },
   onToggle: resultToggle,
   onCopyKey: (key) => void copyKeyOf(key),
   onCopyPath: (id) => void resultCopyPath(id),
@@ -6661,7 +6700,7 @@ async function paintResultLabel(): Promise<void> {
 // and a result that arrives afterwards belongs to a pane that is gone.
 async function showResultDocument(text: string): Promise<void> {
   const channel = runResultChannel;
-  const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text });
+  const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(runViewport) });
   if (!res || channel !== runResultChannel) return;
   if (!res.ok) {
     // JSON.stringify produced this text, so this is a bug rather than bad input
@@ -6847,7 +6886,70 @@ runOpenBtn.addEventListener('click', () => {
 
 const keysDialog = $<HTMLDialogElement>('#keys-dialog');
 
+// The palette's commands point at the real controls, so a command does
+// whatever its button does today and is offered only where that button would
+// be. Built fresh on every open: which ones apply depends on what is open.
+const modKey = (k: string) => (MAC_KEYS ? `⌘${k}` : `Ctrl ${k}`);
+function paletteCommands(): PaletteCommand[] {
+  const cmds: PaletteCommand[] = [];
+  const click = (sel: string) => () => document.querySelector<HTMLElement>(sel)?.click();
+  const add = (group: string, label: string, run: () => void, extra: Partial<PaletteCommand> = {}) =>
+    cmds.push({ group, label, run, ...extra });
+  const docOpen = !viewer.hidden;
+  if (docOpen) {
+    add('view', 'tree', click('#mode-switch button[data-mode="tree"]'), { keywords: 'view mode' });
+    add('view', 'code', click('#mode-switch button[data-mode="code"]'), { keywords: 'view mode text editor raw' });
+    add('view', 'split — tree and code side by side', click('#mode-switch button[data-mode="split"]'), { keywords: 'view mode' });
+    add('view', 'functions — run JavaScript over this document', click('#mode-switch button[data-mode="run"]'), { keywords: 'script run code' });
+    add('document', 'search keys and values', () => searchBox.focus(), { keys: '/', keywords: 'find filter' });
+    add('document', 'query', click('#ask-btn'), { keywords: 'jsonpath ask question english' });
+    add('document', 'compare with another document', click('#compare-btn'), { keywords: 'diff baseline semantic' });
+    add('document', 'convert to Excel or CSV', click('#convert-btn'), { keywords: 'spreadsheet xlsx table export' });
+    add('document', 'collapse all', click('#collapse-btn'), { keywords: 'fold' });
+    add('document', 'copy pretty JSON', click('#fmt-btn'), { keywords: 'format indent' });
+    add('document', 'copy minified JSON', click('#min-btn'), { keywords: 'compact' });
+    add('document', 'download', click('#dl-btn'), { keywords: 'save file' });
+    add('document', 'compress to Base64 Zstd', click('#compress-btn'), { keywords: 'encode payload kafka' });
+    add('document', 'size report', click('#transport-btn'), { keywords: 'bytes transport budget' });
+    add('document', 'undo', () => void doUndoUI(), { keys: modKey('Z') });
+    add('document', 'redo', () => void doRedoUI(), { keys: modKey('⇧Z') });
+  }
+  add('app', 'new document — paste or open a file', click('#new-btn'), { keywords: 'paste home' });
+  add('app', 'open a file…', click('#open-btn'), { keywords: 'load disk' });
+  add('app', 'open the sample document', click('#sample-btn'), { keywords: 'example demo' });
+  add('app', 'decode a payload — Zstd, Base64, bytea', click('#codec-btn'), { keywords: 'decompress encode' });
+  add('app', sidebarHidden() ? 'show documents' : 'hide documents',
+    () => setSidebarHidden(!sidebarHidden()), { keys: modKey('B'), keywords: 'sidebar recents' });
+  add('app', 'keyboard shortcuts', () => keysDialog.showModal(), { keys: '?', keywords: 'keys help' });
+  add('theme', 'theme: follow the system', click('[data-theme="system"]'), { keywords: 'appearance auto' });
+  add('theme', 'theme: dark', click('[data-theme="dark"]'), { keywords: 'appearance night' });
+  add('theme', 'theme: light', click('[data-theme="light"]'), { keywords: 'appearance day' });
+  add('theme', glassToggle.checked ? 'glass: off' : 'glass: on', () => glassToggle.click(), { keywords: 'material blur translucent' });
+  for (const row of document.querySelectorAll<HTMLElement>('#recents .doc-row')) {
+    const open = row.querySelector<HTMLElement>('.doc-row-open');
+    const title = row.querySelector('.doc-row-title')?.textContent?.trim();
+    if (!open || !title || row.classList.contains('active')) continue;
+    add('open recent', title, () => open.click(), { keywords: 'document recent file' });
+  }
+  return cmds;
+}
+const palette = new CommandPalette(
+  $<HTMLDialogElement>('#palette'),
+  $<HTMLInputElement>('#palette-input'),
+  $('#palette-list'),
+  paletteCommands,
+);
+
 window.addEventListener('keydown', async (e) => {
+  // ⌘K / Ctrl K first, and from anywhere — a text field or the code editor
+  // included: none of them binds it, and a palette you cannot reach while
+  // typing is not one. Pressed again it closes, as everywhere else.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (palette.isOpen) palette.close();
+    else palette.open();
+    return;
+  }
   const ae = document.activeElement;
   // A CodeMirror surface is a contenteditable div, not an <input>/<textarea> —
   // count focus inside either of them as "typing" so tree j/k/y/c don't steal

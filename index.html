@@ -330,12 +330,12 @@ SPDX-License-Identifier: MIT -->
             <article class="lp-cell">
               <span class="lp-tag lp-tag-boolean">diff</span>
               <h3>Semantic side-by-side compare</h3>
-              <p>Arrays align by identity, so reordering does not drown you in false changes. Ignore noisy fields by key or path prefix.</p>
+              <p>Arrays align by identity, so reordering does not drown you in false changes. It opens on what changed, and says so when two documents are identical.</p>
             </article>
             <article class="lp-cell">
               <span class="lp-tag lp-tag-key">navigation</span>
-              <h3>Paths, lenses, and “same value”</h3>
-              <p>Copy any node as JSONPath, JSON Pointer, or JS accessor. Epoch → local date, lat/lng, uuid flags, and byte weight on collapsed nodes.</p>
+              <h3>Paths, lenses, and <kbd>⌘K</kbd></h3>
+              <p>Every action and recent document is a few keystrokes away. Parent keys stay pinned as you scroll; timestamps say how long ago; any node copies as JSONPath, Pointer, or JS.</p>
             </article>
           </div>
         </section>
@@ -1200,6 +1200,7 @@ SPDX-License-Identifier: MIT -->
         <div class="keys-row"><span><kbd>/</kbd></span><span>search keys and values</span></div>
         <div class="keys-row"><span><kbd>⌘Z</kbd> or <kbd>Ctrl Z</kbd></span><span>undo — shift redoes</span></div>
         <span class="keys-group">window</span>
+        <div class="keys-row"><span><kbd>⌘K</kbd> or <kbd>Ctrl K</kbd></span><span>command palette — every action and document</span></div>
         <div class="keys-row"><span><kbd>⌘B</kbd> or <kbd>Ctrl B</kbd></span><span>hide · show documents</span></div>
         <span class="keys-group">functions</span>
         <div class="keys-row"><span><kbd>⌘↵</kbd> or <kbd>Ctrl ↵</kbd></span><span>run the script</span></div>
@@ -1207,6 +1208,18 @@ SPDX-License-Identifier: MIT -->
         <div class="keys-row"><span><kbd>⌃↵</kbd></span><span>open the pasted text</span></div>
       </div>
     </form>
+  </dialog>
+  <!-- Command palette (src/palette.ts). A combobox over a listbox: focus never
+       leaves the field, arrows move aria-activedescendant through the list. -->
+  <dialog id="palette" aria-label="Command palette">
+    <div class="palette-field field">
+      <svg class="ic" aria-hidden="true"><use href="#i-search" /></svg>
+      <input id="palette-input" type="text" role="combobox" aria-expanded="true"
+        aria-controls="palette-list" aria-autocomplete="list" autocomplete="off"
+        spellcheck="false" placeholder="type a command or a document name" />
+      <kbd>esc</kbd>
+    </div>
+    <div id="palette-list" role="listbox" aria-label="Commands"></div>
   </dialog>
   <dialog id="transport-dialog" aria-labelledby="transport-dialog-title" tabindex="-1">
     <form method="dialog" class="transport-dialog">

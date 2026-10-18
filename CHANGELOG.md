@@ -2,7 +2,36 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.6.0 — 2026-10-18
+
+- **Command palette.** Press ⌘K (Ctrl K elsewhere) from anywhere, even while
+  typing, and type a few letters of what you want: a view, an action on the
+  document, a theme, or the name of a recent document. Arrows move, Enter
+  runs, Escape closes and hands focus back. Every command is the app's own
+  button, so the palette does exactly what the button does. The tree's resting
+  status line now mentions it.
+- **A small document opens unfolded.** The tree used to open on the root's
+  keys and an empty pane; the sample showed 4 rows. It now unfolds level by
+  level, in document order, until one screen is full (35 rows of the sample at
+  1440×900). Large documents are unchanged: their first level already fills
+  the screen. Comparisons do the same, but only into branches that changed, so
+  compare opens on the differences instead of a collapsed root.
+- **Parent rows stay pinned while you scroll.** Deep in a large document, the
+  keys you are inside (up to six levels) stay at the top of the tree with their
+  line numbers. Click one to jump to it.
+- **Values explain themselves.** Colour strings (`#88c0d0`, `rgba(…)`,
+  `hsl(…)`) show a colour chip. Timestamps say how long ago they were
+  ("3 days ago", "in 2 months"), and epoch numbers now show in your own time
+  zone. Before, they always showed India time (IST), whatever your location.
+  Coordinates say `latitude` / `longitude` instead of a pin emoji.
+- **Finish.** Dialogs, popovers and toasts fade in with a 4px rise instead of
+  blinking on. In compare, the side where a row does not exist is hatched, and
+  added rows are tinted as clearly as removed ones. The landing page's menu no
+  longer wraps onto two lines at 1280px.
+- **Faster large opens.** Saving to local storage waits until the first rows
+  have painted, which removes the only main-thread pause (50–100 ms) from
+  opening a 100 MB file. Number parsing stops re-checking precision after the
+  first unsafe number.
 
 - **Comparing a document with itself says so.** Semantic compare now opens
   with one line, "Documents are identical", and says whether the text matched
