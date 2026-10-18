@@ -4,6 +4,14 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **The phone landing page opens on its headline.** Focusing the paste box on
+  load scrolled the page 540px down to it, so a first-time phone visitor never
+  saw the hero; the paste card's title also collapsed to nothing beside its
+  status line. The nav is now one sideways-scrolling row under the brand.
+- **The phone viewer and code view waste less.** The toolbar's compress /
+  compare / convert become glyph squares below 480px, so the toolbar is one row
+  instead of two; wrapped code lines continue at their own indentation instead
+  of column 0.
 - **Pasting stringified JSON opens the JSON it holds.** A whole document that
   arrives as a JSON string — `"{\"id\":1}"`, the shape a log line or an API
   field hands you — used to open as one long string row, and stringified twice it

@@ -1391,24 +1391,29 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 :root[data-theme='light'] .lp-paste { box-shadow: var(--shadow); }
 .lp-paste-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 2px 10px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
 .lp-paste-title {
   font: 600 14.5px var(--display);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+  flex-shrink: 0;
 }
+/* The title is the card's name and never gives way. On a phone the status
+   line drops under it (the head wraps) and only then truncates — it used to
+   refuse to shrink, so the TITLE collapsed to nothing and the status ran off
+   the card's edge. */
 .lp-paste-status {
   font: var(--fs-chip) var(--mono);
   /* Instructional copy at 12.5px is ordinary text, not placeholder ink. */
   color: var(--text-dim);
   white-space: nowrap;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lp-paste-body { padding: var(--gap-4) 18px 18px; }
 
@@ -1688,8 +1693,23 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   /* The mono nav earns its width on a desktop; on a phone it was three rows
      of display face before the headline. One size down and tighter gaps buy
      back a row without changing the voice. */
-  .lp-nav { gap: var(--gap-4); }
-  .lp-nav a { font-size: var(--fs-chip); }
+  /* Then still three rows, so: brand and `open the app` share the first row,
+     and the nav is ONE row under them that scrolls sideways, fading at the
+     right edge to say there is more. The MIT line is said again in the hero's
+     trust line, so the header can drop it here. */
+  .lp-nav {
+    order: 3;
+    flex: 1 0 100%;
+    flex-wrap: nowrap;
+    gap: var(--gap-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+    white-space: nowrap;
+    mask-image: linear-gradient(to right, black 85%, transparent);
+  }
+  .lp-nav::-webkit-scrollbar { display: none; }
+  .lp-nav a { font-size: var(--fs-chip); flex-shrink: 0; }
+  .lp-meta { display: none; }
   .lp-hero h1 { font-size: 38px; letter-spacing: -1px; }
   .sp-header { padding: var(--gap-4) 24px; }
   .sp-main { padding: 0 24px 40px; }
@@ -2609,6 +2629,13 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-height: var(--ctl-h);
   padding: 0 var(--gap-2);
   font-size: var(--fs-chip);
+}
+/* ...except on a phone, where the words cost the toolbar a whole second row
+   (~40px of every screen). Below 480px the three named actions become glyph
+   squares like their neighbours; aria-label and title already name them. */
+@media (max-width: 480px) {
+  .tb-tools .tb-named-action { width: var(--ctl-h); padding: 0; justify-content: center; }
+  .tb-named-action .tb-label { display: none; }
 }
 
 /* Quiet utilities — toolbar, code bar, split strip, ask row, codec label rows,
