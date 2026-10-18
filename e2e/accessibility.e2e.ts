@@ -97,3 +97,26 @@ test('compact documents drawer traps and restores keyboard focus', async ({ page
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+
+test('glass is a named, persistent switch that never reaches reduced-transparency users', async ({ page }) => {
+  await openSample(page);
+  const glass = page.getByRole('switch', { name: 'glass' });
+  await expect(glass).not.toBeChecked();
+  await glass.focus();
+  await glass.press('Space');
+  await expect(glass).toBeChecked();
+  await expect(page.locator('html')).toHaveAttribute('data-glass', '');
+  // Every ink is checked on the composite in lint:contract; this is the
+  // browser's own scan of the same surfaces with the material on.
+  await expectNoWcagViolations(page);
+
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-glass', '');
+  await expect(page.getByRole('switch', { name: 'glass' })).toBeChecked();
+
+  // More contrast: the solid theme, and the switch says why it is inert.
+  await page.emulateMedia({ contrast: 'more' });
+  await expect(page.getByRole('switch', { name: 'glass' })).toBeDisabled();
+  const toolbar = await page.locator('#toolbar').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(toolbar).not.toMatch(/rgba\(.*, 0\.\d+\)$/);
+});

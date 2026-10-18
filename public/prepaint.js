@@ -20,6 +20,13 @@
       theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     document.documentElement.dataset.theme = theme;
 
+    // Glass is a material over either theme, not a third theme, so it is its
+    // own attribute. Presence-only: nothing from the query string becomes an
+    // attribute VALUE here. Reduced transparency / more contrast are handled
+    // in style.css, which draws the solid theme under either preference.
+    if (new URLSearchParams(location.search).has('glass') || localStorage.getItem('wb-glass') === '1')
+      document.documentElement.dataset.glass = '';
+
     var script = document.currentScript;
     if (
       script &&

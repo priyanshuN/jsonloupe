@@ -6873,6 +6873,34 @@ onThemeChange((t) => {
 });
 paintThemeSwitch();
 
+// Glass: a MATERIAL over either theme, not a third theme — so it is its own
+// attribute and its own control rather than a fourth segment above. prepaint.js
+// applies it before first paint; this only flips and persists it. When the OS
+// asks for reduced transparency or more contrast, style.css draws the solid
+// theme regardless, and the switch says so instead of pretending to work.
+const glassToggle = $<HTMLInputElement>('#glass-toggle');
+const solidOnly = matchMedia('(prefers-reduced-transparency: reduce), (prefers-contrast: more)');
+function paintGlass(): void {
+  glassToggle.checked = document.documentElement.dataset.glass !== undefined;
+  glassToggle.disabled = solidOnly.matches;
+  $('#glass-opt').title = solidOnly.matches
+    ? 'Glass is off while your system asks for reduced transparency or more contrast'
+    : 'Glass: translucent chrome, frosted menus and dialogs; the document stays solid';
+}
+glassToggle.addEventListener('change', () => {
+  const on = glassToggle.checked;
+  if (on) document.documentElement.dataset.glass = '';
+  else delete document.documentElement.dataset.glass;
+  try {
+    if (on) localStorage.setItem('wb-glass', '1');
+    else localStorage.removeItem('wb-glass');
+  } catch {
+    /* private mode — holds for this session */
+  }
+});
+solidOnly.addEventListener('change', paintGlass);
+paintGlass();
+
 // ---------- sample ----------
 
 $('#sample-btn').addEventListener('click', () => {
