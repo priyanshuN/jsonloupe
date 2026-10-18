@@ -39,6 +39,7 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-collapse" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8 8 4.5l3.5 3.5" /><path d="M4.5 11.5 8 8l3.5 3.5" /></symbol>
     <symbol id="i-run" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M5.6 3.6 12 8l-6.4 4.4z" /></symbol>
     <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5v9" /><path d="M3.5 8h9" /></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M6.5 3v10" /></symbol>
   </svg>
 
   <div class="sg" id="sg-main">
@@ -115,6 +116,10 @@ SPDX-License-Identifier: MIT -->
         <button class="btn-icon btn-quiet" aria-label="icon-only quiet"><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg></button>
         <button class="btn-quiet"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg>icon + label</button>
         <span class="sg-note">same tiers on chrome — hover each; one hover treatment, one focus ring (rule 5)</span>
+      </div>
+      <div class="sg-row on-chrome">
+        <button class="btn-icon btn-quiet" type="button" title="Hide documents" aria-label="Hide documents"><svg class="ic" aria-hidden="true"><use href="#i-sidebar"></use></svg></button>
+        <span class="sg-note">the sidebar toggle (rule 26) — one glyph for both directions, in the window's top-left corner either way; ⌘B / Ctrl B</span>
       </div>
     </section>
 
@@ -201,6 +206,7 @@ SPDX-License-Identifier: MIT -->
         <svg class="ic" aria-hidden="true"><use href="#i-collapse"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg>
         <svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>
+        <svg class="ic" aria-hidden="true"><use href="#i-sidebar"></use></svg>
         <span style="color:var(--text-dim)">⋯ × ▸ ▾ ★ ☆</span>
         <span class="sg-note">stroke-width lives on .ic only — exactly 1 device px; i-run is the one filled symbol; characters survive only where universal</span>
       </div>

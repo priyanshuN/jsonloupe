@@ -13,9 +13,10 @@ Notable changes to jsonloupe. Dates are UTC.
   filter said 0), and a ⚠ on equal `tags` rows. An array that matches exactly
   no longer carries an alignment warning, because no alignment mode could
   change an exact match, so the plan button no longer asks for a review. One
-  array's warning no longer paints its equal sibling at the same wildcard path. Pasting a baseline that matches the open
-  document exactly now opens the comparison instead of a toast; so does picking
-  a different recent with the same text.
+  array's warning no longer paints its equal sibling at the same wildcard
+  path. Pasting a baseline that matches the open document exactly now opens
+  the comparison instead of a toast; so does picking a different recent with
+  the same text.
 - **Compare reads JSON inside strings.** A field like `gatewayResponse` that
   holds stringified JSON used to show as changed whenever its key order or
   spacing did. Compare now decodes it: the gutter says `same json` when only the
@@ -36,7 +37,11 @@ Notable changes to jsonloupe. Dates are UTC.
   preview header were each 33px, a height set by whatever padding each
   carried. They now share `--head-h` (28px). Convert's "preview" band, which
   holds no controls, uses that height too instead of a full control bar.
-
+- **The documents sidebar hides.** On a desktop-width window the sidebar
+  toggle at the top-left corner (or ⌘B / Ctrl B) hides the documents column
+  whole and gives its 250px to the document; the toggle stays in the same
+  corner, now leading the toolbar. The choice survives a reload, and a hidden
+  sidebar leaves the tab order. Phones keep their drawer.
 - **The toolbar holds one row on a laptop.** In tree view it needed ~1300px,
   so every window narrower than about 1500px (1280, 1366, 1440) wrapped it onto
   a second row — 46px off the document — while the search field stretched to
