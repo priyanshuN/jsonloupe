@@ -2,7 +2,7 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.6.0 — 2026-10-18
 
 - **Command palette.** Press ⌘K (Ctrl K elsewhere) from anywhere, even while
   typing, and type a few letters of what you want: a view, an action on the
