@@ -68,10 +68,12 @@ export type PayloadTextWrapper =
   | 'none'
   | 'sql-single-quoted'
   | 'postgres-e-string'
-  | 'double-quoted-cell';
+  | 'double-quoted-cell'
+  | 'json-string';
 
 export type PayloadLayerKind =
   | 'sql-cell'
+  | 'json-string'
   | 'base64'
   | 'postgres-bytea-hex'
   | 'zstd'
@@ -355,6 +357,37 @@ function decodeDoubleQuotedCell(value: string): string | null {
   return out;
 }
 
+// How many string layers a stringified document may be wrapped in before we
+// stop peeling. Real payloads are stringified once or twice (a log line that
+// JSON-encoded a field that was already JSON); past a handful it is not a
+// mistake anyone made by accident.
+const MAX_STRINGIFIED_LAYERS = 8;
+
+/**
+ * A JSON string literal whose content is a JSON object or array — the whole
+ * document stringified, once or more. Returns the innermost text EXACTLY as it
+ * sits inside the string (JSON.parse of a string literal only unescapes; no
+ * number in it is ever read), or null when the string is just a string.
+ */
+function peelStringifiedJson(literal: string): { text: string; layers: number } | null {
+  let text = literal;
+  let layers = 0;
+  while (layers < MAX_STRINGIFIED_LAYERS && text.trimStart().startsWith('"')) {
+    let inner: unknown;
+    try {
+      inner = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (typeof inner !== 'string') return null;
+    text = inner;
+    layers++;
+  }
+  const first = text.trimStart()[0];
+  if (layers === 0 || (first !== '{' && first !== '[') || !isValidJsonText(text)) return null;
+  return { text, layers };
+}
+
 function startsBytea(value: string): boolean {
   return /^\\{1,2}[xX]/.test(value);
 }
@@ -409,6 +442,23 @@ function prepareText(input: string): PreparedText {
   // CSV quote-doubling made the original invalid JSON but the inner text JSON.
   if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
     const originalIsJson = isValidJsonText(input);
+    // A whole document that was stringified: nobody pastes a lone string to
+    // read it as a string, so this one is opened for what it holds. The
+    // condition is certainty, not a guess — the paste is a valid JSON string
+    // AND what it holds is a valid JSON object or array.
+    const peeled = originalIsJson ? peelStringifiedJson(trimmed) : null;
+    if (peeled) {
+      return {
+        text: peeled.text,
+        wrapper: 'json-string',
+        layer: {
+          kind: 'json-string',
+          inputByteLength: inputLength,
+          outputByteLength: byteLength(peeled.text),
+          detail: peeled.layers === 1 ? 'stringified JSON' : `stringified JSON ×${peeled.layers}`,
+        },
+      };
+    }
     const text = decodeDoubleQuotedCell(trimmed);
     const useful =
       text !== null &&
@@ -472,6 +522,11 @@ function quotedTextCouldWrapPayload(input: string, quoteIndex: number): boolean 
     if (code !== 0x09 && code !== 0x0a && code !== 0x0d && code !== 0x20) break;
     index++;
   }
+
+  // A stringified document: the string opens on `{`/`[`, or on `\"` when it
+  // was stringified more than once. prepareText makes the real decision.
+  if (input[index] === '{' || input[index] === '[') return true;
+  if (input[index] === '\\' && input[index + 1] === '"') return true;
 
   // PostgreSQL bytea may appear as a clipboard quote (`"\x…"`) or as a JSON
   // string whose backslash is escaped (`"\\x…"`).

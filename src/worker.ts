@@ -493,10 +493,16 @@ function isMaybeJson(s: string): boolean {
   while (i < s.length && s.charCodeAt(i) <= 32) i++;
   if (i >= s.length) return false;
   const a = s[i];
-  if (a !== '{' && a !== '[') return false;
   let j = s.length - 1;
   while (j > i && s.charCodeAt(j) <= 32) j--;
   const b = s[j];
+  // Stringified more than once: the value is itself a JSON string literal
+  // whose content opens on `{`, `[`, or another escaped quote. Cheap shape
+  // check only — this runs per rendered row; unpack makes the real decision.
+  if (a === '"' && b === '"' && j > i) {
+    const c = s[i + 1];
+    return c === '{' || c === '[' || (c === '\\' && s[i + 2] === '"');
+  }
   return (a === '{' && b === '}') || (a === '[' && b === ']');
 }
 
@@ -1504,9 +1510,11 @@ function unpack(id: number, indexHint: number, commit: boolean): { ok: boolean; 
   if (!n) return { ok: false, totalRows: visible.length, error: 'unknown node' };
   if (n.unpacked === undefined) {
     if (typeof n.value !== 'string') return { ok: false, totalRows: visible.length, error: 'not a string' };
-    let parsed: unknown;
+    // A value stringified more than once parses to a string that is itself
+    // JSON; one click peels every layer, as the paste decoder does (codec.ts).
+    let parsed: unknown = n.value;
     try {
-      parsed = lparse(n.value);
+      for (let layer = 0; layer < 8 && typeof parsed === 'string'; layer++) parsed = lparse(parsed);
     } catch {
       return { ok: false, totalRows: visible.length, error: 'string is not valid JSON' };
     }

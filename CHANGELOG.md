@@ -4,6 +4,30 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **Pasting stringified JSON opens the JSON it holds.** A whole document that
+  arrives as a JSON string — `"{\"id\":1}"`, the shape a log line or an API
+  field hands you — used to open as one long string row, and stringified twice it
+  had no way in at all. The paste decoder now peels every string layer when what
+  is inside is a valid object or array, keeps the inner text exactly (int64
+  digits included), and says so with a `decoded · stringified JSON` badge. A
+  string that is just a string still opens as a string.
+- **`{…}` reaches a field stringified more than once.** The button now appears
+  on such values and one click peels every layer, where before it did not appear.
+- **Denser rows: 35 fit where 27 did.** Rows are 22px (were 28) and documents
+  read at 13.5px, the size every other list already used; the code pane takes
+  the same pitch, so in split view a row on the left sits beside its line on
+  the right. An open object reads `{ 10 keys }` instead of repeating the keys
+  listed under it, a value cut short shows in full on hover, and the row's
+  `key · path · copy` buttons sit next to the value instead of at the far
+  window edge. In a narrow tree pane (a phone, or split view's left side) those
+  buttons float over the row end, so values get the whole width.
+- **Table view's columns line up with its header.** The header sized every
+  column to 220px while the rows fit the window, so once a table was wider than
+  the screen each column drifted further from its title and long ids were cut.
+- **The tree and code panes draw a document more carefully.** An object row
+  keeps its key count visible when its preview truncates; indent guides drop from
+  the caret that opened them; the split-synced code line is banded like the
+  tree's selected row; both gutters number lines at the same size.
 - **A wrong answer to "how many line items does the invoice have" is fixed, and
   it was self-inflicted.** The prose clause added with the `top` fix above —
   naming the first pipe argument as an output column — also pushed the model

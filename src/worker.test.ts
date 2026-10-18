@@ -25,6 +25,7 @@ interface Row {
   hasChildren: boolean;
   childCount: number;
   expanded: boolean;
+  maybeJson?: boolean;
 }
 interface ParseRes {
   ok: boolean;
@@ -759,6 +760,21 @@ describe('unpack', () => {
     expect(res.totalRows).toBeGreaterThan(before);
     // original string stays authoritative in copy
     expect(nodeValue(p.id)).toBe('"{\\"inner\\":7}"');
+  });
+
+  it('peels a value stringified twice in one click, keeping int64 digits', () => {
+    const twice = JSON.stringify(JSON.stringify('{"id":7241590238164561921}'));
+    parse(`{"payload":${twice}}`);
+    const p = rows().find((r) => r.key === 'payload')!;
+    expect(p.maybeJson).toBe(true);
+    const res = h<{ ok: boolean }>({ type: 'unpack', id: p.id, index: p.index, commit: true });
+    expect(res.ok).toBe(true);
+    expect(stringify(0)).toBe('{"payload":{"id":7241590238164561921}}');
+  });
+
+  it('does not offer to unpack a quoted word', () => {
+    parse(`{"s":${JSON.stringify('"hello"')}}`);
+    expect(rows().find((r) => r.key === 's')!.maybeJson).toBeFalsy();
   });
 
   it('refuses to unpack a plain string', () => {
