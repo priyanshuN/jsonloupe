@@ -125,14 +125,13 @@
        under another bar takes --bg-chrome-2 so the two stay a visible step
        apart.
        ONE STRIP GEOMETRY, and it is not negotiable per bar: --gap-2 / --gap-3
-       padding (8/12), min-height --bar-h (46px). Every strip that misses it puts its
+       padding (--bar-pad-y / 12), min-height --bar-h (40px). Every strip that misses it puts its
        first control on a different x from the strip above, and no two stacked
        bars come out the same height — invisible one at a time, machined vs
        assembled when you see them stacked. Two exceptions, both stated:
        #status-bar is a STATUS line, not a control bar, so it keeps 32px (and
        the vertical padding that holds 32px) while taking the 12px inset like
-       everything else; .sem-toolbar keeps --bg-chrome-2 because it is deliberately a
-       second bar under a first. A list panel (#search-panel) is the one strip
+       everything else; a bar stacked under another bar takes --bg-chrome-2. A list panel (#search-panel) is the one strip
        whose box is sized by its rows: it delivers the 12px inset and its height
        through them, because a panel inset that compounds with a row inset puts
        the first hit 24px in.
@@ -267,8 +266,8 @@
        out of the tab order entirely, so a pointer was the only way to them.
    21. A PANEL THAT FLOATS OVER THE PAGE RENDERS TO THE TOP LAYER — a <dialog>
        or a [popover], never position:absolute inside a strip. #sem-plan-body
-       was the exception and it proved the rule: it hung off .sem-toolbar, that
-       bar takes overflow-x:auto below 900px, and an ancestor with non-visible
+       was the exception and it proved the rule: it hung off compare's filter
+       bar, that bar took overflow-x:auto below 900px, and an ancestor with non-visible
        overflow clips absolutely-positioned descendants — so the one control
        that fixes a wrong array alignment was cut down to a 42px strip you
        scrolled sideways. `popover` also brings light-dismiss and Esc, which
@@ -338,8 +337,8 @@
      per-theme fact, not a constant. Dark has headroom above the canvas, so
      chrome goes lighter, exactly as it always has here. */
   --bg-chrome: #21262f;
-  /* A SECOND chrome tier for a bar stacked under another bar (.sem-toolbar
-     under .sem-head). One step further from the canvas, same per-theme
+  /* A SECOND chrome tier for a bar stacked under another bar
+     (#convert-cols-head under .convert-bar). One step further from the canvas, same per-theme
      direction as --bg-chrome — dark keeps going up, so this is the value that
      bar already had. */
   --bg-chrome-2: #2a303b;
@@ -509,6 +508,11 @@
      pitch. Mirrored as a virtualization constant in tree.ts, compare-view.ts
      and main.ts (TROW_H) — change all four together. */
   --row-h: 22px;
+  /* A sticky column header — compare's, the table view's, convert's preview —
+     is the document's top edge, one notch taller than a row it labels. They
+     were 33px each, a height nothing else in the app had, set by whatever
+     padding each header happened to carry. */
+  --head-h: 28px;
 
   /* Contract rules 1, 3 and 4 — the only control sizes and gaps in the app.
      Stepped up 2026-08-09 with the type ramp below: 12.5px body in a 28px
@@ -520,7 +524,11 @@
   --ctl-h: 30px;
   --ctl-h-mini: 22px;
   --icon: 15px;
-  --bar-h: 46px;
+  /* 40, from 46 (2026-10-18): a 30px control with 5px above and below, the
+     density of the desktop tools this sits beside. Three stacked 47px strips
+     were 141px of chrome above compare's first row. */
+  --bar-h: 40px;
+  --bar-pad-y: calc((var(--bar-h) - var(--ctl-h)) / 2);
   --gap-1: 4px;
   --gap-2: 8px;
   --gap-3: 12px;
@@ -1010,7 +1018,10 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 15px 14px 13px;
+  /* Rule 11's strip geometry, so its bottom edge and #toolbar's are one line
+     across the window instead of two edges 18px apart. */
+  min-height: var(--bar-h);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
 }
 .brand {
@@ -1868,7 +1879,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   gap: var(--gap-4);
   /* Rule 11's strip geometry — the one every other bar now matches. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
   flex-wrap: wrap;
@@ -2706,7 +2717,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   /* Rule 11's strip geometry, like every other bar between the toolbar and the
      panes — this one used to be 11/14 on its own. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   display: flex;
   flex-direction: column;
   gap: var(--gap-2);
@@ -3169,7 +3180,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   align-items: center;
   gap: 10px;
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
 }
@@ -3864,7 +3875,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   gap: 10px;
   /* Rule 11's strip geometry. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
 }
@@ -4110,7 +4121,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   gap: 10px;
   /* Rule 11's strip geometry. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
   flex-wrap: wrap;
@@ -4170,12 +4181,15 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   background: var(--bg-canvas);
 }
 .sem-head {
+  position: relative;
+  z-index: 8;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: var(--gap-1) 10px;
   /* Rule 11's strip geometry. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
 }
@@ -4189,32 +4203,15 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    13px: this was the one surface in the app whose title was accent-coloured,
    for no stated reason. */
 .sem-heading strong { flex-shrink: 0; }
-#sem-title {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-dim);
-  font: var(--fs-body) var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sem-toolbar {
-  position: relative;
-  z-index: 8;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* Rule 11's strip geometry; the stated background exception. */
-  min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
-  border-bottom: 1px solid var(--border);
-  /* Second bar under .sem-head — --bg-chrome-2 keeps them a visible step apart.
-     They were 3 units apart in light once .sem-head went chrome. */
-  background: var(--bg-chrome-2);
-}
 .sem-filters {
   display: flex;
   align-items: center;
   gap: var(--gap-1);
+}
+/* When the one bar cannot hold everything, the filters take the second row
+   whole, rather than one stray button wrapping alone under the actions. */
+@container viewer (max-width: 1180px) {
+  .sem-filters { order: 1; flex: 1 1 100%; }
 }
 .sem-filters button {
   display: inline-flex;
@@ -4240,11 +4237,6 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   background: var(--accent-soft);
   color: var(--text);
 }
-.sem-order-note {
-  margin-left: auto;
-  color: var(--text-faint);
-  font: var(--fs-chip) var(--mono);
-}
 #sem-plan-btn {
   white-space: nowrap;
   color: var(--text-dim);
@@ -4256,7 +4248,17 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   background: var(--accent-soft);
   color: var(--text);
 }
-/* Rule 21: a top-layer popover, so .sem-toolbar's overflow-x cannot clip it —
+/* Rule 18: "this alignment is not certain" is attention — the review notes
+   that used to fill a banner row tint the button that opens them instead. */
+#sem-plan-btn.needs-review { color: var(--warn); }
+.sem-plan-note {
+  margin: 0;
+  padding: var(--gap-2) 10px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--warn);
+  font: var(--fs-chip) var(--mono);
+}
+/* Rule 21: a top-layer popover, so no clipping ancestor can cut it —
    main.ts sets left/top under the trigger, because anchor positioning is not
    portable yet. The display pair is deliberate and must stay together: the
    first line hides the panel in a browser with no popover support (where the
@@ -4337,7 +4339,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    starts where the data starts. --bg-elevated made it a third plane. */
 .sem-columns {
   flex-shrink: 0;
-  height: 33px;
+  height: var(--head-h);
   border-bottom: 1px solid var(--border-strong);
   background: var(--bg-canvas);
   color: var(--text-dim);
@@ -4481,14 +4483,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    (rule 19): one strip, one geometry, one implementation. */
 
 @media (max-width: 900px) {
-  .sem-toolbar {
-    align-items: flex-start;
-    overflow-x: auto;
-  }
   .sem-filters { flex: 0 0 auto; }
-  .sem-order-note { display: none; }
-  .sem-head { flex-wrap: wrap; }
-  .sem-heading { flex: 1 1 100%; }
 }
 
 /* ---------- table ---------- */
@@ -4504,7 +4499,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   gap: var(--gap-3);
   /* Rule 11's strip geometry. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
 }
@@ -4545,7 +4540,8 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .tcell.th {
   font-weight: 700;
   color: var(--c-key);
-  padding: var(--gap-2) 11px;
+  padding: 0 11px;
+  line-height: var(--head-h);
   cursor: pointer;
   user-select: none;
 }
@@ -4631,7 +4627,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   gap: var(--gap-3);
   /* Rule 11's strip geometry. */
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
   flex-shrink: 0;
@@ -4661,7 +4657,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   .convert-bar { flex-wrap: wrap; }
 }
 /* Rule 18: --c-key paints JSON values, and "tables in this document" is prose
-   about the view. Same treatment #sem-title has for the same job — the dim mono
+   about the view. Same treatment compare's subtitle had for the same job — the dim mono
    descriptor trailing a surface title. */
 #convert-title {
   min-width: 0;
@@ -4808,7 +4804,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   align-items: center;
   gap: var(--gap-2);
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome-2);
 }
@@ -4852,13 +4848,19 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   align-items: center;
   gap: var(--gap-2);
   min-height: var(--bar-h);
-  padding: var(--gap-2) var(--gap-3);
+  padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   background: var(--bg-chrome);
 }
 #convert-cols-head { background: var(--bg-chrome-2); }
-#convert-preview-head { border-top: 1px solid var(--border); }
+/* The preview head holds no control — a label and a row count — so it is a
+   column-header-height band, not a 46px control strip. */
+#convert-preview-head {
+  min-height: var(--head-h);
+  padding-block: 0;
+  border-top: 1px solid var(--border);
+}
 /* Rule 18: a sheet name is user-authored output, not a JSON key. #doc-title's
    rank — the strongest identity in a bar. */
 #convert-detail-name { font: 700 var(--fs-code) var(--mono); color: var(--text); }
@@ -5024,9 +5026,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   top: 0;
   background: var(--bg-canvas);
   border-bottom: 1px solid var(--border-strong);
+  height: var(--head-h);
   color: var(--text);
   font-weight: 700;
-  padding: var(--gap-2) 11px;
+  padding: 0 11px;
   z-index: 1;
 }
 .convert-grid td.empty { color: var(--text-faint); }
@@ -5257,15 +5260,9 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   }
   .disc-key { min-width: 0; }
 
-  /* The 900px treatment lets compare's filter bar scroll sideways, which on a
-     phone parks `reordered`, `needs review` and `collapse` off the right edge
-     with nothing to say they are there. Below 760 the bar wraps instead, and
-     the filter group takes a row of its own so its chips can wrap inside it —
-     it is `flex: 0 0 auto` above, so it sizes to max-content and never would. */
-  .sem-toolbar {
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
+  /* On a phone the filter group takes a row of its own so its chips can wrap
+     inside it — it is `flex: 0 0 auto` above, so it sizes to max-content and
+     never would. */
   .sem-filters {
     flex: 1 1 100%;
     flex-wrap: wrap;
@@ -5295,7 +5292,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
     align-self: stretch;
     gap: var(--gap-2);
     min-height: var(--bar-h);
-    padding: var(--gap-2) var(--gap-3);
+    padding: var(--bar-pad-y) var(--gap-3);
     border: 0;
     border-bottom: 1px solid var(--border);
     border-radius: 0;

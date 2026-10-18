@@ -223,7 +223,7 @@ const diffIgnore = $<HTMLInputElement>('#diff-ignore');
 const diffKey = $<HTMLInputElement>('#diff-key');
 const diffBody = $('#diff-body');
 const semanticView = $('#semantic-view');
-const semTitle = $('#sem-title');
+const semHeading = $('#sem-heading');
 const semSummaryBtn = $<HTMLButtonElement>('#sem-summary');
 const semCloseBtn = $<HTMLButtonElement>('#sem-close');
 const semFilters = $('#sem-filters');
@@ -3982,33 +3982,49 @@ function renderSemanticSummary(res: CompareOk): void {
   const conservative = [...grouped.values()].filter((plans) =>
     plans.some((plan) => plan.warnings.length > 0),
   ).length;
-  const bits = [
-    `${uniquePlans.length} array${uniquePlans.length === 1 ? '' : 's'}`,
-    identities ? `${identities} identity-aligned` : '',
-    conservative ? `${conservative} need review` : '',
-  ].filter(Boolean);
-  semPlanBtn.textContent = `alignment plan · ${bits.join(' · ')}`;
+  // The button names only what asks for you: how many arrays to review, or
+  // else how many were aligned. The identity split is the panel's to show.
+  const arrays = `${uniquePlans.length} array${uniquePlans.length === 1 ? '' : 's'}`;
+  semPlanBtn.textContent = `plan · ${conservative ? `${conservative} to review` : arrays}`;
+  semPlanBtn.dataset.detail = [arrays, identities ? `${identities} identity-aligned` : ''].filter(Boolean).join(' · ');
 
+  // Only the truncation notice keeps a banner: it changes what the grid can
+  // show. The review notes describe the plan, so they ride its button (warn
+  // tint + tooltip) and open its panel's first line — not a fourth bar.
   const warnings: string[] = [];
+  const reviewNotes: string[] = [];
   if (res.truncated) {
     warnings.push(
       `Comparison capped at ${res.truncation.cap.toLocaleString()} nodes; at least ${res.truncation.omittedBranchesAtLeast.toLocaleString()} branch${res.truncation.omittedBranchesAtLeast === 1 ? '' : 'es'} omitted.`,
     );
   }
   if (res.summary.ambiguous > 0) {
-    warnings.push(
+    reviewNotes.push(
       `${res.summary.ambiguous.toLocaleString()} row${res.summary.ambiguous === 1 ? ' needs' : 's need'} matching review.`,
     );
   }
   if (conservative > 0) {
-    warnings.push('Some arrays stayed positional because their semantics cannot be inferred safely from JSON alone.');
+    reviewNotes.push('Some arrays stayed positional because their semantics cannot be inferred safely from JSON alone.');
   }
   semWarning.hidden = warnings.length === 0;
   semWarning.textContent = warnings.join(' ');
+  semPlanNote = reviewNotes.join(' ');
+  semPlanBtn.classList.toggle('needs-review', reviewNotes.length > 0);
+  semPlanBtn.title = semPlanNote || `${semPlanBtn.dataset.detail}. How each array was aligned, and how to change it.`;
 }
+
+// Set by renderSemanticSummary, which always runs first; read as the plan
+// panel's opening line.
+let semPlanNote = '';
 
 function renderSemanticPlan(plans: AlignmentPlan[]): void {
   semPlanBody.replaceChildren();
+  if (semPlanNote) {
+    const note = document.createElement('p');
+    note.className = 'sem-plan-note';
+    note.textContent = semPlanNote;
+    semPlanBody.appendChild(note);
+  }
   const grouped = new Map<string, AlignmentPlan[]>();
   for (const plan of plans) {
     const group = grouped.get(plan.path);
@@ -4099,7 +4115,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
   }
   const token = ++semanticOpenToken;
   setSemanticFilterButton('all');
-  semTitle.textContent = 'aligning…';
+  semHeading.title = 'aligning…';
   semLeftTitle.textContent = `${diffOtherTitle} · baseline`;
   semRightTitle.textContent = `${currentTitle} · current`;
   semWarning.hidden = true;
@@ -4128,7 +4144,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
     return;
   }
 
-  semTitle.textContent = `${diffOtherTitle} → ${currentTitle}`;
+  semHeading.title = `${diffOtherTitle} → ${currentTitle}. Rows are shown in aligned order; neither original is changed.`;
   renderSemanticSummary(res);
   renderSemanticPlan(res.plans);
   semanticCompare.setTotal(res.totalRows);
@@ -4136,7 +4152,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
 }
 
 // The alignment plan is a popover (index.html, style.css rule 21): the browser
-// renders it in the top layer, so .sem-toolbar's overflow-x cannot clip it, and
+// renders it in the top layer, so no clipping ancestor of the bar can cut it, and
 // light dismiss + Esc come with the attribute. Placing it under its own trigger
 // is positionUnder's job, shared with the download-name popover.
 const positionSemPlan = (): void => positionUnder(semPlanBody, semPlanBtn);
