@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { SAMPLE_DOC } from '../src/sample-doc';
 
 const wcagTags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 
@@ -74,6 +75,24 @@ test('converter exposes its tables and mapping controls without WCAG violations'
   await page.getByRole('button', { name: 'customize' }).click();
   await expect(page.getByRole('list', { name: 'Columns' })).toBeVisible();
   await expectNoWcagViolations(page, '#convert-view');
+});
+
+test('the sample compared with a reformatted copy of itself reads as identical', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await openSample(page);
+  // Same values with every line break and indent removed: the first thing a
+  // user tries, and it used to show a warning banner and a ⚠ on equal rows.
+  await page.evaluate((text) => navigator.clipboard.writeText(text), SAMPLE_DOC.replace(/\n\s*/g, ''));
+  await page.locator('#compare-btn').click();
+  await page.getByRole('button', { name: 'paste baseline' }).click();
+  const verdict = page.locator('#sem-verdict');
+  await expect(verdict).toBeVisible();
+  await expect(verdict).toContainText('Documents are identical');
+  await expect(verdict).toContainText('Only formatting or key order differs');
+  await expect(page.locator('#sem-warning')).toBeHidden();
+  await expect(page.locator('#sem-plan-btn')).not.toContainText('to review');
+  await expect(page.locator('#sem-layer .compare-warning')).toHaveCount(0);
+  await expectNoWcagViolations(page, '#semantic-view');
 });
 
 test('compact documents drawer traps and restores keyboard focus', async ({ page }) => {

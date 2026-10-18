@@ -8,6 +8,7 @@ import type {
   AlignmentPlan,
   SemanticCompareResult,
   SemanticSummary,
+  SemanticVerdict,
 } from './semantic';
 
 // 'chunk' is a synthetic range row ([0 … 9999]) interposed when a container has
@@ -85,10 +86,13 @@ export interface CompareRow {
   expanded: boolean;
   matchLabel?: string;
   warning?: string;
+  /** A side holds a JSON string: decoded, it has the same content or it differs. */
+  embedded?: 'same' | 'differs';
 }
 
 export interface CompareMeta {
   totalRows: number;
+  verdict: SemanticVerdict;
   nodeCount: number;
   summary: SemanticSummary;
   plans: AlignmentPlan[];

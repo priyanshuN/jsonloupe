@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { LosslessNumber } from 'lossless-json';
+import { lparse } from './lossless';
+import { SAMPLE_DOC } from './sample-doc';
 import {
   compareSemantic,
   flattenVisibleRows,
@@ -635,5 +637,139 @@ describe('schema-free semantic comparison', () => {
 
     expect(rows.map((node) => node.matchLabel)).toEqual(['$', 'a', 'b']);
     expect(flattenVisibleRows(result.root, { statuses: new Set(['added']), includeAncestors: false })).toEqual([result.root]);
+  });
+});
+
+// The sample compared with itself is the case a new user tries first. It must
+// read as identical, with no warning asking for a review of nothing.
+describe('identical and nearly identical documents', () => {
+  // Same values, keys reversed at every level and no whitespace at all.
+  const reorderKeys = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(reorderKeys);
+    if (value && typeof value === 'object' && !(value instanceof LosslessNumber)) {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .reverse()
+          .map(([key, inner]) => [key, reorderKeys(inner)]),
+      );
+    }
+    return value;
+  };
+
+  it('calls the sample identical to itself and drops every moot plan warning', () => {
+    const result = compareSemantic(lparse(SAMPLE_DOC), lparse(SAMPLE_DOC));
+    expect(result.verdict).toBe('identical');
+    expect(result.summary).toMatchObject({ changed: 0, added: 0, removed: 0, moved: 0, ambiguous: 0, typeChanged: 0 });
+    expect(result.plans.length).toBeGreaterThan(0);
+    for (const plan of result.plans) {
+      expect(plan.equal, plan.instancePath).toBe(true);
+      expect(plan.warnings, plan.instancePath).toEqual([]);
+    }
+    // Including the primitive tags arrays, full and empty, that used to warn.
+    const tags = result.plans.filter((plan) => plan.path === '$.orders[*].tags');
+    expect(tags.map((plan) => plan.inferredKind)).toEqual(['primitive-unknown', 'empty-unknown']);
+  });
+
+  it('calls a key-reordered, minified copy identical too', () => {
+    const result = compareSemantic(lparse(SAMPLE_DOC), reorderKeys(lparse(SAMPLE_DOC)));
+    expect(result.verdict).toBe('identical');
+    expect(result.plans.every((plan) => plan.warnings.length === 0)).toBe(true);
+  });
+
+  it('keeps the warning on the one array that differs and drops it on its equal sibling', () => {
+    const result = compareSemantic(
+      { rows: [{ tags: ['a', 'b'] }, { tags: ['x'] }] },
+      { rows: [{ tags: ['b', 'a'] }, { tags: ['x'] }] },
+    );
+    const tags = result.plans.filter((plan) => plan.path === '$.rows[*].tags');
+    expect(tags.map((plan) => plan.instancePath)).toEqual(['$.rows[0].tags', '$.rows[1].tags']);
+    expect(tags[0].warnings.join(' ')).toMatch(/unknowable/);
+    expect(tags[0].equal).toBe(false);
+    expect(tags[1].warnings).toEqual([]);
+    expect(tags[1].equal).toBe(true);
+    expect(result.verdict).toBe('different');
+  });
+
+  it('drops a low-confidence identity warning when the array matched anyway', () => {
+    const rows = [{ id: 'same', n: 1 }, { id: 'same', n: 2 }];
+    const result = compareSemantic({ rows }, { rows: structuredClone(rows) }, { rules: { '$.rows': { mode: 'identity' } } });
+    expect(planAt(result.plans, '$.rows').warnings).toEqual([]);
+    expect(result.verdict).toBe('identical');
+  });
+
+  it('says reordered when only array positions moved', () => {
+    const result = compareSemantic(
+      { jobs: [{ orderId: 'A', qty: 1 }, { orderId: 'B', qty: 2 }] },
+      { jobs: [{ orderId: 'B', qty: 2 }, { orderId: 'A', qty: 1 }] },
+    );
+    expect(result.verdict).toBe('reordered');
+    expect(result.summary.moved).toBe(2);
+    expect(result.summary.changed).toBe(0);
+  });
+
+  it('never calls a capped comparison identical', () => {
+    const value = { values: [1, 2, 3, 4, 5] };
+    const result = compareSemantic(value, structuredClone(value), { nodeCap: 3 });
+    expect(result.truncated).toBe(true);
+    expect(result.verdict).toBe('different');
+  });
+});
+
+describe('embedded JSON strings', () => {
+  const gateway = (text: string) => ({ gatewayResponse: text });
+
+  it('marks a key-reordered JSON string as the same content and counts it once', () => {
+    const result = compareSemantic(
+      gateway('{"authCode":"A1042","avs":"Y"}'),
+      gateway('{ "avs": "Y", "authCode": "A1042" }'),
+    );
+    const node = allNodes(result.root).find((entry) => entry.path === '$.gatewayResponse')!;
+    expect(node.status).toBe('changed');
+    expect(node.embedded).toBe('same');
+    expect(node.children).toEqual([]);
+    expect(result.summary.changed).toBe(1);
+    expect(result.verdict).toBe('different');
+  });
+
+  it('decodes a changed JSON string into children without inflating the summary or the plans', () => {
+    const result = compareSemantic(
+      gateway('{"authCode":"A1042","avs":"Y","items":[1,2]}'),
+      gateway('{"authCode":"A1043","avs":"Y","items":[2,1]}'),
+    );
+    const node = allNodes(result.root).find((entry) => entry.path === '$.gatewayResponse')!;
+    expect(node.status).toBe('changed');
+    expect(node.embedded).toBe('differs');
+    expect(node.hasChildren).toBe(true);
+    const authCode = node.children.find((child) => child.path === '$.gatewayResponse.authCode')!;
+    expect(authCode.status).toBe('changed');
+    expect(authCode.leftPreview).toBe('"A1042"');
+    expect(authCode.rightPreview).toBe('"A1043"');
+    expect(result.summary.changed).toBe(1);
+    expect(result.plans).toEqual([]);
+  });
+
+  it('decodes arrays, and a string against the object it was unpacked into', () => {
+    const arrays = compareSemantic({ v: '[1,2]' }, { v: '[1,3]' });
+    expect(arrays.root.children[0].embedded).toBe('differs');
+    expect(arrays.root.children[0].children.map((child) => child.status)).toEqual(['equal', 'changed']);
+
+    const unpacked = compareSemantic(gateway('{"a":1,"b":[true]}'), { gatewayResponse: { b: [true], a: 1 } });
+    const node = unpacked.root.children[0];
+    expect(node.status).toBe('typeChanged');
+    expect(node.embedded).toBe('same');
+    expect(unpacked.summary.typeChanged).toBe(1);
+  });
+
+  it('leaves ordinary strings, broken JSON and mismatched shapes as plain text', () => {
+    const plain = compareSemantic({ v: 'hello' }, { v: 'world' });
+    expect(plain.root.children[0].embedded).toBeUndefined();
+    const broken = compareSemantic({ v: '{oops}' }, { v: '{"a":1}' });
+    expect(broken.root.children[0].embedded).toBeUndefined();
+    const scalar = compareSemantic({ v: '{"a":1}' }, { v: 7 });
+    expect(scalar.root.children[0].embedded).toBeUndefined();
+    const shapes = compareSemantic({ v: '{"a":1}' }, { v: '[1]' });
+    expect(shapes.root.children[0]).toMatchObject({ embedded: 'differs', children: [] });
+    const huge = compareSemantic({ v: `[${'1,'.repeat(600_000)}1]` }, { v: `[${'1,'.repeat(600_000)}2]` });
+    expect(huge.root.children[0].embedded).toBeUndefined();
   });
 });

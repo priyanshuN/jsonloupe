@@ -29,6 +29,11 @@ const STATUS_META: Record<CompareStatus, { glyph: string; title: string }> = {
   ambiguous: { glyph: '?', title: 'Ambiguous match' },
 };
 
+const EMBEDDED_TITLE = {
+  same: 'Embedded JSON with the same content: only its text differs (key order or spacing)',
+  differs: 'Embedded JSON, decoded: expand the row to see what changed inside',
+} as const;
+
 export class SemanticCompareView {
   private total = 0;
   private epoch = 0;
@@ -187,6 +192,17 @@ export class SemanticCompareView {
       match.textContent = `${row.leftIndex}→${row.rightIndex}`;
       match.title = `Original index ${row.leftIndex} → ${row.rightIndex}`;
       gutter.appendChild(match);
+    }
+
+    if (row.embedded) {
+      // A JSON string on at least one side, compared by what it decodes to.
+      // A word, not a glyph: no drawing of "stringified JSON" exists (rule 3).
+      const embedded = document.createElement('span');
+      embedded.className = 'compare-embedded';
+      embedded.textContent = row.embedded === 'same' ? 'same json' : 'json';
+      embedded.title = EMBEDDED_TITLE[row.embedded];
+      embedded.setAttribute('aria-label', EMBEDDED_TITLE[row.embedded]);
+      gutter.appendChild(embedded);
     }
 
     if (row.warning) {

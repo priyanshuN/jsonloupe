@@ -723,9 +723,15 @@ function makeCompareState(
 ): SemanticWorkerState {
   const nodesById = new Map<number, SemanticNode>();
   const parentById = new Map<number, number>();
+  // A plan is per concrete array, and only that array's row carries its
+  // warning. The normalized-path fallback is for an array whose own plan could
+  // not be found by instance; it must not paint `$.orders[1].tags` (equal, no
+  // warning) with the warning `$.orders[0].tags` earned.
   const planWarningByInstance = new Map<string, string>();
   const planWarningByPath = new Map<string, string>();
+  const plannedInstances = new Set<string>();
   for (const plan of result.plans) {
+    plannedInstances.add(plan.instancePath);
     if (plan.warnings.length === 0) continue;
     const warning = plan.warnings.join(' ');
     planWarningByInstance.set(plan.instancePath, warning);
@@ -743,8 +749,11 @@ function makeCompareState(
 
     const concretePath = node.left?.path ?? node.right?.path;
     const planWarning =
-      (concretePath ? planWarningByInstance.get(concretePath) : undefined) ??
-      planWarningByPath.get(node.path);
+      node.arrayMode === undefined
+        ? undefined
+        : concretePath && plannedInstances.has(concretePath)
+          ? planWarningByInstance.get(concretePath)
+          : planWarningByPath.get(node.path);
     const truncationWarning = node.truncated
       ? `Comparison stopped at the ${result.truncation.cap.toLocaleString('en-US')} node safety cap.`
       : '';
@@ -903,12 +912,14 @@ function semanticRow(state: SemanticWorkerState, entry: CompareVisible, index: n
   if (matchLabel) row.matchLabel = matchLabel;
   const warning = state.warningById.get(node.id);
   if (warning) row.warning = warning;
+  if (node.embedded) row.embedded = node.embedded;
   return row;
 }
 
 function compareMeta(state: SemanticWorkerState): CompareMeta {
   return {
     totalRows: state.visible.length,
+    verdict: state.result.verdict,
     nodeCount: state.result.nodeCount,
     summary: state.result.summary,
     plans: state.result.plans,

@@ -4454,6 +4454,35 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   flex: 0 0 auto;
   color: var(--warn);
 }
+/* A decoded JSON string. Same type as the match label beside it: a note about
+   how the row was compared, never a status of its own. */
+.compare-embedded {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+/* The whole-document verdict, first in the grid so it reads before any row.
+   Rule 15 tier 1, ink only: "identical" is expected and needs no response, so
+   it takes no fill and no hairline of its own. The canvas ground keeps it part
+   of the document surface (rule 11) rather than a third bar. */
+#sem-verdict {
+  display: flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  gap: var(--gap-3);
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-canvas);
+  font: var(--fs-body) var(--sans);
+}
+#sem-verdict[hidden] { display: none; }
+/* Rule 22's 700: the verdict outranks every row under it. */
+.sem-verdict-line {
+  color: var(--ok);
+  font-weight: 700;
+}
+#sem-verdict[data-verdict='reordered'] .sem-verdict-line { color: var(--accent); }
+.sem-verdict-hint { color: var(--text-dim); }
 /* Rule 18: changed is --warn, not the number's own hue. */
 .compare-row.status-changed .compare-gutter,
 .compare-row.status-type .compare-gutter { color: var(--warn); }
