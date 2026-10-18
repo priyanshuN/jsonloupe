@@ -164,9 +164,14 @@ const viewer = $('#viewer');
 const pasteBox = $<HTMLTextAreaElement>('#paste-box');
 const parseError = $('#parse-error');
 const sidebar = $('#sidebar');
+// An Apple keyboard says ⌘ where every other one says Ctrl: what code.ts's
+// Mod-s means, and which modifier Mod+B listens for.
+const MAC_KEYS = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 const sidebarOpenBtn = $<HTMLButtonElement>('#sidebar-open');
 const sidebarCloseBtn = $<HTMLButtonElement>('#sidebar-close');
 const sidebarScrim = $<HTMLButtonElement>('#sidebar-scrim');
+const sidebarHideBtn = $<HTMLButtonElement>('#sidebar-hide');
+const sidebarShowBtn = $<HTMLButtonElement>('#sidebar-show');
 const recentsEl = $('#recents');
 const docTitleEl = $('#doc-title');
 const docStatsEl = $('#doc-stats');
@@ -284,7 +289,7 @@ function paintDocumentsDrawer(): void {
     if (open) sidebar.setAttribute('aria-modal', 'true');
     else sidebar.removeAttribute('aria-modal');
   } else {
-    sidebar.inert = false;
+    sidebar.inert = sidebarHidden();
     sidebar.removeAttribute('role');
     sidebar.removeAttribute('aria-hidden');
     sidebar.removeAttribute('aria-modal');
@@ -358,6 +363,65 @@ document.addEventListener('keydown', (event) => {
     first.focus();
   }
 });
+// ---------- hidden sidebar: the desktop documents column (style.css rule 26) ----------
+
+// prepaint.js puts the attribute on <html> before the first frame; this only
+// flips and persists it. Storage is presence-only: 'closed', or no key.
+function sidebarHidden(): boolean {
+  return document.documentElement.dataset.sidebarClosed !== undefined;
+}
+
+function paintSidebarToggles(): void {
+  const open = !sidebarHidden();
+  sidebarHideBtn.setAttribute('aria-expanded', String(open));
+  sidebarShowBtn.setAttribute('aria-expanded', String(open));
+}
+
+function setSidebarHidden(hidden: boolean): void {
+  // Focus inside the column that is about to disappear, or on the toggle that
+  // is, would fall to <body>; hand it to the toggle that takes over the corner.
+  const ae = document.activeElement;
+  const strand = ae instanceof Node && (hidden ? sidebar.contains(ae) : ae === sidebarShowBtn);
+  if (hidden) document.documentElement.dataset.sidebarClosed = '';
+  else delete document.documentElement.dataset.sidebarClosed;
+  try {
+    if (hidden) localStorage.setItem('wb-sidebar', 'closed');
+    else localStorage.removeItem('wb-sidebar');
+  } catch {
+    /* private mode — holds for this session */
+  }
+  paintSidebarToggles();
+  paintDocumentsDrawer();
+  if (strand) (hidden ? sidebarShowBtn : sidebarHideBtn).focus({ preventScroll: true });
+}
+
+// The virtualized readers measure their viewport; remeasure once the column has
+// finished moving, not on every frame of it.
+$('#app').addEventListener('transitionend', (e) => {
+  if (e.target === e.currentTarget && e.propertyName === 'grid-template-columns') scheduleResponsiveRefresh();
+});
+sidebarHideBtn.addEventListener('click', () => setSidebarHidden(true));
+sidebarShowBtn.addEventListener('click', () => setSidebarHidden(false));
+// Mod+B, as in VS Code and Claude. Desktop only: the compact drawer has its own
+// trigger, and the marketing landing has no sidebar to show. Never while a
+// field or an editor holds focus — there Mod+B belongs to the text.
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'b' || e.altKey || e.shiftKey) return;
+  if (!(MAC_KEYS ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey)) return;
+  if (compactShell.matches) return;
+  if (!landing.hidden && !landing.classList.contains('landing--app')) return;
+  const ae = document.activeElement;
+  if (
+    ae instanceof HTMLInputElement ||
+    ae instanceof HTMLTextAreaElement ||
+    (ae instanceof HTMLElement && ae.isContentEditable)
+  ) return;
+  if (document.querySelector('dialog:modal')) return;
+  e.preventDefault();
+  setSidebarHidden(!sidebarHidden());
+});
+paintSidebarToggles();
+
 compactShell.addEventListener('change', () => {
   closeDocumentsDrawer(false);
   scheduleResponsiveRefresh();
@@ -3121,9 +3185,7 @@ const codeApplyBtn = $<HTMLButtonElement>('#code-apply');
 
 // Mod-s is what code.ts binds; it is ⌘S on an Apple keyboard and Ctrl+S on
 // every other one, and the strip has to name the one the reader actually has.
-const APPLY_SHORTCUT = /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
-  ? '⌘S'
-  : 'Ctrl+S';
+const APPLY_SHORTCUT = MAC_KEYS ? '⌘S' : 'Ctrl+S';
 const UNAPPLIED_HINT = `unapplied · ${APPLY_SHORTCUT} to apply`;
 
 // The editor's status is held here as well as painted, because the strip is
@@ -6925,6 +6987,34 @@ onThemeChange((t) => {
   codeEditor?.setTheme(t);
 });
 paintThemeSwitch();
+
+// Glass: a MATERIAL over either theme, not a third theme — so it is its own
+// attribute and its own control rather than a fourth segment above. prepaint.js
+// applies it before first paint; this only flips and persists it. When the OS
+// asks for reduced transparency or more contrast, style.css draws the solid
+// theme regardless, and the switch says so instead of pretending to work.
+const glassToggle = $<HTMLInputElement>('#glass-toggle');
+const solidOnly = matchMedia('(prefers-reduced-transparency: reduce), (prefers-contrast: more)');
+function paintGlass(): void {
+  glassToggle.checked = document.documentElement.dataset.glass !== undefined;
+  glassToggle.disabled = solidOnly.matches;
+  $('#glass-opt').title = solidOnly.matches
+    ? 'Glass is off while your system asks for reduced transparency or more contrast'
+    : 'Glass: translucent chrome, frosted menus and dialogs; the document stays solid';
+}
+glassToggle.addEventListener('change', () => {
+  const on = glassToggle.checked;
+  if (on) document.documentElement.dataset.glass = '';
+  else delete document.documentElement.dataset.glass;
+  try {
+    if (on) localStorage.setItem('wb-glass', '1');
+    else localStorage.removeItem('wb-glass');
+  } catch {
+    /* private mode — holds for this session */
+  }
+});
+solidOnly.addEventListener('change', paintGlass);
+paintGlass();
 
 // ---------- sample ----------
 

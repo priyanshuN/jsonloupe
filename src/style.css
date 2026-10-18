@@ -315,6 +315,39 @@
        same rule in the same commit, or the rule is prose. Every control in
        every tier/state/theme is on one page: /styleguide.html, the stare
        page — check it after any token change.
+   25. GLASS IS A MATERIAL, NOT A THEME (2026-10-18). Opt-in behind the
+       sidebar's glass checkbox ([data-glass] on <html>, set before first
+       paint by prepaint.js), over either theme. It changes what surfaces are
+       made of and never where anything is: a [data-glass] rule sets no
+       geometry, so switching it moves no pixel. Three surfaces, one recipe:
+       the FRAME (sidebar + every rule-11 chrome strip) is translucent over
+       a teal-tinted ground lit from the top, with no backdrop-filter, because
+       nothing ever scrolls under it; the FLOATS (⋯ menu, popovers, dialogs,
+       toast) are frosted for real, since they do sit over the document; the
+       CANVAS stays solid, so document text is never behind glass. Each glass
+       fill is drawn from the theme's own palette (dark: its chrome, thinned;
+       light: milky white over a teal-tinted ground) — the prototype's
+       borrowed neutral greys put a grey dialog on a blue-slate app — and the
+       frame over its unlit ground still lands on the solid chrome, so rule
+       11's chrome/canvas step holds. Every ink holds its floor on the COMPOSITE,
+       over the worst thing that can be behind it. Reduce Transparency and
+       Increase Contrast get the solid theme, exactly. All of it is linted.
+   26. THE SIDEBAR HIDES WHOLE, OR NOT AT ALL (2026-10-18). At desktop widths
+       the documents column collapses to a 0 track — never an icon rail: a
+       document has no favicon, so a rail is a column of identical file glyphs
+       that names nothing. Closed, it is visibility: hidden and inert, so its
+       controls leave the tab order and the accessibility tree in the frame
+       they leave the screen. ONE toggle place: the window's top-left corner —
+       #sidebar-hide leads the sidebar header, #sidebar-show takes the first
+       control slot of whichever view is up, and the view's top strip reserves
+       its room through --sidebar-lead rather than having it laid over its
+       content. That reserved slot is window chrome, not a fourth toolbar group
+       (rule 10): the three groups keep their order and their gaps. State is
+       presence-only (wb-sidebar = 'closed', or no key) and applied by
+       prepaint.js before the first frame, as theme is. The column moves at
+       rule 12's one speed; below 900px the drawer owns the sidebar and none
+       of this applies. The linter holds the 0 track, the hidden state and
+       both toggles' aria wiring.
    ========================================================================== */
 
 :root,
@@ -326,6 +359,10 @@
      durations. Mode-invariant, so it lives here rather than per theme. */
   --dur: 0.12s;
   --ease: ease;
+
+  /* Rule 25: the documents column's one width. The hidden sidebar animates
+     this track to 0, and the sidebar's rows hold it while they slide out. */
+  --sidebar-w: 250px;
 
   --bg: #191d24;
   /* Rule 11: the document reading surface. Same value as --bg here — dark was
@@ -405,6 +442,26 @@
   --gutter-bg: #1c212a;
   /* Landing hero wash — the only gradient on the public page. */
   --hero-wash: rgba(134, 200, 220, 0.1);
+
+  /* Rule 25: the glass material, used only under [data-glass]. The frame
+     fill is translucent over a GROUND of solid chrome + --glass-tint, lit from
+     the top by --glass-glow (the brand teal, finance-pwa's vertical fade);
+     --glass-sheen is the bright top edge every glass surface catches. Dark's
+     frame is its own chrome, thinned — light's is milky white (below). */
+  --glass-chrome: rgba(33, 38, 47, 0.6);
+  --glass-chrome-2: rgba(42, 48, 59, 0.74);
+  --glass-float: rgba(33, 38, 47, 0.94);
+  --glass-tint: rgba(134, 200, 220, 0.03);
+  --glass-glow: rgba(134, 200, 220, 0.24);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  /* A control ON the frame is a smaller pane of the same glass (finance-pwa's
+     .g-btn); a segmented switch is a RECESSED track with the chosen segment a
+     RAISED lens on it — the iOS segmented control, so what is selected reads
+     at a glance. Both in the theme's own slate: a neutral white lens read as
+     grey on blue. */
+  --glass-control: rgba(38, 44, 54, 0.62);
+  --glass-track: rgba(13, 16, 21, 0.26);
+  --glass-lens: rgba(52, 61, 75, 0.94);
 }
 
 :root[data-theme='light'] {
@@ -482,6 +539,20 @@
   --gutter-bg: #f1f4f7;
   /* Same wash, lower alpha: on a light ground the dark-theme value reads as haze. */
   --hero-wash: rgba(47, 123, 214, 0.07);
+
+  /* Rule 25, light: finance-pwa's light glass — MILKY WHITE over a teal-
+     tinted ground, not grey over grey. Where no light falls, white at .5 over
+     the tinted ground lands back on #edf1f4, the solid chrome to one unit, so
+     rule 11's chrome/canvas step survives; under the top light it frosts teal. */
+  --glass-chrome: rgba(255, 255, 255, 0.5);
+  --glass-chrome-2: rgba(255, 255, 255, 0.3);
+  --glass-float: rgba(255, 255, 255, 0.88);
+  --glass-tint: rgba(55, 113, 138, 0.1);
+  --glass-glow: rgba(55, 113, 138, 0.26);
+  --glass-sheen: rgba(255, 255, 255, 0.8);
+  --glass-control: rgba(255, 255, 255, 0.6);
+  --glass-track: rgba(27, 37, 49, 0.07);
+  --glass-lens: rgba(255, 255, 255, 1);
 }
 
 :root {
@@ -616,7 +687,7 @@ html.returning #landing { display: none; }
 
 #app {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr;
   height: 100vh;
   height: 100dvh;
 }
@@ -625,7 +696,8 @@ html.returning #landing { display: none; }
    behavior do not depend on generated content. They stay completely out of
    desktop layout; the <=900px shell block turns them on. */
 #mobile-shell-bar,
-#sidebar-close { display: none; }
+#sidebar-close,
+#sidebar-show { display: none; }
 
 /* ---------- buttons & inputs ---------- */
 
@@ -1014,6 +1086,50 @@ select:focus {
   min-height: 0;
 }
 
+/* ---------- hidden sidebar (contract rule 26) ----------
+   Desktop only: the compact shell's drawer (<=900px) owns the sidebar there and
+   none of this applies. Closed means GONE — a 0 track, not an icon rail, because
+   documents have no favicons and a rail would be a column of identical file
+   glyphs. Hidden by visibility, so it leaves the tab order and the
+   accessibility tree in the same frame (main.ts adds inert on top). */
+@media (width > 900px) {
+  #app { transition: grid-template-columns var(--dur) var(--ease); }
+  #sidebar { overflow: hidden; }
+  /* The rows keep the open width while the track closes over them, so they
+     slide out whole instead of re-wrapping at every width on the way to 0. */
+  #sidebar > * { min-width: calc(var(--sidebar-w) - 1px); }
+  :root[data-sidebar-closed] #app {
+    grid-template-columns: 0 1fr;
+    /* What a view's top strip reserves for #sidebar-show: one icon button and
+       the in-group gap after it. Unset while the sidebar is open. */
+    --sidebar-lead: calc(var(--ctl-h) + var(--gap-2));
+  }
+  /* The transition lives on the CLOSED state only, so visibility lags on the
+     way out (the column stays painted while it slides) and flips at once on
+     the way in — a visibility transition starts at `hidden`, and focus()
+     refuses a hidden target, so opening could not hand focus to the toggle. */
+  :root[data-sidebar-closed] #sidebar {
+    visibility: hidden;
+    transition: visibility var(--dur) var(--ease);
+  }
+  #content { position: relative; }
+  /* Pinned to the toolbar's first control slot (rule 11's 8/12 strip inset),
+     so on the viewer it reads as the bar's leading control. */
+  :root[data-sidebar-closed] #sidebar-show {
+    display: inline-flex;
+    position: absolute;
+    top: var(--gap-2);
+    left: var(--gap-3);
+    z-index: 1;
+  }
+  :root[data-sidebar-closed] #toolbar { padding-left: calc(var(--gap-3) + var(--sidebar-lead)); }
+  :root[data-sidebar-closed] .codec-head { padding-left: var(--sidebar-lead); }
+  /* The toggle leads the header; brand follows it, `new` stays right. */
+  .side-head { gap: var(--gap-2); }
+  .side-head .brand { margin-right: auto; }
+}
+#sidebar-hide { flex-shrink: 0; }
+
 .side-head {
   display: flex;
   align-items: center;
@@ -1185,7 +1301,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    here restyles the workbench. */
 
 #app:has(#landing:not([hidden]):not(.landing--app)) { grid-template-columns: 1fr; }
-#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar { display: none; }
+#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar,
+#app:has(#landing:not([hidden]):not(.landing--app)) #sidebar-show { display: none; }
 
 #landing {
   flex: 1;
@@ -5155,6 +5272,7 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
     transform: translateX(0);
   }
   #sidebar-close { display: inline-flex; }
+  #sidebar-hide { display: none; }
   #sidebar-scrim {
     position: fixed;
     inset: 0;
@@ -5487,6 +5605,145 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   .doc-row-actions button {
     min-width: var(--bar-h);
     min-height: var(--bar-h);
+  }
+}
+
+/* ---------- glass (opt-in material, rule 25) ---------- */
+
+/* The footer as two aligned rows once glass exists: the theme switch spans
+   the full width with equal segments; the glass setting and the about link
+   share the second row's two edges, both plain text at the footer's size. */
+.side-foot:has(#glass-toggle) { flex-wrap: wrap; }
+.side-foot:has(#glass-toggle) #theme-switch { flex-basis: 100%; }
+.side-foot:has(#glass-toggle) #theme-switch button { flex: 1; }
+.glass-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-2);
+  padding: 0 var(--gap-1);
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  cursor: pointer;
+  user-select: none;
+}
+.glass-opt:hover { color: var(--text); }
+.glass-opt:has(:disabled) { opacity: 0.6; cursor: default; }
+
+/* Rule 7's one checkbox in its SWITCH shape (.chk-switch, role="switch"): an
+   on/off SETTING rather than an item ticked in a list. Same component — same
+   border, same accent when on, same focus ring — drawn as a track and knob. */
+.chk.chk-switch {
+  width: 26px;
+  height: 16px;
+  border-radius: var(--r-pill);
+  background: var(--border-strong);
+  border-color: transparent;
+  place-content: center start;
+}
+.chk.chk-switch::after {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-fill-ink);
+  box-shadow: var(--shadow-sm);
+  transform: translateX(1px);
+  opacity: 1;
+  transition: transform var(--dur) var(--ease);
+}
+.chk.chk-switch:checked { background: var(--accent-fill); border-color: transparent; }
+.chk.chk-switch:checked::after { transform: translateX(11px); }
+.chk.chk-switch:disabled { cursor: default; }
+
+/* Glass is a MATERIAL over either theme. It changes what surfaces are made of
+   and never where anything is: no rule below sets geometry, so switching it
+   moves no pixel of layout (rule 25, linted).
+     FRAME — the sidebar and every chrome strip. Translucent over one soft
+     light, the brand teal from the top-left, which is all a strip has behind
+     it: nothing ever scrolls under the frame, so it takes NO backdrop-filter.
+     A blur over a static wash is invisible and still costs a compositing
+     layer on every strip while a 5M-row tree scrolls beside it.
+     FLOATS — the ⋯ menu, popovers, dialogs, the toast. These do sit over the
+     document, so they are frosted for real: a blur deep enough that 13.5px
+     mono underneath becomes colour, not letters, under a fill dense enough
+     that every ink still clears its floor over the darkest/lightest thing that
+     could be behind it (linted).
+     CANVAS — the tree, the editor, the table — stays solid. Document text is
+     never behind glass and never under it. */
+:root[data-glass] #app {
+  /* Re-pointed on #app, not :root, so `inherit` below can hand the solid
+     theme value straight back. */
+  --bg-chrome: var(--glass-chrome);
+  --bg-chrome-2: var(--glass-chrome-2);
+  /* The light: finance-pwa's vertical fade from the top edge, plus the even
+     tint the whole ground carries. Vertical, so every strip at one height
+     frosts the same and the toolbar reads as one pane, not a lit corner. */
+  background:
+    linear-gradient(in oklab, var(--glass-glow), transparent 420px),
+    linear-gradient(var(--glass-tint), var(--glass-tint));
+}
+/* What the frame is glass OVER: the solid chrome, read on body, where it is
+   still the theme's own value. */
+:root[data-glass] body { background: var(--bg-chrome); }
+/* The public landing is not the workbench: it keeps its own hero wash. */
+:root[data-glass] #app:has(#landing:not([hidden]):not(.landing--app)) { background: none; }
+:root[data-glass] body:has(#landing:not([hidden]):not(.landing--app)) { background: var(--bg); }
+/* Every pane of glass catches light on its top edge — the sheen inside the
+   strip, above the hairline rule 11 already draws. The sidebar's is on its
+   inner right edge, beside the frame's seam with the document. */
+:root[data-glass] :is(#mobile-shell-bar, #toolbar, .tree-bar, .code-bar, #ask-panel, #search-panel, .run-bar, .diff-head, .sem-head, .table-bar, .convert-bar, #status-bar) {
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+:root[data-glass] #sidebar { box-shadow: inset -1px 0 0 var(--glass-sheen), inset 0 1px 0 var(--glass-sheen); }
+/* Controls on the frame are glass too — bordered buttons and the segmented
+   switches — so the frame reads as one material rather than glass behind
+   solid tiles. Scoped to the frame's own strips through --btn-bg, so nothing
+   over the canvas (a tree row's actions float over the row end, rule 20) ever
+   turns translucent. Fields stay solid: rule 14's ground means "type here". */
+:root[data-glass] :is(#sidebar, #mobile-shell-bar, #toolbar, .tree-bar, .code-bar, #ask-panel, .run-bar, .diff-head, .sem-head, .table-bar, .convert-bar) {
+  --btn-bg: var(--glass-control);
+}
+:root[data-glass] #app .mode-switch {
+  background: var(--glass-track);
+  border-color: transparent;
+  box-shadow: inset 0 1px 2px var(--glass-track);
+}
+:root[data-glass] #app .mode-switch button.on,
+:root[data-glass] #app .mode-switch button.on:hover {
+  background: var(--glass-lens);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--glass-sheen), var(--shadow-sm);
+}
+
+:root[data-glass] :is(.menu, #dl-name, #sem-plan-body, #model-dialog, #baseline-picker, #keys-dialog, #transport-dialog, #toast) {
+  background: var(--glass-float);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: inset 0 1px 0 var(--glass-sheen), var(--shadow);
+}
+:root[data-glass] #toast.bad { background: color-mix(in srgb, var(--danger) 12%, var(--glass-float)); }
+
+/* Reduce Transparency / Increase Contrast: the solid theme, exactly — same
+   shapes (glass never changed them), solid fills, no wash, no blur. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-glass] #app {
+    --bg-chrome: inherit;
+    --bg-chrome-2: inherit;
+    background: none;
+  }
+  :root[data-glass] {
+    --glass-float: var(--bg-elevated);
+    --glass-sheen: transparent;
+  }
+  :root[data-glass] :is(#sidebar, #mobile-shell-bar, #toolbar, .tree-bar, .code-bar, #ask-panel, .run-bar, .diff-head, .sem-head, .table-bar, .convert-bar) {
+    --btn-bg: inherit;
+  }
+  :root[data-glass] #app .mode-switch { background: var(--bg-canvas); border-color: var(--border); box-shadow: none; }
+  :root[data-glass] #app .mode-switch button.on,
+  :root[data-glass] #app .mode-switch button.on:hover { background: var(--bg-hover); box-shadow: var(--shadow-sm); }
+  :root[data-glass] :is(.menu, #dl-name, #sem-plan-body, #model-dialog, #baseline-picker, #keys-dialog, #transport-dialog, #toast) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 

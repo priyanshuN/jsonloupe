@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 // Contract linter — the component contract at the top of src/style.css,
-// machine-enforced (contract rule 23). Every check here corresponds to a
+// machine-enforced (contract rule 24). Every check here corresponds to a
 // written rule; when the contract gains a rule, this file gains its check in
 // the same commit, or the rule is prose.
 //
@@ -33,6 +33,14 @@
 //  10. rule 15 — the named tier-2 recipes keep their hairline and stay off the
 //      -soft fills, so tier 2 and tier 3 cannot quietly converge into one
 //      device the reader has to know the domain to decode.
+//  11. rule 25 — glass: the unlit frame keeps rule 11's step from the canvas;
+//      every ink clears its floor over the worst thing that can be behind it;
+//      [data-glass] rules set no geometry, blur only the floats, never touch
+//      the canvas; and the reduced-transparency / more-contrast fallback hands
+//      back the solid theme.
+//  12. rule 26 — the hidden sidebar is a 0 track (no icon rail) and
+//      visibility: hidden, both desktop-only, and both toggles carry
+//      aria-controls="sidebar" and aria-expanded.
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -190,6 +198,126 @@ for (const [name, tokens] of Object.entries(themes)) {
   }
 }
 
+// ---------- glass (rule 25) ----------
+
+// The glass tokens are rgba, so they are read separately from the hex map
+// above, and contrast is measured on the COMPOSITE: fill over backdrop.
+function rgbaTokens(selectorRe) {
+  const m = css.match(selectorRe);
+  if (!m) return {};
+  const [a, b] = blockRange(m.index);
+  const out = {};
+  for (const t of cssRaw.slice(a, b).matchAll(/--([\w-]+):\s*rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)\s*;/g)) {
+    out[t[1]] = { rgb: [+t[2], +t[3], +t[4]], a: +t[5] };
+  }
+  return out;
+}
+const hexRgb = (hex) => {
+  const h = hex.slice(1);
+  const f = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  return [0, 2, 4].map((i) => parseInt(f.slice(i, i + 2), 16));
+};
+const rgbHex = (rgb) => '#' + rgb.map((c) => Math.round(c).toString(16).padStart(2, '0')).join('');
+/** `fill` (rgba token) painted over an opaque `under` ([r,g,b]). */
+const over = (fill, under) => fill.rgb.map((c, i) => c * fill.a + under[i] * (1 - fill.a));
+
+const GLASS_TOKENS = ['glass-chrome', 'glass-chrome-2', 'glass-float', 'glass-tint', 'glass-glow', 'glass-sheen', 'glass-control', 'glass-track', 'glass-lens'];
+const FRAME_INKS = ['text', 'text-dim', 'text-faint', 'accent', 'brand'];
+const FLOAT_INKS = ['text', 'text-dim', 'text-faint', 'accent', 'danger'];
+const glassThemes = {
+  dark: rgbaTokens(/^:root,\s*\n:root\[data-theme='dark'\]/m),
+  light: rgbaTokens(/^:root\[data-theme='light'\]/m),
+};
+for (const [name, glass] of Object.entries(glassThemes)) {
+  const hex = themes[name];
+  const missing = GLASS_TOKENS.filter((t) => !glass[t]);
+  if (missing.length) {
+    errors.push(`glass(${name}): ${missing.map((t) => '--' + t).join(', ')} missing or not rgba(r, g, b, a) — rule 25`);
+    continue;
+  }
+  const chrome = hexRgb(hex['bg-chrome']);
+  const frameUnder = {
+    'bg-chrome': chrome,
+    'glow peak': over(glass['glass-glow'], chrome),
+    'bg-canvas': hexRgb(hex['bg-canvas']),
+  };
+  // A float can sit over anything in the document, but always through its
+  // 24px blur, which spreads glyphs into their surroundings: 13.5px mono on
+  // 22px rows covers well under a third of its own area, so a blurred block of
+  // the densest text is taken as 40% --text over the canvas — a deliberately
+  // pessimistic figure (measured runs of real rows land nearer 15-20%).
+  const canvas = hexRgb(hex['bg-canvas']);
+  const floatUnder = {
+    ...frameUnder,
+    'blurred text': over({ rgb: hexRgb(hex.text), a: 0.4 }, canvas),
+  };
+  const check = (fill, unders, inks) => {
+    for (const [label, under] of Object.entries(unders)) {
+      const ground = rgbHex(over(glass[fill], under));
+      for (const ink of inks) {
+        const r = ratio(hex[ink], ground);
+        if (r < 4.5) errors.push(`glass(${name}): --${ink} on --${fill} over ${label} = ${r.toFixed(2)}:1, floor 4.5:1 — rule 25`);
+      }
+    }
+  };
+  check('glass-chrome', frameUnder, FRAME_INKS);
+  check('glass-chrome-2', frameUnder, FRAME_INKS);
+  check('glass-float', floatUnder, FLOAT_INKS);
+  // A control is glass on glass: its ground is the frame over each backdrop,
+  // and the lit segment adds the lens on top of that.
+  const onFrame = Object.fromEntries(Object.entries(frameUnder).map(([k, u]) => [`frame over ${k}`, over(glass['glass-chrome'], u)]));
+  check('glass-control', onFrame, ['text', 'text-dim', 'accent']);
+  // A segmented switch: the recessed track carries the idle labels, the
+  // raised lens on it carries the chosen one.
+  check('glass-track', onFrame, ['text', 'text-dim']);
+  const onTrack = Object.fromEntries(Object.entries(onFrame).map(([k, u]) => [`track on ${k}`, over(glass['glass-track'], u)]));
+  check('glass-lens', onTrack, ['text']);
+}
+
+// The [data-glass] rules themselves. Innermost `selector { body }` pairs, so a
+// rule nested in @media is read on its own.
+const GLASS_FLOATS = new Set(['.menu', '#dl-name', '#sem-plan-body', '#model-dialog', '#baseline-picker', '#keys-dialog', '#transport-dialog', '#toast']);
+const GEOMETRY = /^(?:border-radius|padding[\w-]*|margin[\w-]*|(?:min-|max-)?(?:width|height)|display|position|top|right|bottom|left|inset[\w-]*|gap|row-gap|column-gap|flex[\w-]*|grid[\w-]*|font[\w-]*|transform|order|line-height|letter-spacing)$/;
+let glassRules = 0;
+for (const m of css.matchAll(/([^{};]+)\{([^{}]*)\}/g)) {
+  const selector = m[1].trim().replace(/\s+/g, ' ');
+  if (!selector.includes('[data-glass]')) continue;
+  glassRules++;
+  const at = `style.css:${lineOf(m.index + m[0].indexOf('{'))}`;
+  for (const d of m[2].matchAll(/([\w-]+)\s*:\s*([^;]+)/g)) {
+    const [prop, value] = [d[1], d[2].trim()];
+    if (GEOMETRY.test(prop)) {
+      errors.push(`${at} "${selector}" sets ${prop} — glass is a material and never moves layout (rule 25)`);
+    }
+    if (/^--(?:bg-canvas|gutter-bg)$/.test('--' + prop.replace(/^--/, '')) && prop.startsWith('--')) {
+      errors.push(`${at} "${selector}" redefines ${prop} — the canvas is never glass (rule 25)`);
+    }
+    if (/backdrop-filter$/.test(prop) && value !== 'none') {
+      const targets = (selector.match(/:is\(([^)]*)\)/)?.[1] ?? selector.replace(/^:root\[data-glass\]\s*/, ''))
+        .split(',')
+        .map((t) => t.trim());
+      const strays = targets.filter((t) => !GLASS_FLOATS.has(t));
+      if (strays.length) {
+        errors.push(`${at} backdrop-filter on ${strays.join(', ')} — only floats are frosted; nothing scrolls under the frame (rule 25)`);
+      }
+    }
+  }
+}
+if (!glassRules) errors.push('style.css: no [data-glass] rules found — the glass layer moved; update rule 25 here');
+
+// The fallback: Reduce Transparency / Increase Contrast get the solid theme.
+const solidFallback = [...css.matchAll(/@media \(prefers-reduced-transparency: reduce\), \(prefers-contrast: more\)/g)]
+  .map((m) => {
+    const [open, end] = blockRange(m.index);
+    return css.slice(open + 1, end - 1);
+  })
+  .join('\n');
+for (const need of [/--bg-chrome:\s*inherit/, /--bg-chrome-2:\s*inherit/, /--glass-float:\s*var\(--bg-elevated\)/, /--glass-sheen:\s*transparent/, /--btn-bg:\s*inherit/, /backdrop-filter:\s*none/]) {
+  if (!need.test(solidFallback)) {
+    errors.push(`style.css: the reduced-transparency / more-contrast block is missing ${need.source} — those users get the solid theme (rule 25)`);
+  }
+}
+
 // ---------- type ramp (rule 23) ----------
 
 /** The selector a declaration at `idx` belongs to, whitespace-collapsed. */
@@ -340,6 +468,36 @@ if (/flex-basis:\s*100%/.test(ruleIn(compactBodies(420), '.tb-search'))) {
   errors.push('style.css: .tb-search must keep its 760px basis below 420px — full width strands #ask-btn on its own row');
 }
 
+// ---------- hidden sidebar (rule 26) ----------
+
+// Desktop only: the compact drawer owns the sidebar below 900px, and a closed
+// rule outside this block would hide the drawer's contents with it.
+const desktopShell = (() => {
+  const at = css.indexOf('@media (width > 900px)');
+  if (at < 0) return '';
+  const [open, end] = blockRange(at);
+  return css.slice(open + 1, end - 1);
+})();
+if (!desktopShell) {
+  errors.push('style.css: the @media (width > 900px) block is missing — rule 26 lives there');
+} else {
+  const closedApp = ruleIn(desktopShell, ':root[data-sidebar-closed] #app');
+  // A first track other than 0 is an icon rail, which rule 26 rules out.
+  if (!/grid-template-columns:\s*0\s+1fr/.test(closedApp)) {
+    errors.push('style.css: :root[data-sidebar-closed] #app must close the column to a 0 track (rule 26 — no icon rail)');
+  }
+  if (!/visibility:\s*hidden/.test(ruleIn(desktopShell, ':root[data-sidebar-closed] #sidebar'))) {
+    errors.push('style.css: :root[data-sidebar-closed] #sidebar must be visibility: hidden, so its controls leave the tab order (rule 26)');
+  }
+}
+for (const id of ['sidebar-hide', 'sidebar-show']) {
+  const tag = html.match(new RegExp(`<button id="${id}"[^>]*>`))?.[0] ?? '';
+  if (!tag) errors.push(`index.html: #${id} is missing — rule 26's toggle pair`);
+  else if (!/aria-controls="sidebar"/.test(tag) || !/aria-expanded="(?:true|false)"/.test(tag)) {
+    errors.push(`index.html: #${id} must carry aria-controls="sidebar" and aria-expanded (rule 26)`);
+  }
+}
+
 // ---------- dead tokens ----------
 
 const definedTokens = new Set();
@@ -347,7 +505,9 @@ for (const [a, b] of tokenRanges) {
   for (const t of css.slice(a, b).matchAll(/--([\w-]+):/g)) definedTokens.add(t[1]);
 }
 const usageCorpus = [
-  css.replace(/--([\w-]+):\s*[^;]+;/g, ''), // css minus definitions
+  // css minus the NAMES being defined; values stay, so a token whose one use is
+  // inside another token's value (--bg-chrome: var(--glass-chrome)) counts.
+  css.replace(/--([\w-]+):/g, ''),
   readFileSync(join(root, 'src/code.ts'), 'utf8'),
   readFileSync(join(root, 'src/main.ts'), 'utf8'),
   html,
@@ -367,4 +527,4 @@ if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
   process.exit(1);
 }
-console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, type ramp, restatements, dead tokens, status layout)');
+console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, glass, type ramp, restatements, hidden sidebar, dead tokens, status layout)');

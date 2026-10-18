@@ -129,6 +129,12 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-run" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M5.6 3.6 12 8l-6.4 4.4z" />
     </symbol>
+    <!-- The window's own layout, drawn: a frame with its left column ruled
+         off. Hides and shows the documents sidebar, so the drawing is the
+         thing it acts on — the same glyph VS Code and Claude use there. -->
+    <symbol id="i-sidebar" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M6.5 3v10" />
+    </symbol>
     <symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M8 3.5v9" /><path d="M3.5 8h9" />
     </symbol>
@@ -166,6 +172,11 @@ SPDX-License-Identifier: MIT -->
     </div>
     <aside id="sidebar" aria-label="Documents">
       <div class="side-head">
+        <!-- Desktop only (contract rule 26): the sidebar hides whole, and this
+             toggle and #sidebar-show share the window's top-left corner, so
+             the control never moves far from the pointer that just used it. -->
+        <button id="sidebar-hide" class="btn-icon btn-quiet" type="button" aria-controls="sidebar" aria-expanded="true"
+          title="Hide documents" aria-label="Hide documents"><svg class="ic" aria-hidden="true"><use href="#i-sidebar"></use></svg></button>
         <a class="brand" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec"><img class="brand-mark" src="/favicon.svg" alt="" width="27" height="27" /><span>json<span class="brand-loupe">loupe</span></span></a>
         <!-- The drawn plus, not the character: `+` carries its own optical
              weight and its own baseline, which is the whole reason rule 3
@@ -193,12 +204,21 @@ SPDX-License-Identifier: MIT -->
           <button type="button" data-theme="dark" title="Dark theme">dark</button>
           <button type="button" data-theme="light" title="Light theme">light</button>
         </div>
+        <!-- Glass is a material, not a theme, so it is not a fourth segment:
+             it is a setting, rule 7's checkbox in its switch shape, opening
+             the footer's second row under the switch it modifies. -->
+        <label class="glass-opt" id="glass-opt">glass<input type="checkbox" role="switch" class="chk chk-switch" id="glass-toggle" /></label>
         <span class="lp-spacer"></span>
         <a class="about-link" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec">about</a>
       </div>
     </aside>
     <button id="sidebar-scrim" type="button" tabindex="-1" aria-label="Close documents" hidden></button>
     <main id="content">
+      <!-- The other half of #sidebar-hide: present only while the sidebar is
+           hidden, pinned to the top-left of whichever view is up. The view's
+           top strip reserves its room (--sidebar-lead), so nothing sits under it. -->
+      <button id="sidebar-show" class="btn-icon btn-quiet" type="button" aria-controls="sidebar" aria-expanded="false"
+        title="Show documents" aria-label="Show documents"><svg class="ic" aria-hidden="true"><use href="#i-sidebar"></use></svg></button>
       <section id="landing">
         <header class="lp-header">
           <a class="lp-brand" href="./" title="jsonloupe">
@@ -1179,6 +1199,8 @@ SPDX-License-Identifier: MIT -->
         <span class="keys-group">document</span>
         <div class="keys-row"><span><kbd>/</kbd></span><span>search keys and values</span></div>
         <div class="keys-row"><span><kbd>⌘Z</kbd> or <kbd>Ctrl Z</kbd></span><span>undo — shift redoes</span></div>
+        <span class="keys-group">window</span>
+        <div class="keys-row"><span><kbd>⌘B</kbd> or <kbd>Ctrl B</kbd></span><span>hide · show documents</span></div>
         <span class="keys-group">functions</span>
         <div class="keys-row"><span><kbd>⌘↵</kbd> or <kbd>Ctrl ↵</kbd></span><span>run the script</span></div>
         <span class="keys-group">paste view</span>

@@ -116,3 +116,90 @@ test('compact documents drawer traps and restores keyboard focus', async ({ page
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+
+test('glass is a named, persistent switch that never reaches reduced-transparency users', async ({ page }) => {
+  await openSample(page);
+  const glass = page.getByRole('switch', { name: 'glass' });
+  await expect(glass).not.toBeChecked();
+  await glass.focus();
+  await glass.press('Space');
+  await expect(glass).toBeChecked();
+  await expect(page.locator('html')).toHaveAttribute('data-glass', '');
+  // Every ink is checked on the composite in lint:contract; this is the
+  // browser's own scan of the same surfaces with the material on.
+  await expectNoWcagViolations(page);
+
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-glass', '');
+  await expect(page.getByRole('switch', { name: 'glass' })).toBeChecked();
+
+  // More contrast: the solid theme, and the switch says why it is inert.
+  await page.emulateMedia({ contrast: 'more' });
+  await expect(page.getByRole('switch', { name: 'glass' })).toBeDisabled();
+  const toolbar = await page.locator('#toolbar').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(toolbar).not.toMatch(/rgba\(.*, 0\.\d+\)$/);
+});
+
+test('desktop sidebar hides whole, by button and Mod+B, and stays hidden across a reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openSample(page);
+
+  const sidebar = page.getByRole('complementary', { name: 'Documents' });
+  const hide = page.getByRole('button', { name: 'Hide documents' });
+  const show = page.getByRole('button', { name: 'Show documents' });
+  await expect(sidebar).toBeVisible();
+  await expect(hide).toHaveAttribute('aria-expanded', 'true');
+  await expect(hide).toHaveAttribute('aria-controls', 'sidebar');
+  await expect(show).toBeHidden();
+
+  // The button: focus moves to the toggle that takes over the corner, and the
+  // hidden column leaves the tab order (inert + visibility: hidden).
+  await hide.click();
+  await expect(sidebar).toBeHidden();
+  await expect(show).toBeFocused();
+  await expect(show).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#sidebar')).toHaveJSProperty('inert', true);
+  const showBox = await show.boundingBox();
+  const backBox = await page.getByRole('button', { name: 'Back to paste' }).boundingBox();
+  expect(showBox && backBox && showBox.x + showBox.width <= backBox.x).toBe(true);
+  await expectNoWcagViolations(page);
+
+  // Persistence: the attribute is applied before first paint, so the reload
+  // never shows the column.
+  expect(await page.evaluate(() => localStorage.getItem('wb-sidebar'))).toBe('closed');
+  await page.reload();
+  await expect(page.getByRole('tree', { name: 'JSON document' })).toBeVisible();
+  await expect(show).toBeVisible();
+  await expect(sidebar).toBeHidden();
+
+  // Mod+B from the page opens it; inside a text field it belongs to the text.
+  // The attribute is the state; visibility itself lags by one transition.
+  const closed = () => page.evaluate(() => document.documentElement.dataset.sidebarClosed !== undefined);
+  await page.keyboard.press('ControlOrMeta+b');
+  expect(await closed()).toBe(false);
+  await expect(sidebar).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('wb-sidebar'))).toBeNull();
+  const search = page.locator('#search-box');
+  await search.focus();
+  await search.press('ControlOrMeta+b');
+  expect(await closed()).toBe(false);
+  await search.blur();
+  await page.keyboard.press('ControlOrMeta+b');
+  expect(await closed()).toBe(true);
+  await expect(sidebar).toBeHidden();
+
+  // Opening by the button lands focus on the sidebar's own toggle.
+  await show.click();
+  await expect(sidebar).toBeVisible();
+  await expect(hide).toBeFocused();
+  await expect(hide).toHaveAttribute('aria-expanded', 'true');
+  await expectNoWcagViolations(page);
+
+  // The compact drawer ignores the desktop state entirely.
+  await hide.click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(hide).toBeHidden();
+  await expect(show).toBeHidden();
+  await page.getByRole('button', { name: 'documents', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Documents' })).toBeVisible();
+});

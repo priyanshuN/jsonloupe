@@ -20,6 +20,18 @@
       theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     document.documentElement.dataset.theme = theme;
 
+    // Glass is a material over either theme, not a third theme, so it is its
+    // own attribute. Presence-only: nothing from the query string becomes an
+    // attribute VALUE here. Reduced transparency / more contrast are handled
+    // in style.css, which draws the solid theme under either preference.
+    if (new URLSearchParams(location.search).has('glass') || localStorage.getItem('wb-glass') === '1')
+      document.documentElement.dataset.glass = '';
+    // The hidden sidebar (contract rule 26) must be hidden in the FIRST frame,
+    // or every reload of a closed sidebar opens it and animates it shut.
+    // Presence-only, like the stored value: 'closed' or no key at all.
+    if (localStorage.getItem('wb-sidebar') === 'closed')
+      document.documentElement.dataset.sidebarClosed = '';
+
     var script = document.currentScript;
     if (
       script &&
