@@ -90,7 +90,7 @@ test('the sample compared with a reformatted copy of itself reads as identical',
   await expect(verdict).toContainText('Documents are identical');
   await expect(verdict).toContainText('Only formatting or key order differs');
   await expect(page.locator('#sem-warning')).toBeHidden();
-  await expect(page.locator('#sem-plan-btn')).not.toContainText('uncertain');
+  await expect(page.locator('#sem-plan-btn')).not.toContainText('to review');
   await expect(page.locator('#sem-layer .compare-warning')).toHaveCount(0);
   await expectNoWcagViolations(page, '#semantic-view');
 });

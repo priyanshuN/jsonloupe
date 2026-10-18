@@ -12,8 +12,8 @@ Notable changes to jsonloupe. Dates are UTC.
   positional", a plan button asking for "1 need review" (while the needs-review
   filter said 0), and a ⚠ on equal `tags` rows. An array that matches exactly
   no longer carries an alignment warning, because no alignment mode could
-  change an exact match, and one array's warning no longer paints its equal
-  sibling at the same wildcard path. Pasting a baseline that matches the open
+  change an exact match, so the plan button no longer asks for a review. One
+  array's warning no longer paints its equal sibling at the same wildcard path. Pasting a baseline that matches the open
   document exactly now opens the comparison instead of a toast; so does picking
   a different recent with the same text.
 - **Compare reads JSON inside strings.** A field like `gatewayResponse` that
@@ -21,6 +21,22 @@ Notable changes to jsonloupe. Dates are UTC.
   spacing did. Compare now decodes it: the gutter says `same json` when only the
   text differs, and `json` with the decoded diff as children when the content
   really changed. The string still counts as one change in the totals.
+- **Compare spends 75px on chrome, not 204.** Semantic compare stacked a
+  title bar, a filter bar, a warning banner and a 33px column header before
+  its first aligned row. The title, filters and actions are now one bar
+  (wrapping to two below ~1180px, with the filters taking the second row
+  whole). The "baseline → current" subtitle moved into the heading's tooltip,
+  because the column headers already name both sides. The review warnings
+  moved onto the plan button (warn-tinted, `plan · 2 to review`) and into the
+  first line of its panel. The truncation notice keeps its banner.
+- **Every control bar is 40px, from 46px.** A 30px control with 5px above and
+  below, derived from one `--bar-pad-y` token. The sidebar header now uses
+  the same geometry, so its bottom edge and the toolbar's are one line.
+- **One column-header height.** Compare's, the table view's and convert's
+  preview header were each 33px, a height set by whatever padding each
+  carried. They now share `--head-h` (28px). Convert's "preview" band, which
+  holds no controls, uses that height too instead of a full control bar.
+
 - **The toolbar holds one row on a laptop.** In tree view it needed ~1300px,
   so every window narrower than about 1500px (1280, 1366, 1440) wrapped it onto
   a second row — 46px off the document — while the search field stretched to

@@ -875,16 +875,18 @@ SPDX-License-Identifier: MIT -->
           <div id="diff-body"></div>
         </div>
         <section id="semantic-view" hidden>
+          <!-- ONE bar, not two (2026-10-18). The view used to stack a title
+               bar over a filter bar over a warning banner over the column
+               header: 204px before the first aligned row. The subtitle
+               (baseline → current) said again what the column headers below
+               already say, so it moved into the heading's tooltip; the review
+               warnings describe the alignment plan, so they live on its button
+               and at the top of its panel. Below 1280 the bar wraps into two
+               rows rather than scrolling sideways. -->
           <div class="sem-head">
-            <div class="sem-heading">
-              <strong>Semantic compare</strong>
-              <span id="sem-title"></span>
+            <div class="sem-heading" id="sem-heading">
+              <strong>Compare</strong>
             </div>
-            <span class="spacer"></span>
-            <button id="sem-summary">structural summary</button>
-              <button id="sem-close" class="btn-quiet">back to tree</button>
-          </div>
-          <div class="sem-toolbar">
             <div id="sem-filters" class="sem-filters" role="toolbar" aria-label="Comparison filters">
               <button data-filter="all" class="on">all <span id="sem-count-all">0</span></button>
               <button data-filter="changed">changed <span id="sem-count-changed">0</span></button>
@@ -892,18 +894,18 @@ SPDX-License-Identifier: MIT -->
               <button data-filter="moved">reordered <span id="sem-count-moved">0</span></button>
               <button data-filter="ambiguous">needs review <span id="sem-count-ambiguous">0</span></button>
             </div>
-            <span class="sem-order-note">aligned order · originals unchanged</span>
-            <button id="sem-collapse">collapse</button>
+            <span class="spacer"></span>
+            <button id="sem-collapse" title="Collapse every expanded row">collapse</button>
             <!-- The plan panel renders to the TOP LAYER (contract rule 21), not
-                 as an absolutely-positioned child of this bar: below 900px the
-                 bar takes overflow-x:auto, and a non-visible-overflow ancestor
-                 clips absolute descendants — the 720px panel was being cut down
-                 to the strip's own 42px. `popover` also brings the light
-                 dismiss and Esc the <details> never had. main.ts positions it
-                 under this button. -->
+                 as an absolutely-positioned child of this bar: a
+                 non-visible-overflow ancestor clips absolute descendants.
+                 `popover` also brings the light dismiss and Esc the <details>
+                 never had. main.ts positions it under this button. -->
             <button id="sem-plan-btn" type="button" popovertarget="sem-plan-body"
-              aria-expanded="false">alignment plan</button>
+              aria-expanded="false">plan</button>
             <div id="sem-plan-body" popover></div>
+            <button id="sem-summary" title="List every change as paths, grouped by kind">summary</button>
+            <button id="sem-close" class="btn-quiet">back to tree</button>
           </div>
           <div id="sem-warning" hidden></div>
           <div id="sem-grid-wrap">
