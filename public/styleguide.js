@@ -21,6 +21,10 @@ paintTheme();
 // Swatches read the live computed tokens, so this page cannot drift from the
 // stylesheet it documents. Values below are trusted project-owned constants.
 const surfaceTokens = ['bg-well', 'bg', 'bg-chrome', 'bg-chrome-2', 'bg-canvas', 'bg-elevated', 'bg-elevated-2', 'bg-inset', 'bg-hover'];
+// Rule 25's fills are translucent, so each is painted over the solid chrome
+// rather than over this page's own ground: what the swatch shows is what the
+// frame shows.
+const glassTokens = ['glass-chrome', 'glass-chrome-2', 'glass-float', 'glass-tint', 'glass-glow', 'glass-sheen', 'glass-control', 'glass-track', 'glass-lens'];
 const inkTokens = ['text', 'text-dim', 'text-faint', 'accent', 'brand', 'ok', 'warn', 'danger', 'c-key', 'c-string', 'c-number', 'c-boolean'];
 
 // Same principle as the swatches, applied to the numbers this page PRINTS: the
@@ -38,7 +42,7 @@ stampMetrics();
 
 function renderSwatches() {
   const computed = getComputedStyle(doc);
-  const swatch = (token, ink) => {
+  const swatch = (token, ink, overChrome) => {
     const value = computed.getPropertyValue(`--${token}`).trim();
     if (!value) return null;
 
@@ -50,6 +54,8 @@ function renderSwatches() {
       fill.classList.add('sw-fill--ink');
       fill.style.color = value;
       fill.textContent = 'Ag 42';
+    } else if (overChrome) {
+      fill.style.background = `linear-gradient(${value}, ${value}), var(--bg-chrome)`;
     } else {
       fill.style.background = value;
     }
@@ -60,6 +66,7 @@ function renderSwatches() {
     return card;
   };
   document.getElementById('sg-surfaces').replaceChildren(...surfaceTokens.map((token) => swatch(token, false)).filter(Boolean));
+  document.getElementById('sg-glass').replaceChildren(...glassTokens.map((token) => swatch(token, false, true)).filter(Boolean));
   document.getElementById('sg-inks').replaceChildren(...inkTokens.map((token) => swatch(token, true)).filter(Boolean));
 }
 renderSwatches();
