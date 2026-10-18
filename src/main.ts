@@ -170,6 +170,19 @@ const sidebarScrim = $<HTMLButtonElement>('#sidebar-scrim');
 const recentsEl = $('#recents');
 const docTitleEl = $('#doc-title');
 const docStatsEl = $('#doc-stats');
+// The toolbar shows the size (and JSONL, which changes how the document reads);
+// the parse time and decode trace move to the tooltip. They are a one-time fact
+// about the open, and on a laptop-width window they were the ~110px that pushed
+// the toolbar onto a second row.
+// The title truncates in a narrow toolbar, so its tooltip carries the full name.
+function setDocTitle(name: string): void {
+  docTitleEl.textContent = name;
+  docTitleEl.title = `${name} — click to rename`;
+}
+function setDocStats(bytes: number, parseMs: number, jsonl: boolean, decodedNote = ''): void {
+  docStatsEl.textContent = `${fmtBytes(bytes)}${jsonl ? ' · JSONL' : ''}`;
+  docStatsEl.title = `${fmtBytes(bytes)} · parsed in ${parseMs} ms${jsonl ? ' · JSONL' : ''}${decodedNote}`;
+}
 const searchBox = $<HTMLInputElement>('#search-box');
 const searchPanel = $('#search-panel');
 const treePane = $('#tree-pane');
@@ -1216,7 +1229,7 @@ function attachInitialSave(
     if (documentToken !== currentDocumentToken) return renderRecents();
     currentDocId = meta.id;
     currentTitle = meta.title;
-    docTitleEl.textContent = meta.title;
+    setDocTitle(meta.title);
     return renderRecents();
   }).catch((error) => {
     if (documentToken === currentDocumentToken) {
@@ -2130,9 +2143,9 @@ async function openText(
   }
 
   reloadBtn.hidden = !handle;
-  docTitleEl.textContent = currentTitle;
+  setDocTitle(currentTitle);
   const decodedNote = provenance ? ` · decoded via ${provenance.transforms.join(' → ') || provenance.format}` : '';
-  docStatsEl.textContent = `${fmtBytes(text.length)} · parsed in ${res.parseMs} ms${res.jsonl ? ' · JSONL' : ''}${decodedNote}`;
+  setDocStats(text.length, res.parseMs, !!res.jsonl, decodedNote);
   // Malformed input was auto-repaired: surface a persistent badge (the toast is
   // transient). The stored raw text stays the original bytes; the badge opens the
   // code view's raw-source toggle so the user can see exactly what they pasted.
@@ -2950,7 +2963,7 @@ docTitleEl.addEventListener('click', async () => {
   if (!name) return;
   currentTitle = name;
   currentDocumentRevision++;
-  docTitleEl.textContent = name;
+  setDocTitle(name);
   await store.renameDoc(currentDocId, name);
   await renderRecents();
 });
@@ -3451,7 +3464,7 @@ async function applyCode(): Promise<void> {
   }
   currentText = text;
   markCurrentContentEdited();
-  docStatsEl.textContent = `${fmtBytes(text.length)} · parsed in ${res.parseMs} ms${res.jsonl ? ' · JSONL' : ''}`;
+  setDocStats(text.length, res.parseMs, !!res.jsonl);
   // The applied text is a different document to the one the script ran over —
   // markCurrentContentEdited above has already marked any result stale — and its
   // numbers may have gained or lost exactness.

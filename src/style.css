@@ -839,11 +839,11 @@ select:focus {
   display: flex;
   align-items: center;
   flex: 1;
-  /* 160, down from 220: the toolbar must hold one row at 1440 in tree view
-     (it wrapped below ~1505). The placeholder still fits; past this the field
-     is the one control that can give, because it FLEXES back all the width a
-     wide window offers. */
-  min-width: 160px;
+  /* 120 (was 220, then 160): the toolbar must hold one row on a laptop in tree
+     view. The placeholder and filter chip still fit; past this the field is
+     the one control that can give, because it FLEXES back all the width a wide
+     window offers. */
+  min-width: 120px;
   min-height: var(--ctl-h);
   background: var(--bg-canvas);
   border: 1px solid var(--border);
@@ -1854,7 +1854,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 
 /* ---------- viewer / toolbar ---------- */
 
-#viewer { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#viewer { flex: 1; display: flex; flex-direction: column; min-height: 0; container: viewer / inline-size; }
 
 /* Rule 4: groups are separated by --gap-4, controls inside a group by --gap-2. */
 /* Rule 11: every control strip bordered against a pane is chrome, so it takes
@@ -1893,6 +1893,16 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   min-width: 0;
 }
 #back-btn { flex-shrink: 0; }
+/* On a viewer wide enough to hold the whole toolbar, it does not wrap: a long
+   document name truncates instead (its full name is the tooltip and the tab),
+   because a wrap costs the document a 46px second row. Narrower than this the
+   controls alone outgrow one row, so wrapping is the honest answer there. */
+@container viewer (min-width: 1000px) {
+  #toolbar { flex-wrap: nowrap; }
+  .tb-doc { flex-shrink: 1; }
+  #doc-title { min-width: 0; }
+  #mode-switch, #ask-btn, .tb-tools { flex-shrink: 0; }
+}
 #doc-title {
   font: 700 var(--fs-code) var(--mono);
   max-width: 240px;
@@ -2630,10 +2640,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   padding: 0 var(--gap-2);
   font-size: var(--fs-chip);
 }
-/* ...except on a phone, where the words cost the toolbar a whole second row
-   (~40px of every screen). Below 480px the three named actions become glyph
-   squares like their neighbours; aria-label and title already name them. */
-@media (max-width: 480px) {
+/* ...except where the words cost the toolbar a whole SECOND ROW. In tree view
+   the toolbar needs ~1300px for one row with them, so every laptop window
+   under ~1500px (1280, 1366, 1440, 1536) paid 46px of document height for
+   these three labels — and the search field then stretched to fill the empty
+   half of the first row. Below a 1280px viewer the three become glyph squares
+   like their neighbours; aria-label and title already name them, and the
+   toolbar holds one row down to a 1280px window. A container query, because
+   it is the viewer's width that matters, not the window's (the sidebar). */
+@container viewer (max-width: 1280px) {
   .tb-tools .tb-named-action { width: var(--ctl-h); padding: 0; justify-content: center; }
   .tb-named-action .tb-label { display: none; }
 }
