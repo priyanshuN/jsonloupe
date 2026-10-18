@@ -51,7 +51,7 @@ function harness(overrides: Partial<TreeCallbacks> = {}) {
   const viewport = document.createElement('div');
   const spacer = document.createElement('div');
   const layer = document.createElement('div');
-  Object.defineProperty(viewport, 'clientHeight', { value: 56 });
+  Object.defineProperty(viewport, 'clientHeight', { value: 56, configurable: true });
   viewport.append(spacer, layer);
   document.body.appendChild(viewport);
   const callbacks: TreeCallbacks = {
@@ -250,5 +250,67 @@ describe('VirtualTree object summaries and truncation', () => {
     Object.defineProperty(val, 'scrollWidth', { configurable: true, value: 40 });
     val.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     expect(val.hasAttribute('title')).toBe(false);
+  });
+});
+
+describe('VirtualTree value chips and pinned parents', () => {
+  const stringRow = (preview: string): Row => ({
+    ...leafRow,
+    hint: undefined,
+    bytes: undefined,
+    maybeJson: false,
+    unpacked: false,
+    preview,
+  });
+
+  it('draws a colour chip only for a string that is a colour', () => {
+    const { inner } = harness();
+    for (const [preview, chip] of [
+      ['"#88c0d0"', true],
+      ['"#fff"', true],
+      ['"rgba(46, 52, 64, 0.6)"', true],
+      ['"hsl(210 40% 60%)"', true],
+      ['"#12345"', false],
+      ['"red"', false],
+      ['"url(javascript:alert(1))"', false],
+    ] as const) {
+      const swatch = inner.rowEl(stringRow(preview)).querySelector<HTMLElement>('.swatch');
+      expect(!!swatch, preview).toBe(chip);
+      if (swatch) expect(swatch.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('pins the ancestors the worker names, out of the tree, and clicking one lands it in place', async () => {
+    const parent: Row = { ...objectRow, index: 4, depth: 1, key: 'users' };
+    const child: Row = { ...objectRow, id: 9, index: 7, depth: 2, key: '1' };
+    const fetchSticky = vi.fn(async () => [parent, child]);
+    const { viewport, inner, tree } = harness({
+      fetchRows: vi.fn(async (start: number) => [{ ...leafRow, index: start }]),
+      fetchSticky,
+    });
+    Object.defineProperty(viewport, 'clientHeight', { value: 22 * 30 });
+    inner.total = 100;
+    viewport.scrollTop = 22 * 10;
+    await inner.render();
+    await Promise.resolve();
+    expect(fetchSticky).toHaveBeenCalledWith(10, 6);
+    const pinned = [...viewport.querySelectorAll<HTMLElement>('.tree-sticky .sticky-row')];
+    expect(pinned.map((r) => r.querySelector('.key')!.textContent)).toEqual(['users:', '1:']);
+    expect(viewport.querySelector('.tree-sticky')!.getAttribute('aria-hidden')).toBe('true');
+    expect(pinned[0].getAttribute('role')).toBeNull();
+    expect(pinned[0].querySelector('.actions')).toBeNull();
+
+    pinned[1].click();
+    // the second pinned row was in slot 1, so its real row lands one row down
+    expect(viewport.scrollTop).toBe(22 * (7 - 1));
+    expect(tree.selectedIndex()).toBe(7);
+  });
+
+  it('asks for nothing at the very top', async () => {
+    const fetchSticky = vi.fn(async () => []);
+    const { inner } = harness({ fetchRows: vi.fn(async () => [leafRow]), fetchSticky });
+    inner.total = 3;
+    await inner.render();
+    expect(fetchSticky).not.toHaveBeenCalled();
   });
 });

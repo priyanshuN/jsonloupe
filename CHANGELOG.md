@@ -4,6 +4,12 @@ Notable changes to jsonloupe. Dates are UTC.
 
 ## Unreleased
 
+- **Command palette.** Press ⌘K (Ctrl K elsewhere) from anywhere, even while
+  typing, and type a few letters of what you want: a view, an action on the
+  document, a theme, or the name of a recent document. Arrows move, Enter
+  runs, Escape closes and hands focus back. Every command is the app's own
+  button, so the palette does exactly what the button does. The tree's resting
+  status line now mentions it.
 - **A small document opens unfolded.** The tree used to open on the root's
   keys and an empty pane; the sample showed 4 rows. It now unfolds level by
   level, in document order, until one screen is full (35 rows of the sample at
