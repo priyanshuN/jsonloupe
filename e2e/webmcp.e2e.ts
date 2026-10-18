@@ -147,7 +147,9 @@ test('a malformed query comes back with a caret under the fault', async ({ page 
 test('reveal_path expands the tree to the node and flashes the row it landed on', async ({ page }) => {
   await openWithBridge(page);
   await loadTasks(page);
-  // A freshly opened document shows the root and its one child, nothing deeper.
+  // A small document opens unfolded to fit the pane; fold it back to the root
+  // and its one child so the reveal has something to walk into.
+  await page.locator('#collapse-btn').click();
   await expect(page.getByRole('treeitem')).toHaveCount(2);
 
   const result = await callTool(page, 'reveal_path', { path: '$.tasks[?(@.delayMin > 40)]' });

@@ -192,6 +192,13 @@ const searchBox = $<HTMLInputElement>('#search-box');
 const searchPanel = $('#search-panel');
 const treePane = $('#tree-pane');
 const treeViewport = $('#tree-viewport');
+// How many rows a freshly opened document may unfold into: one screen of the
+// pane it lands in. Before the first open the viewer is still hidden and the
+// pane measures 0, so fall back to the window less the toolbar and status line.
+function fitRows(pane: HTMLElement): number {
+  const h = pane.clientHeight || innerHeight - 80;
+  return Math.max(12, Math.floor(h / 22) - 1); // 22 = --row-h
+}
 const toast = $('#toast');
 const dropOverlay = $('#drop-overlay');
 const fileInput = $<HTMLInputElement>('#file-input');
@@ -1285,6 +1292,22 @@ function beginOpenRequest(): number {
   return ++openRequestToken;
 }
 
+// Resolves once the frame that shows the new rows has been painted: a task
+// queued from inside rAF runs after that frame. The timeout covers a hidden
+// tab, where rAF never fires and the save must still happen.
+function afterPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    requestAnimationFrame(() => setTimeout(go, 0));
+    setTimeout(go, 120);
+  });
+}
+
 function attachInitialSave(
   promise: Promise<store.DocMeta>,
   documentToken: number,
@@ -1534,6 +1557,10 @@ function updateCrumbSoon(): void {
 const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('#tree-spacer'), $('#tree-layer'), {
   fetchRows: async (start, count) => {
     const r = await call<{ rows: Row[] }>({ type: 'rows', start, count });
+    return r.rows;
+  },
+  fetchSticky: async (top, max) => {
+    const r = await call<{ rows: Row[] }>({ type: 'sticky', top, max });
     return r.rows;
   },
   onToggle: (id, index) => void doToggle(id, index),
@@ -2165,7 +2192,7 @@ async function openText(
     }
   }
 
-  const res = await call<ParseOk | ParseErr>({ type: 'parse', text });
+  const res = await call<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(treeViewport) });
   if (requestToken !== openRequestToken) return false;
   if (!res.ok) {
     if (keepCurrentOnFailure) {
@@ -2200,8 +2227,11 @@ async function openText(
     }
   } else {
     currentDocId = null;
+    // After the first rows paint, not before: the IndexedDB put of a 100 MB
+    // text is the one main-thread long task in a large open (50–100 ms,
+    // measured), and it landed between the parse and the first frame.
     attachInitialSave(
-      store.saveDoc(text, title, handle ?? undefined, provenance ?? undefined),
+      afterPaint().then(() => store.saveDoc(text, title, handle ?? undefined, provenance ?? undefined)),
       documentToken,
     );
   }
@@ -3511,6 +3541,7 @@ async function applyCode(): Promise<void> {
     type: 'parse',
     text,
     apply: true,
+    expandRows: fitRows(treeViewport),
     // Intake may repair pasted data; an editor must never invent and commit
     // bytes the user did not type.
     repair: false,
@@ -4234,6 +4265,7 @@ async function openSemanticCompare(failurePane: 'tree' | 'diff' = 'diff'): Promi
     rules: semanticRules,
     displayMode: 'aligned',
     nodeCap: 50_000,
+    expandRows: fitRows(semViewport),
   });
   if (token !== semanticOpenToken) return;
   if (!res.ok) {
@@ -5875,6 +5907,10 @@ const resultTree = new VirtualTree(runViewport, $('#run-spacer'), $('#run-layer'
     const r = await resultCall<{ rows: Row[] }>({ type: 'rows', start, count });
     return r?.rows ?? [];
   },
+  fetchSticky: async (top, max) => {
+    const r = await resultCall<{ rows: Row[] }>({ type: 'sticky', top, max });
+    return r?.rows ?? [];
+  },
   onToggle: resultToggle,
   onCopyKey: (key) => void copyKeyOf(key),
   onCopyPath: (id) => void resultCopyPath(id),
@@ -6661,7 +6697,7 @@ async function paintResultLabel(): Promise<void> {
 // and a result that arrives afterwards belongs to a pane that is gone.
 async function showResultDocument(text: string): Promise<void> {
   const channel = runResultChannel;
-  const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text });
+  const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(runViewport) });
   if (!res || channel !== runResultChannel) return;
   if (!res.ok) {
     // JSON.stringify produced this text, so this is a bug rather than bad input

@@ -17,6 +17,8 @@ import type { Row } from './protocol';
 // it says so by leaving them out rather than by passing no-ops.
 export interface TreeCallbacks {
   fetchRows(start: number, count: number): Promise<Row[]>;
+  /** Ancestors to pin over the pane when row `top` is the first in view. */
+  fetchSticky?(top: number, max: number): Promise<Row[]>;
   onToggle(id: number, index: number): void;
   onCopyKey?(key: string): void;
   onCopyPath(id: number): void;
@@ -31,6 +33,17 @@ export interface TreeCallbacks {
 }
 
 const ROW_H = 22; // = --row-h in style.css (rule 8b)
+
+// A string that IS a colour gets a chip of that colour before it — a theme
+// file or a design-token dump reads at a glance instead of hex by hex. Strict
+// shapes only (hex, rgb[a](), hsl[a]()), and the value is still checked by
+// CSS.supports before it reaches the style, so document text never becomes
+// anything but a background colour.
+const COLOR_RE = /^"(#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgb|hsl)a?\([\d\s.,%/+-]+\))"$/i;
+function colorOf(preview: string): string | null {
+  const m = COLOR_RE.exec(preview);
+  return m && CSS.supports('color', m[1]) ? m[1] : null;
+}
 const OVERSCAN = 12;
 
 function fmtBytes(n: number): string {
@@ -47,6 +60,8 @@ export class VirtualTree {
   private selected = -1;
   private lastRows: Row[] = [];
   private editing = false;
+  private stickyEl: HTMLElement | null = null;
+  private stickyEpoch = 0;
 
   constructor(
     private viewport: HTMLElement,
@@ -55,6 +70,26 @@ export class VirtualTree {
     private cbs: TreeCallbacks,
   ) {
     viewport.addEventListener('scroll', () => this.schedule());
+    // Sticky parent rows: a zero-height strip pinned at the top of the scroller,
+    // its rows overflowing down over the first real ones. It is a picture of
+    // rows that already exist further up, so it stays out of the tree's
+    // accessibility and tab order; clicking a pinned row goes to the real one.
+    if (cbs.fetchSticky) {
+      this.stickyEl = document.createElement('div');
+      this.stickyEl.className = 'tree-sticky';
+      this.stickyEl.setAttribute('aria-hidden', 'true');
+      viewport.insertBefore(this.stickyEl, spacer);
+      this.stickyEl.addEventListener('click', (e) => {
+        const rowEl = (e.target as HTMLElement).closest('.row') as HTMLElement | null;
+        if (!rowEl) return;
+        // Land the real row exactly where its pinned copy was: scrolled to the
+        // top it would slide under the rows still pinned above it.
+        const index = Number(rowEl.dataset.index);
+        const slot = [...this.stickyEl!.children].indexOf(rowEl);
+        this.viewport.scrollTop = Math.max(0, index - slot) * ROW_H;
+        this.select(index, { scroll: false });
+      });
+    }
     // A value cut short by the pane shows its whole preview on hover. Measured
     // at the moment of hover, so a row that fits never carries a tooltip.
     layer.addEventListener('mouseover', (e) => {
@@ -274,11 +309,38 @@ export class VirtualTree {
     this.layer.replaceChildren(frag);
     this.layer.style.transform = `translateY(${start * ROW_H}px)`;
     this.flashIndex = -1;
+    void this.renderSticky();
     if (hadFocus) {
       this.layer
         .querySelector<HTMLElement>(`.row[data-index="${this.selected}"]`)
         ?.focus({ preventScroll: true });
     }
+  }
+
+  private async renderSticky(): Promise<void> {
+    if (!this.stickyEl || !this.cbs.fetchSticky) return;
+    const top = Math.floor(this.viewport.scrollTop / ROW_H);
+    // At most six levels, and never more than a third of the pane: the stack
+    // is context for the rows below it, not a second document on top of them.
+    const max = Math.min(6, Math.floor(this.viewport.clientHeight / ROW_H / 3));
+    const ep = ++this.stickyEpoch;
+    const rows = top > 0 && max > 0 ? await this.cbs.fetchSticky(top, max) : [];
+    if (ep !== this.stickyEpoch) return;
+    const frag = document.createDocumentFragment();
+    for (const r of rows) {
+      const el = this.rowEl(r);
+      el.className = 'row sticky-row';
+      el.removeAttribute('role');
+      el.removeAttribute('aria-selected');
+      el.removeAttribute('aria-expanded');
+      el.removeAttribute('aria-label');
+      el.removeAttribute('aria-level');
+      el.tabIndex = -1;
+      el.querySelector('.actions')?.remove();
+      el.title = 'Go to this row';
+      frag.appendChild(el);
+    }
+    this.stickyEl.replaceChildren(frag);
   }
 
   private rowEl(r: Row): HTMLElement {
@@ -351,6 +413,15 @@ export class VirtualTree {
       mark.textContent = '⚯';
       mark.title = 'Un-stringified JSON — copy still returns the original string';
       el.appendChild(mark);
+    }
+
+    const color = r.type === 'string' && !r.unpacked ? colorOf(r.preview) : null;
+    if (color) {
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      swatch.style.backgroundColor = color;
+      swatch.setAttribute('aria-hidden', 'true');
+      el.appendChild(swatch);
     }
 
     const val = document.createElement('span');

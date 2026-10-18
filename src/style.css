@@ -1359,6 +1359,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-brand img { border-radius: 9px; display: block; }
 .lp-nav { display: flex; gap: 22px; }
 .lp-nav a {
+  /* A two-word link broke onto two lines at 1280 ("json to / excel") and the
+     header doubled in height. A link is one target; it never wraps. */
+  white-space: nowrap;
   font: 500 13.5px var(--display);
   color: var(--text-dim);
   text-decoration: none;
@@ -1739,6 +1742,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    read the copy and paste. Everything below the hero now has to hold up on a
    phone as well — the workbench does, and this is the page the phone visitor
    actually arrives on. */
+/* Between the phone layout and a wide desktop the nav and the MIT line no
+   longer fit on one row together. The MIT line is said again in the hero's
+   trust line, so it is the one that goes. */
+@media (max-width: 1360px) {
+  .lp-meta { display: none; }
+}
 @media (max-width: 1100px) {
   .lp-hero { grid-template-columns: 1fr; gap: 34px; padding: 44px 24px 36px; }
   .lp-hero h1 { font-size: 42px; letter-spacing: -1.2px; }
@@ -3660,6 +3669,27 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   );
 }
 #tree-spacer { width: 1px; }
+/* Sticky parent rows (tree.ts renderSticky). Zero height and in flow before
+   the spacer, so it costs the scroll geometry nothing; position: sticky holds
+   it at the top while its rows overflow down over the first real ones. The
+   rows are opaque canvas (the gutter paints itself through .rownum), and the
+   last one casts the one shadow that says "this is pinned, the document runs
+   on underneath" — the same lift a sticky header has in every native list. */
+.tree-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 0;
+}
+.sticky-row {
+  background: var(--bg-canvas);
+  cursor: pointer;
+}
+.sticky-row:hover { background: var(--bg-hover); }
+.sticky-row:last-child {
+  box-shadow: 0 1px 0 var(--border), 0 6px 10px -6px rgba(0, 0, 0, 0.35);
+}
+.sticky-row .key { cursor: pointer; }
 #tree-layer {
   position: absolute;
   top: 0;
@@ -3737,6 +3767,17 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .key-separator { user-select: none; }
 .key.idx { color: var(--c-null); }
 .val { overflow: hidden; text-overflow: ellipsis; }
+/* tree.ts colorOf: the colour a string names, as a chip before it. Sized to
+   the x-height of the mono face so it sits on the text, not above it; the
+   inset hairline keeps white on light and black on dark visible. */
+.swatch {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
 .val.string { color: var(--c-string); }
 .val.number { color: var(--c-number); }
 .val.boolean { color: var(--c-boolean); }
@@ -4520,7 +4561,12 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 .compare-side.missing {
   justify-content: center;
-  background: color-mix(in srgb, var(--bg-inset) 75%, transparent);
+  /* The side a row does not exist on is hatched, the way every desktop diff
+     draws an absence: a flat inset read as "empty value", which is a different
+     claim. Hairline weight, so the hatch never competes with the text across. */
+  background:
+    repeating-linear-gradient(135deg, transparent 0 5px, var(--border-soft) 5px 6px),
+    color-mix(in srgb, var(--bg-inset) 75%, transparent);
 }
 .compare-right { border-left: 1px solid var(--border); }
 .compare-left { border-right: 1px solid var(--border); }
@@ -4616,7 +4662,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
 }
 .compare-row.status-added .compare-right {
-  background: color-mix(in srgb, var(--ok) 7%, transparent);
+  /* 12%, not removed's 7%: dark's --ok is a pale olive that vanished at 7%
+     while --danger beside it still read, so the two halves of one change came
+     out at different strengths. Matched by eye in both themes. */
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 .compare-row.status-removed .compare-left {
   background: color-mix(in srgb, var(--danger) 7%, transparent);
@@ -5756,6 +5805,23 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    declared above it at equal specificity. `0.01ms` rather than `0`: animations
    still fire their end events, so any JS waiting on animationend/transitionend
    keeps working. */
+/* Rule 12 decoration: a floating surface ARRIVES rather than blinking into
+   place — a 4px rise and a fade, the way a sheet settles in a native app. The
+   individual translate property, not transform, so it composes with whatever
+   positioning a popover already uses instead of replacing it. Keyframes, not
+   @starting-style, so it needs nothing newer than the dialog element itself.
+   The reduced-motion block below collapses it with everything else. */
+@keyframes surface-in {
+  from { opacity: 0; translate: 0 4px; }
+}
+@keyframes backdrop-in {
+  from { opacity: 0; }
+}
+dialog[open],
+[popover]:popover-open,
+#toast { animation: surface-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+dialog[open]::backdrop { animation: backdrop-in 160ms ease-out; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
