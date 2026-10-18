@@ -6913,7 +6913,7 @@ async function boot(): Promise<void> {
   if (location.hash === '#about') {
     closeDocumentsDrawer(false);
     ungate();
-    pasteBox.focus();
+    pasteBox.focus({ preventScroll: true });
     return;
   }
   if (convertHandoff.kind === 'unavailable') {
@@ -6941,7 +6941,10 @@ async function boot(): Promise<void> {
     try { localStorage.removeItem('wb-returning'); } catch { /* private mode */ }
     ungate();
     if (wantsConverter) enterConvertRoute();
-    else pasteBox.focus();
+    // preventScroll: on a phone the paste card sits below the hero, and a plain
+    // focus scrolled the landing 540px down to it — a first-time visitor never
+    // saw the headline. Desktop has the card above the fold, so nothing moves.
+    else pasteBox.focus({ preventScroll: true });
     return;
   }
   // Docs exist but the flag may predate this feature — prime it for next load.

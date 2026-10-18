@@ -11,7 +11,7 @@
 // store and decides what "apply" (a re-parse) actually does.
 
 import type { Theme } from './theme';
-import type { EditorView } from '@codemirror/view';
+import type { DecorationSet, EditorView, ViewUpdate } from '@codemirror/view';
 import type { Extension, Compartment, AnnotationType } from '@codemirror/state';
 
 interface Palette {
@@ -155,11 +155,48 @@ export class CodeEditor {
   static async create(opts: CreateOpts): Promise<CodeEditor> {
     const [state, view, lang, cmds, search, jsonLang, hl] = await loadCm();
 
-    const { EditorState, Compartment, Annotation, StateEffect, StateField } = state;
+    const { EditorState, Compartment, Annotation, StateEffect, StateField, RangeSetBuilder } = state;
     const {
       EditorView, lineNumbers, highlightActiveLine, highlightActiveLineGutter,
-      drawSelection, dropCursor, keymap, highlightSpecialChars, Decoration,
+      drawSelection, dropCursor, keymap, highlightSpecialChars, Decoration, ViewPlugin,
     } = view;
+    // Hanging indent for wrapped lines. lineWrapping folds a long value onto
+    // the next row, and that row used to start at column 0 — under the braces
+    // of the outermost object, so a wrapped number or base64 run read as if it
+    // belonged to nothing. Each line now carries its own indentation as a
+    // negative text-indent: the first row is unchanged, every continuation row
+    // starts where the line's key does. `ch` is exact in a monospace face. Only
+    // visible lines are decorated, and only the first 256 characters of each
+    // are scanned, so a 50 MB single-line document costs nothing extra.
+    const hangMarks = new Map<number, ReturnType<typeof Decoration.line>>();
+    const hangMark = (n: number) => {
+      let mark = hangMarks.get(n);
+      if (!mark) {
+        // 6px is .cm-line's own left padding, kept under the indent.
+        mark = Decoration.line({ attributes: { style: `text-indent:-${n}ch;padding-left:calc(${n}ch + 6px)` } });
+        hangMarks.set(n, mark);
+      }
+      return mark;
+    };
+    const buildHang = (v: EditorView): DecorationSet => {
+      const builder = new RangeSetBuilder<ReturnType<typeof Decoration.line>>();
+      for (const { from, to } of v.visibleRanges) {
+        for (let pos = from; pos <= to; ) {
+          const line = v.state.doc.lineAt(pos);
+          const lead = /^[ \t]*/.exec(line.text.slice(0, 256))![0];
+          let n = 0;
+          for (const ch of lead) n += ch === '\t' ? 2 : 1;
+          if (n > 0) builder.add(line.from, line.from, hangMark(n));
+          pos = line.to + 1;
+        }
+      }
+      return builder.finish();
+    };
+    const hangIndent = ViewPlugin.fromClass(class {
+      decorations: DecorationSet;
+      constructor(v: EditorView) { this.decorations = buildHang(v); }
+      update(u: ViewUpdate) { if (u.docChanged || u.viewportChanged) this.decorations = buildHang(u.view); }
+    }, { decorations: (p) => p.decorations });
     const {
       foldGutter, indentOnInput, bracketMatching, syntaxHighlighting, HighlightStyle, foldKeymap,
     } = lang;
@@ -351,6 +388,7 @@ export class CodeEditor {
           // Long base64/embedded-payload strings must fold onto the next line
           // instead of pushing the whole document behind a horizontal scrollbar.
           EditorView.lineWrapping,
+          hangIndent,
           hlComp.of(makeHl(opts.theme)),
           themeComp.of(makeTheme(opts.theme)),
           keymap.of([
