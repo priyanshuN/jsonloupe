@@ -9,6 +9,7 @@
 // run mode's result pane is.
 
 import type { Row } from './protocol';
+import { appendMarked, makeMatcher, type Matcher } from './highlight';
 
 // The optional members are CAPABILITIES the host grants this tree, not options:
 // a row offers `tbl` only where something can open a table, and a value is
@@ -62,6 +63,7 @@ export class VirtualTree {
   private editing = false;
   private stickyEl: HTMLElement | null = null;
   private stickyEpoch = 0;
+  private matcher: Matcher | null = null;
 
   constructor(
     private viewport: HTMLElement,
@@ -260,6 +262,12 @@ export class VirtualTree {
     this.schedule();
   }
 
+  /** Mark this search text in every key and value drawn ('' clears it). */
+  setHighlight(query: string): void {
+    this.matcher = makeMatcher(query);
+    this.schedule();
+  }
+
   // Re-render at the current scroll/size — used when the viewport was hidden
   // (another pane / split) and its dimensions may have changed underneath.
   refresh(): void {
@@ -399,7 +407,7 @@ export class VirtualTree {
     if (r.key !== null) {
       const key = document.createElement('span');
       key.className = typeof r.key === 'number' ? 'key idx' : 'key';
-      key.textContent = String(r.key);
+      appendMarked(key, String(r.key), typeof r.key === 'number' ? null : this.matcher);
       const separator = document.createElement('span');
       separator.className = 'key-separator';
       separator.textContent = ':';
@@ -434,7 +442,10 @@ export class VirtualTree {
     const isObject = r.type === 'object' && !r.unpacked;
     const tail = isObject && !r.expanded ? r.preview.lastIndexOf(' · ') : -1;
     if (isObject && r.expanded) val.textContent = `{ ${r.childCount} key${r.childCount === 1 ? '' : 's'} }`;
-    else val.textContent = tail < 0 ? r.preview : r.preview.slice(0, tail);
+    else if (r.type === 'object' || r.type === 'array') val.textContent = tail < 0 ? r.preview : r.preview.slice(0, tail);
+    // Only a primitive's own text is marked: a container's preview repeats its
+    // children's keys, and marking those would light up every ancestor row.
+    else appendMarked(val, r.preview, this.matcher);
     el.appendChild(val);
     if (tail >= 0) {
       const count = document.createElement('span');

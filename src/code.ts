@@ -172,8 +172,13 @@ export class CodeEditor {
     const hangMark = (n: number) => {
       let mark = hangMarks.get(n);
       if (!mark) {
-        // 6px is .cm-line's own left padding, kept under the indent.
-        mark = Decoration.line({ attributes: { style: `text-indent:-${n}ch;padding-left:calc(${n}ch + 6px)` } });
+        // 6px is .cm-line's own left padding, kept under the indent. The same
+        // width feeds the indent guides (.cm-ind in style.css), so the code
+        // pane draws the nesting lines the tree beside it already has.
+        mark = Decoration.line({
+          class: 'cm-ind',
+          attributes: { style: `text-indent:-${n}ch;padding-left:calc(${n}ch + 6px);--ind:${n}` },
+        });
         hangMarks.set(n, mark);
       }
       return mark;

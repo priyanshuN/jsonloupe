@@ -3,7 +3,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CommandPalette, rankCommands, scoreCommand, type PaletteCommand } from './palette';
+import { CommandPalette, rankCommands, scoreCommand, wordsMatcher, type PaletteCommand } from './palette';
 
 const cmd = (label: string, group = 'document', extra: Partial<PaletteCommand> = {}): PaletteCommand => ({
   label,
@@ -134,5 +134,45 @@ describe('CommandPalette', () => {
     expect(palette.isOpen).toBe(false);
     expect(document.activeElement).toBe(before);
     palette.close(); // closing a closed palette is a no-op
+  });
+});
+
+describe('palette document matches and marks', () => {
+  it('marks every typed word, merging overlaps', () => {
+    const m = wordsMatcher('co cop json')!;
+    expect(m('copy minified JSON')).toEqual([[0, 3], [14, 18]]);
+    expect(wordsMatcher('  ')).toBeNull();
+  });
+
+  it('appends the finder’s places under their own heading, and drops a stale answer', async () => {
+    document.body.innerHTML = `<dialog><input /><div id="l"></div></dialog>`;
+    const dialog = document.querySelector('dialog')!;
+    dialog.showModal ??= function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    const input = document.querySelector('input')!;
+    const list = document.querySelector<HTMLElement>('#l')!;
+    const place = { label: '$.a.name', group: 'in this document', detail: '"Dana"', run: vi.fn() };
+    let resolveOld: (v: PaletteCommand[]) => void = () => {};
+    const find = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<PaletteCommand[]>((r) => (resolveOld = r)))
+      .mockImplementation(async () => [place]);
+    const palette = new CommandPalette(dialog, input, list, () => [cmd('download')], find);
+    palette.open();
+    input.value = 'da';
+    input.dispatchEvent(new Event('input'));
+    input.value = 'dan';
+    input.dispatchEvent(new Event('input'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(list.querySelector('.palette-group')?.textContent).toBe('in this document');
+    expect(list.querySelector('.place .palette-detail')?.innerHTML).toBe('"<mark class="hl">Dan</mark>a"');
+    // the older, slower answer arrives last and must not repaint the list
+    resolveOld([{ ...place, label: '$.stale' }]);
+    await Promise.resolve();
+    expect([...list.querySelectorAll('.palette-label')].map((e) => e.textContent)).toEqual(['$.a.name']);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(place.run).toHaveBeenCalledOnce();
   });
 });

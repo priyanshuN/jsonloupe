@@ -2518,6 +2518,31 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A document match: the path is the label, its value trails it dimmer —
+   the same pairing the search panel's hits use, in the same mono. */
+.palette-opt.place .palette-label {
+  flex: 0 1 auto;
+  color: var(--c-key);
+  font: var(--fs-chip) var(--mono);
+}
+.palette-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* In a menu the marked letters are INK, not a fill: an amber block on every
+   row read as twelve warnings. The accent says "this is what you typed" the
+   way native palettes do, without competing with the highlighted row. */
+.palette-opt mark.hl {
+  color: var(--accent);
+  background: none;
+  box-shadow: none;
+}
+.palette-opt.place .palette-label mark.hl { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .palette-where {
   flex-shrink: 0;
   color: var(--text-faint);
@@ -3866,6 +3891,15 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .key-separator { user-select: none; }
 .key.idx { color: var(--c-null); }
 .val { overflow: hidden; text-overflow: ellipsis; }
+/* highlight.ts: the search text where it occurs in a key or a value, in the
+   tree and in the hit list. Amber, the colour every editor uses for "found",
+   as a soft fill so the token keeps its own syntax colour on top. */
+mark.hl {
+  color: inherit;
+  background: color-mix(in srgb, var(--warn) 32%, transparent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
+}
 /* tree.ts colorOf: the colour a string names, as a chip before it. Sized to
    the x-height of the mono face so it sits on the text, not above it; the
    inset hairline keeps white on light and black on dark visible. */
@@ -4180,6 +4214,22 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 /* The tree's size and pitch (rule 8b), so split view reads as one surface:
    a line on the left sits at the height of a row on the right. */
 #code-host .cm-scroller { font: var(--fs-body)/var(--row-h) var(--mono); }
+/* Indent guides, the tree's .indent lines in the editor: one hairline per
+   2-space level, dropped from the middle of the bracket that opened it
+   (0.5ch into each step), drawn only across the line's own indentation and
+   continuing down its wrapped rows. A background IMAGE, so the active-line
+   and selection colours still paint under it. */
+#code-host .cm-line.cm-ind {
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0 0.5ch,
+    var(--border-soft) 0.5ch calc(0.5ch + 1px),
+    transparent calc(0.5ch + 1px) 2ch
+  );
+  background-position: 6px 0;
+  background-size: calc((var(--ind) - 1) * 1ch) 100%;
+  background-repeat: no-repeat;
+}
 
 /* The pane while it is still becoming itself. Rule 17 states the one treatment
    for a surface with nothing IN it; this is the neighbouring case — a surface
@@ -4893,6 +4943,8 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   border-radius: var(--r-xl);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
   align-items: center;
   justify-content: center;
   font-size: 20px;
@@ -4901,6 +4953,17 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   z-index: 30;
   pointer-events: none;
   backdrop-filter: blur(2px);
+  /* Rule 12 decoration: the frame breathes while a file hovers, the way a
+     drop target in a native app says "yes, here". */
+  animation: drop-breathe 1.6s ease-in-out infinite;
+}
+/* The privacy promise, at the moment a file is about to be handed over. */
+.drop-sub {
+  font: 400 var(--fs-body) var(--mono);
+  color: var(--text-dim);
+}
+@keyframes drop-breathe {
+  50% { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 }
 
 /* ---------- converter ----------

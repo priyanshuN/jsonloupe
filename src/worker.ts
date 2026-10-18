@@ -391,6 +391,44 @@ function expandNode(id: number): void {
   expandAt(id, idx);
 }
 
+// Unfold everything under one node (the root when id is the root), breadth
+// first, stopping before the rows it adds would pass `cap`: a 5M-element
+// array must not become 5M rows because someone pressed `*`. Expansion is
+// decided first and the subtree's visible rows rebuilt once, so this is
+// linear in the rows it shows rather than one splice per node.
+function expandSubtree(idValue: unknown, capValue: unknown): { totalRows: number; capped: boolean; index: number } {
+  const id = Number(idValue);
+  const cap = Math.max(1, Math.trunc(Number(capValue) || 50_000));
+  const n = nodes.get(id);
+  const idx = n ? visible.indexOf(id) : -1;
+  if (!n || idx === -1 || effChildCount(n) === 0) return { totalRows: visible.length, capped: false, index: idx };
+  let j = idx + 1;
+  while (j < visible.length && nodes.get(visible[j])!.depth > n.depth) j++;
+  const shownBefore = j - idx - 1;
+  let rows = 0;
+  let capped = false;
+  let level = [id];
+  outer: while (level.length) {
+    const next: number[] = [];
+    for (const cur of level) {
+      const c = effChildCount(nodes.get(cur)!);
+      if (c === 0) continue;
+      if (rows + c > cap) {
+        capped = true;
+        break outer;
+      }
+      rows += c;
+      expanded.add(cur);
+      next.push(...ensureChildren(cur));
+    }
+    level = next;
+  }
+  const ins: number[] = [];
+  collectVisible(id, ins);
+  visible = visible.slice(0, idx + 1).concat(ins, visible.slice(idx + 1 + shownBefore));
+  return { totalRows: visible.length, capped, index: idx };
+}
+
 function collapseAll(): number {
   const root = nodes.get(rootId)!;
   expanded = new Set();
@@ -1478,9 +1516,17 @@ function parseRegexQuery(query: string): { re: RegExp } | { literal: true } | { 
   return { literal: true };
 }
 
-function doSearch(query: string): { results: SearchHit[]; total?: number; error?: string } {
-  searchPaths = [];
-  const results: SearchHit[] = [];
+// `keep` makes these hits the ones the search panel's `reveal` resolves. The
+// command palette searches with keep:false and a small limit, so typing in ⌘K
+// never re-points the panel's hits; it gets each hit's path back to reveal by.
+function doSearch(
+  query: string,
+  limit = SEARCH_LIMIT,
+  keep = true,
+): { results: (SearchHit & { path?: (string | number)[] })[]; total?: number; error?: string } {
+  const paths: (string | number)[][] = [];
+  if (keep) searchPaths = paths;
+  const results: (SearchHit & { path?: (string | number)[] })[] = [];
   if (!query) return { results };
   const parsed = parseRegexQuery(query);
   if ('error' in parsed) return { results, error: parsed.error };
@@ -1493,8 +1539,8 @@ function doSearch(query: string): { results: SearchHit[]; total?: number; error?
   if (!root) return { results };
 
   const add = (path: (string | number)[], preview: string, where: 'key' | 'value') => {
-    searchPaths.push(path);
-    results.push({ pathText: formatPath(path), preview, where });
+    paths.push(path);
+    results.push(keep ? { pathText: formatPath(path), preview, where } : { pathText: formatPath(path), preview, where, path });
   };
 
   // The traversal always runs to completion so `total` is the real occurrence
@@ -1512,7 +1558,7 @@ function doSearch(query: string): { results: SearchHit[]; total?: number; error?
         const cv = (v as Record<string, unknown>)[k];
         if (hit(k)) {
           total++;
-          if (results.length < SEARCH_LIMIT) add([...path, k], previewOf(cv), 'key');
+          if (results.length < limit) add([...path, k], previewOf(cv), 'key');
         }
         stack.push({ v: cv, path: [...path, k] });
       }
@@ -1520,7 +1566,7 @@ function doSearch(query: string): { results: SearchHit[]; total?: number; error?
       const s = v === null ? 'null' : String(v);
       if (hit(s)) {
         total++;
-        if (results.length < SEARCH_LIMIT) add(path, previewOf(v), 'value');
+        if (results.length < limit) add(path, previewOf(v), 'value');
       }
     }
   }
@@ -2531,8 +2577,12 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return { totalRows: toggle(msg.id as number, msg.index as number) };
     case 'collapseAll':
       return { totalRows: collapseAll() };
+    case 'expandSubtree':
+      return expandSubtree(msg.id ?? rootId, msg.cap);
     case 'search':
       return doSearch(msg.query as string);
+    case 'find':
+      return doSearch(msg.query as string, Math.min(50, Math.max(1, Number(msg.limit) || 8)), false);
     case 'reveal':
       return revealResult(msg.index as number);
     case 'sameValue':

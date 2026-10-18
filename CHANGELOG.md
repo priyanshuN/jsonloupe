@@ -2,6 +2,23 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Search as you type, and see the match.** Search runs after a short pause
+  as you type, for documents up to 8 MB (Enter still runs it on larger ones).
+  The matched text is marked in the tree's keys and values and in the hit
+  list, so the match is visible on its row instead of only in a path.
+- **The palette finds places, not just commands.** Typing in ⌘K also searches
+  the open document; up to six matching paths appear under "in this document"
+  with their values, and Enter reveals and selects that row. The typed letters
+  are marked in every result.
+- **Expand all.** Press `*` to unfold everything under the selected row, or
+  the whole document with nothing selected; it is also in the palette. It
+  stops at 50,000 rows and says so, so a huge array cannot freeze the tab.
+- **Indent guides in the code view**, matching the tree's.
+- **The drop target says what happens.** Dragging a file over the window now
+  reads "opens in this tab · nothing is uploaded", and the frame pulses gently.
+
 ## 1.6.0 — 2026-10-18
 
 - **Command palette.** Press ⌘K (Ctrl K elsewhere) from anywhere, even while

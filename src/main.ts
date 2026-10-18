@@ -90,6 +90,7 @@ import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION }
 import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 import { CommandPalette, type PaletteCommand } from './palette';
+import { appendMarked, makeMatcher, type Matcher } from './highlight';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
 // 404s on its first lazy import (e.g. the CodeMirror chunks). Vite surfaces
@@ -2270,6 +2271,9 @@ async function openText(
   parseError.hidden = true;
   searchPanel.hidden = true;
   searchBox.value = '';
+  clearTimeout(liveSearchTimer);
+  searchToken++;
+  tree.setHighlight('');
   resetAskPanel();
   resetRunState(res.hasUnsafeNumbers);
   // A new document brings its own name; the last one's chosen download name is
@@ -3065,6 +3069,17 @@ docTitleEl.addEventListener('click', async () => {
   await renderRecents();
 });
 
+const EXPAND_ALL_CAP = 50_000;
+async function expandAllUnder(id?: number): Promise<void> {
+  const r = await call<{ totalRows: number; capped: boolean; index: number }>({
+    type: 'expandSubtree',
+    id,
+    cap: EXPAND_ALL_CAP,
+  });
+  tree.setTotal(r.totalRows);
+  if (r.capped) showToast(`unfolded as far as ${EXPAND_ALL_CAP.toLocaleString('en-US')} rows — open deeper parts one at a time`);
+}
+
 collapseBtn.addEventListener('click', async () => {
   const r = await call<{ totalRows: number }>({ type: 'collapseAll' });
   tree.setTotal(r.totalRows);
@@ -3662,7 +3677,7 @@ repairBadge.addEventListener('click', () => {
 
 // Render a hit list into the search panel — shared by search and value-identity,
 // so the existing panel-click → reveal wiring (via searchPaths) applies to both.
-function renderHits(results: SearchHit[], header?: string): void {
+function renderHits(results: SearchHit[], header?: string, matcher: Matcher | null = null): void {
   searchPanel.replaceChildren();
   if (header) {
     const h = document.createElement('div');
@@ -3688,7 +3703,9 @@ function renderHits(results: SearchHit[], header?: string): void {
     path.textContent = hit.pathText;
     const prev = document.createElement('span');
     prev.className = `hit-prev ${hit.where}`;
-    prev.textContent = hit.preview;
+    // A key hit's preview is its VALUE, which the query did not match; only a
+    // value hit has the text to mark.
+    appendMarked(prev, hit.preview, hit.where === 'value' ? matcher : null);
     el.append(path, prev);
     searchPanel.appendChild(el);
   });
@@ -3705,20 +3722,41 @@ function renderSearchError(msg: string): void {
   searchPanel.hidden = false;
 }
 
+let searchToken = 0;
 async function runSearch(): Promise<void> {
   const q = searchBox.value.trim();
+  const token = ++searchToken;
   if (!q) {
     searchPanel.hidden = true;
+    tree.setHighlight('');
     return;
   }
   const r = await call<{ results: SearchHit[]; total?: number; error?: string }>({ type: 'search', query: q });
+  // Typing outruns the worker on a large document: only the newest answer may
+  // paint, or an older, slower search would land over the one you are reading.
+  if (token !== searchToken) return;
   if (r.error) {
     renderSearchError(r.error);
+    tree.setHighlight('');
     return;
   }
   const total = r.total ?? r.results.length;
   searchTotals = total ? { total, shown: r.results.length } : null;
-  renderHits(r.results, searchHeaderText());
+  renderHits(r.results, searchHeaderText(), makeMatcher(q));
+  tree.setHighlight(q);
+}
+
+// Search as you type, under a short pause, while a search is cheap: under
+// 8 MB of text the worker answers in well under a frame budget's worth of
+// waiting (39 ms at 10 MB, measured). Above it Enter stays the trigger, so a
+// 100 MB document is not re-walked on every keystroke. One character is too
+// broad to be worth a walk at any size.
+const LIVE_SEARCH_MAX_CHARS = 8_000_000;
+let liveSearchTimer = 0;
+function scheduleLiveSearch(): void {
+  clearTimeout(liveSearchTimer);
+  if (currentText.length > LIVE_SEARCH_MAX_CHARS || searchBox.value.trim().length < 2) return;
+  liveSearchTimer = window.setTimeout(() => void runSearch(), 160);
 }
 
 // This box searches the SOURCE document. Everywhere else that is the only
@@ -3749,7 +3787,10 @@ async function findSameValue(id: number): Promise<void> {
 }
 
 searchBox.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') void runSearch();
+  if (e.key === 'Enter') {
+    clearTimeout(liveSearchTimer);
+    void runSearch();
+  }
   if (e.key === 'Escape') {
     searchPanel.hidden = true;
     searchBox.blur();
@@ -3759,9 +3800,15 @@ searchBox.addEventListener('input', () => {
   // An empty field cannot truthfully describe a still-filtered tree. Restore
   // the expansion/scroll snapshot immediately instead of leaving an invisible
   // old query pruning the document behind a blank box.
-  if (searchBox.value.trim()) return;
+  if (searchBox.value.trim()) {
+    scheduleLiveSearch();
+    return;
+  }
+  clearTimeout(liveSearchTimer);
+  searchToken++;
   searchTotals = null;
   searchPanel.hidden = true;
+  tree.setHighlight('');
   if (filterOn) void setFilter('');
 });
 
@@ -6905,6 +6952,11 @@ function paletteCommands(): PaletteCommand[] {
     add('document', 'query', click('#ask-btn'), { keywords: 'jsonpath ask question english' });
     add('document', 'compare with another document', click('#compare-btn'), { keywords: 'diff baseline semantic' });
     add('document', 'convert to Excel or CSV', click('#convert-btn'), { keywords: 'spreadsheet xlsx table export' });
+    add('document', 'expand all', () => void expandAllUnder(), { keys: '*', keywords: 'unfold open everything' });
+    const sel = tree.getSelected();
+    if (sel?.hasChildren && sel.key !== null) {
+      add('document', `expand all under ${String(sel.key)}`, () => void expandAllUnder(sel.id), { keys: '*', keywords: 'unfold open selected' });
+    }
     add('document', 'collapse all', click('#collapse-btn'), { keywords: 'fold' });
     add('document', 'copy pretty JSON', click('#fmt-btn'), { keywords: 'format indent' });
     add('document', 'copy minified JSON', click('#min-btn'), { keywords: 'compact' });
@@ -6933,11 +6985,43 @@ function paletteCommands(): PaletteCommand[] {
   }
   return cmds;
 }
+// The palette also finds PLACES: a key or value in the open document, by the
+// same search the toolbar runs, capped at six and only while a search is cheap
+// (the live-search size rule). Choosing one reveals it in the tree and selects
+// it, exactly as clicking a hit in the search panel does — without re-pointing
+// that panel's own hits.
+async function paletteFind(query: string): Promise<PaletteCommand[]> {
+  if (viewer.hidden || currentText.length > LIVE_SEARCH_MAX_CHARS) return [];
+  const r = await call<{ results: (SearchHit & { path: (string | number)[] })[]; error?: string }>({
+    type: 'find',
+    query,
+    limit: 6,
+  });
+  if (r.error) return [];
+  return r.results.map((hit) => ({
+    group: 'in this document',
+    label: hit.pathText,
+    detail: hit.preview.length > 60 ? `${hit.preview.slice(0, 60)}…` : hit.preview,
+    run: () => void revealInTree(hit.path),
+  }));
+}
+
+async function revealInTree(path: (string | number)[]): Promise<void> {
+  const r = await call<{ rowIndex: number; totalRows: number }>({ type: 'revealPath', path });
+  if (treePane.hidden) showPane('tree');
+  tree.setTotal(r.totalRows);
+  if (r.rowIndex >= 0) {
+    tree.scrollToIndex(r.rowIndex);
+    tree.select(r.rowIndex, { scroll: false });
+  }
+}
+
 const palette = new CommandPalette(
   $<HTMLDialogElement>('#palette'),
   $<HTMLInputElement>('#palette-input'),
   $('#palette-list'),
   paletteCommands,
+  paletteFind,
 );
 
 window.addEventListener('keydown', async (e) => {
@@ -7050,6 +7134,15 @@ window.addEventListener('keydown', async (e) => {
     case 'c': {
       const r = activeTree.getSelected();
       if (r) await (resultHasFocus ? resultCopyValue(r.id) : copyValueOf(r.id));
+      break;
+    }
+    // `*` unfolds everything under the selected row — the key every native
+    // tree (Windows Explorer, VS Code's outline) gives it. No selection: the
+    // whole document. The source tree only; a result is read, not explored.
+    case '*': {
+      if (resultHasFocus) break;
+      e.preventDefault();
+      await expandAllUnder(tree.getSelected()?.id);
       break;
     }
   }

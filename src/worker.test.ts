@@ -281,6 +281,54 @@ describe('sticky ancestors', () => {
   });
 });
 
+describe('expandSubtree (expand all, capped)', () => {
+  type Ex = { totalRows: number; capped: boolean; index: number };
+  const ex = (id?: number, cap?: number): Ex => h<Ex>({ type: 'expandSubtree', id, cap });
+
+  it('unfolds the whole document from the root', () => {
+    parse('{"a":{"b":{"c":[1,2]}},"d":[{"e":1}]}');
+    // root + a b c 1 2 + d {0} e  = 9
+    expect(ex().totalRows).toBe(9);
+    expect(rows().map((r) => r.key)).toEqual([null, 'a', 'b', 'c', 0, 1, 'd', 0, 'e']);
+  });
+
+  it('unfolds only under the given node and leaves its siblings alone', () => {
+    parse('{"a":{"b":{"c":1}},"d":{"e":{"f":1}}}');
+    const a = rows().find((r) => r.key === 'a')!;
+    const r = ex(a.id);
+    expect(r.index).toBe(1);
+    expect(rows().map((x) => x.key)).toEqual([null, 'a', 'b', 'c', 'd']);
+  });
+
+  it('stops before passing the cap and says so', () => {
+    parse(JSON.stringify({ a: Array.from({ length: 10 }, (_, i) => ({ v: i })) }));
+    const r = ex(undefined, 12);
+    expect(r.capped).toBe(true);
+    // 12 rows may be ADDED under the root: a (1) + its 10 items + item 0's key;
+    // item 1's key would be the 13th, so it stops there (plus the root row)
+    expect(r.totalRows).toBe(13);
+  });
+
+  it('is a no-op on a leaf or an unknown id', () => {
+    parse('{"a":1}');
+    const leaf = rows()[1];
+    expect(ex(leaf.id).totalRows).toBe(2);
+    expect(ex(99_999).index).toBe(-1);
+  });
+});
+
+describe('find (palette search)', () => {
+  it('returns paths, caps the count, and leaves the search panel hits alone', () => {
+    parse('{"a":"mug","b":{"c":"mug"},"d":"cup"}');
+    h({ type: 'search', query: 'cup' });
+    const f = h<{ results: { pathText: string; path: (string | number)[] }[] }>({ type: 'find', query: 'mug', limit: 1 });
+    expect(f.results).toEqual([{ pathText: '$.a', preview: '"mug"', where: 'value', path: ['a'] }]);
+    // the panel's hit 0 still resolves to the 'cup' search, not the find
+    const r = h<{ rowIndex: number }>({ type: 'reveal', index: 0 });
+    expect(rows()[r.rowIndex].key).toBe('d');
+  });
+});
+
 describe('lossless numbers', () => {
   it('preserves a 19-digit int64 id exactly through tree + copy + stringify', () => {
     parse('{"id":1234567890123456789}');
