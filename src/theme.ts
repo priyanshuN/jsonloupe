@@ -90,10 +90,12 @@ export const SCHEMES: readonly Scheme[] = [
   { id: 'catppuccin-mocha', name: 'Catppuccin Mocha', mode: 'dark' },
   { id: 'dracula', name: 'Dracula', mode: 'dark' },
   { id: 'gruvbox', name: 'Gruvbox', mode: 'dark' },
+  { id: 'github-dark', name: 'GitHub Dark', mode: 'dark' },
   { id: 'loupe-light', name: 'jsonloupe', mode: 'light' },
   { id: 'solarized', name: 'Solarized Light', mode: 'light' },
   { id: 'catppuccin-latte', name: 'Catppuccin Latte', mode: 'light' },
   { id: 'rose-pine-dawn', name: 'Rosé Pine Dawn', mode: 'light' },
+  { id: 'github-light', name: 'GitHub Light', mode: 'light' },
 ];
 
 const DEFAULT_SCHEME: Record<Theme, string> = { dark: 'loupe-dark', light: 'loupe-light' };

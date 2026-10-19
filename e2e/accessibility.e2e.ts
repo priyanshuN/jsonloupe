@@ -259,7 +259,7 @@ test('colour schemes: a keyboard menu that previews, keeps a pick, and passes WC
   const schemes = await page
     .locator('.scheme-opt')
     .evaluateAll((els) => els.map((el) => [(el as HTMLElement).dataset.scheme!, el.textContent!] as const));
-  expect(schemes.length).toBeGreaterThanOrEqual(9);
+  expect(schemes.length).toBeGreaterThanOrEqual(11);
   for (const [id, name] of schemes) {
     await button.click();
     await menu.locator(`[data-scheme="${id}"]`).click();

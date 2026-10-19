@@ -89,9 +89,9 @@ flagged, with the original bytes preserved.
   parent keys you are inside pinned at the top of the tree.
 - **Command palette** — `⌘K` / `Ctrl K` from anywhere: type a few letters of a
   view, an action, a theme or a recent document's name, and press Enter.
-- **Colour schemes** — Tokyo Night, Catppuccin Mocha, Dracula and Gruvbox for
-  dark; Solarized Light, Catppuccin Latte and Rosé Pine Dawn for light; plus
-  jsonloupe's own pair. Hover one in the sidebar picker (or arrow through them
+- **Colour schemes** — Tokyo Night, Catppuccin Mocha, Dracula, Gruvbox and
+  GitHub Dark for dark; Solarized Light, Catppuccin Latte, Rosé Pine Dawn and
+  GitHub Light for light; plus jsonloupe's own pair. Hover one in the sidebar picker (or arrow through them
   in `⌘K`) to try it on the whole app. Each mode keeps its own scheme, so
   "follow the system" swaps between your two at sunset. Every scheme meets
   WCAG AA contrast, checked in CI.

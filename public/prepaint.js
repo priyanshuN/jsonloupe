@@ -25,8 +25,8 @@
     // Mirrors SCHEMES in src/theme.ts (theme.test.ts holds the two together);
     // the defaults are absent because a default is painted by no attribute.
     var SCHEMES = {
-      dark: ['tokyo-night', 'catppuccin-mocha', 'dracula', 'gruvbox'],
-      light: ['solarized', 'catppuccin-latte', 'rose-pine-dawn'],
+      dark: ['tokyo-night', 'catppuccin-mocha', 'dracula', 'gruvbox', 'github-dark'],
+      light: ['solarized', 'catppuccin-latte', 'rose-pine-dawn', 'github-light'],
     };
     var scheme = localStorage.getItem('wb-scheme-' + theme);
     if (SCHEMES[theme].indexOf(scheme) !== -1) document.documentElement.dataset.scheme = scheme;

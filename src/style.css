@@ -817,6 +817,66 @@
   --glass-lens: rgba(60, 56, 54, 0.94);
 }
 
+/* GitHub Dark. Primer's dark default (MIT); keys, strings and constants in GitHub's own
+   syntax colours. */
+:root[data-scheme='github-dark'],
+[data-scheme-preview='github-dark'] {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --bg-canvas: #0d1117;
+  --bg-chrome: #161b22;
+  --bg-chrome-2: #21262d;
+  --bg-well: #010409;
+  --bg-elevated: #161b22;
+  --bg-elevated-2: #21262d;
+  --bg-inset: #0a0e14;
+  --bg-hover: #21262d;
+  --bg-sel: rgba(68, 147, 248, 0.16);
+  --border: #21262d;
+  --border-strong: #30363d;
+  --border-soft: rgba(48, 54, 61, 0.45);
+  --text: #e6edf3;
+  --text-dim: #9198a1;
+  --text-faint: #8e96a1;
+  --accent: #4796fb;
+  --brand: #4796fb;
+  --accent-contrast: #010409;
+  --accent-soft: rgba(71, 150, 251, 0.14);
+  --accent-line: rgba(71, 150, 251, 0.5);
+  --accent-fill: #2273d6;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #2273d6;
+  --accent-fill-hover: #1167c8;
+  --danger: #ff6258;
+  --danger-soft: rgba(255, 98, 88, 0.14);
+  --ok: #3fb950;
+  --warn: #d29922;
+  --c-key: #7ee787;
+  --c-string: #a5d6ff;
+  --c-number: #79c0ff;
+  --c-boolean: #d2a8ff;
+  --c-null: #8f98a2;
+  --c-punct: #8f98a2;
+  --btn-bg: #191e24;
+  --btn-bg-hover: #21262d;
+  --btn-bg-active: #0b0f15;
+  --btn-border: #30363d;
+  --btn-border-hover: rgba(142, 150, 161, 0.4);
+  --gutter-bg: #0f1319;
+  --hero-wash: rgba(71, 150, 251, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+  --glass-chrome: rgba(22, 27, 34, 0.6);
+  --glass-chrome-2: rgba(33, 38, 45, 0.74);
+  --glass-float: rgba(22, 27, 34, 0.94);
+  --glass-tint: rgba(71, 150, 251, 0.03);
+  --glass-glow: rgba(71, 150, 251, 0.2);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-control: rgba(25, 30, 36, 0.62);
+  --glass-track: rgba(0, 0, 0, 0.26);
+  --glass-lens: rgba(33, 38, 45, 0.94);
+}
+
 /* Solarized Light. */
 :root[data-scheme='solarized'],
 [data-scheme-preview='solarized'] {
@@ -991,6 +1051,65 @@
   --glass-sheen: rgba(255, 255, 255, 0.8);
   --glass-control: rgba(255, 255, 255, 0.6);
   --glass-track: rgba(87, 82, 121, 0.07);
+  --glass-lens: rgba(255, 255, 255, 1);
+}
+
+/* GitHub Light. Primer's light default (MIT), in GitHub's own syntax colours. */
+:root[data-scheme='github-light'],
+[data-scheme-preview='github-light'] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-canvas: #ffffff;
+  --bg-chrome: #f6f8fa;
+  --bg-chrome-2: #eaeef2;
+  --bg-well: #eff2f5;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #ffffff;
+  --bg-inset: #fbfcfd;
+  --bg-hover: #eaeef2;
+  --bg-sel: rgba(9, 105, 218, 0.15);
+  --border: #d0d7de;
+  --border-strong: #afb8c1;
+  --border-soft: rgba(175, 184, 193, 0.5);
+  --text: #1f2328;
+  --text-dim: #59636e;
+  --text-faint: #5b636c;
+  --accent: #005fc9;
+  --brand: #005fc9;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(0, 95, 201, 0.14);
+  --accent-line: rgba(0, 95, 201, 0.55);
+  --accent-fill: #0969da;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #0969da;
+  --accent-fill-hover: #015ec7;
+  --danger: #c51125;
+  --danger-soft: rgba(197, 17, 37, 0.09);
+  --ok: #00732b;
+  --warn: #865a03;
+  --c-key: #116329;
+  --c-string: #0a3069;
+  --c-number: #0550ae;
+  --c-boolean: #7641d0;
+  --c-null: #59636e;
+  --c-punct: #59636e;
+  --btn-bg: #ffffff;
+  --btn-bg-hover: #eaeef2;
+  --btn-bg-active: #eaeef2;
+  --btn-border: #afb8c1;
+  --btn-border-hover: #5b636c;
+  --gutter-bg: #fcfdfd;
+  --hero-wash: rgba(0, 95, 201, 0.08);
+  --shadow-sm: 0 1px 2px rgba(31, 35, 40, 0.1);
+  --shadow: 0 12px 32px rgba(31, 35, 40, 0.14);
+  --glass-chrome: rgba(255, 255, 255, 0.5);
+  --glass-chrome-2: rgba(255, 255, 255, 0.3);
+  --glass-float: rgba(255, 255, 255, 0.88);
+  --glass-tint: rgba(9, 105, 218, 0.1);
+  --glass-glow: rgba(9, 105, 218, 0.12);
+  --glass-sheen: rgba(255, 255, 255, 0.8);
+  --glass-control: rgba(255, 255, 255, 0.6);
+  --glass-track: rgba(31, 35, 40, 0.07);
   --glass-lens: rgba(255, 255, 255, 1);
 }
 
