@@ -314,3 +314,18 @@ describe('VirtualTree value chips and pinned parents', () => {
     expect(fetchSticky).not.toHaveBeenCalled();
   });
 });
+
+describe('VirtualTree search marks', () => {
+  it('marks the query in keys and primitive values, never in a container preview or an index', () => {
+    const { inner, tree } = harness();
+    tree.setHighlight('pay');
+    const obj = inner.rowEl({ ...objectRow, expanded: false, preview: '{ payload } · 1 key' });
+    expect(obj.querySelector('.key mark.hl')?.textContent).toBe('pay');
+    expect(obj.querySelector('.val mark')).toBeNull();
+    const leaf = inner.rowEl({ ...leafRow, key: 3, unpacked: false, maybeJson: false, preview: '"repay"' });
+    expect(leaf.querySelector('.key mark')).toBeNull();
+    expect(leaf.querySelector('.val mark.hl')?.textContent).toBe('pay');
+    tree.setHighlight('');
+    expect(inner.rowEl(leafRow).querySelector('mark')).toBeNull();
+  });
+});

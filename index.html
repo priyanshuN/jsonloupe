@@ -1064,7 +1064,10 @@ SPDX-License-Identifier: MIT -->
     </main>
   </div>
   <div id="toast" hidden></div>
-  <div id="drop-overlay" hidden><span>Drop JSON / Zstd payload</span></div>
+  <div id="drop-overlay" hidden>
+    <span>Drop JSON / Zstd payload</span>
+    <span class="drop-sub">opens in this tab · nothing is uploaded</span>
+  </div>
   <dialog id="model-dialog" aria-labelledby="model-dialog-title">
     <div class="model-dialog-shell">
       <div class="model-dialog-head">
@@ -1193,6 +1196,7 @@ SPDX-License-Identifier: MIT -->
         <div class="keys-row"><span><kbd>↓</kbd> <kbd>↑</kbd> or <kbd>j</kbd> <kbd>k</kbd></span><span>move selection</span></div>
         <div class="keys-row"><span><kbd>→</kbd> <kbd>←</kbd></span><span>expand · collapse</span></div>
         <div class="keys-row"><span><kbd>Enter</kbd></span><span>toggle a container</span></div>
+        <div class="keys-row"><span><kbd>*</kbd></span><span>expand everything under the row — or the whole document</span></div>
         <div class="keys-row"><span><kbd>y</kbd></span><span>copy path</span></div>
         <div class="keys-row"><span><kbd>c</kbd></span><span>copy value — digits exact</span></div>
         <div class="keys-row"><span>double-click a value</span><span>edit in place</span></div>
