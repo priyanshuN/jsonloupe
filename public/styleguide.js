@@ -13,10 +13,49 @@ themeGroup.addEventListener('click', (event) => {
   const theme = event.target.closest('button')?.dataset.theme;
   if (!theme) return;
   doc.dataset.theme = theme;
+  // A scheme belongs to one mode; switching mode leaves it.
+  delete doc.dataset.scheme;
+  schemeSelect.value = '';
   paintTheme();
   renderSwatches();
 });
 paintTheme();
+
+// Rule 27: the scheme list is read from the stylesheet's own token blocks, so
+// a scheme added there is on this page without anyone remembering to add it.
+// After load, because the stylesheet may still be arriving when this runs.
+const schemeSelect = document.getElementById('sg-scheme');
+window.addEventListener('load', () => {
+  for (const sheet of document.styleSheets) {
+    let rules = [];
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    for (const rule of rules) {
+      // Browsers serialise the attribute value in double quotes.
+      const m = rule.selectorText?.match(/^:root\[data-scheme=["']([\w-]+)["']\]/);
+      if (!m) continue;
+      const option = document.createElement('option');
+      option.value = m[1];
+      option.dataset.mode = rule.style.getPropertyValue('color-scheme').trim();
+      option.textContent = `${m[1]} (${option.dataset.mode})`;
+      schemeSelect.appendChild(option);
+    }
+  }
+  // prepaint.js may already have painted the app's stored scheme here.
+  schemeSelect.value = doc.dataset.scheme ?? '';
+});
+schemeSelect.addEventListener('change', () => {
+  const option = schemeSelect.selectedOptions[0];
+  if (option.value) {
+    doc.dataset.scheme = option.value;
+    doc.dataset.theme = option.dataset.mode;
+  } else delete doc.dataset.scheme;
+  paintTheme();
+  renderSwatches();
+});
 
 // Swatches read the live computed tokens, so this page cannot drift from the
 // stylesheet it documents. Values below are trusted project-owned constants.

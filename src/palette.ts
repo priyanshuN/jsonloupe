@@ -21,6 +21,8 @@ export interface PaletteCommand {
   keys?: string;
   /** Dim text after the label — a document match's value. */
   detail?: string;
+  /** Shown while the row is highlighted, undone by the palette's endPreview. */
+  preview?(): void;
   run(): void;
 }
 
@@ -90,6 +92,7 @@ export class CommandPalette {
   private ranked: PaletteCommand[] = [];
   private found: PaletteCommand[] = [];
   private findToken = 0;
+  private previewing = false;
 
   constructor(
     private dialog: HTMLDialogElement,
@@ -97,6 +100,8 @@ export class CommandPalette {
     private list: HTMLElement,
     private build: () => PaletteCommand[],
     private find?: PaletteFinder,
+    /** Puts back whatever a highlighted row's preview() changed. */
+    private endPreview?: () => void,
   ) {
     input.addEventListener('input', () => this.filter());
     input.addEventListener('keydown', (e) => {
@@ -126,6 +131,7 @@ export class CommandPalette {
       if (e.target === dialog) dialog.close();
     });
     dialog.addEventListener('close', () => {
+      this.stopPreview();
       this.returnFocus?.focus({ preventScroll: true });
       this.returnFocus = null;
     });
@@ -241,11 +247,25 @@ export class CommandPalette {
     const opt = this.list.querySelector<HTMLElement>(`#palette-opt-${i}`);
     if (!opt) {
       this.input.removeAttribute('aria-activedescendant');
+      this.stopPreview();
       return;
     }
     opt.setAttribute('aria-selected', 'true');
     this.input.setAttribute('aria-activedescendant', opt.id);
     if (scroll) opt.scrollIntoView({ block: 'nearest' });
+    // A row that can show itself does, while it is the one Enter would run —
+    // arrowing through colour schemes tries each on the whole app.
+    const cmd = this.shown[i];
+    if (cmd?.preview) {
+      cmd.preview();
+      this.previewing = true;
+    } else this.stopPreview();
+  }
+
+  private stopPreview(): void {
+    if (!this.previewing) return;
+    this.previewing = false;
+    this.endPreview?.();
   }
 
   private runAt(i: number): void {

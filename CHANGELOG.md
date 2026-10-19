@@ -2,6 +2,23 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## Unreleased
+
+- **Colour schemes.** Nine named schemes join jsonloupe's own dark and
+  light: Tokyo Night, Catppuccin Mocha, Dracula, Gruvbox and GitHub Dark
+  (dark), and Solarized Light, Catppuccin Latte, Rosé Pine Dawn and GitHub
+  Light (light). The GitHub pair uses Primer's published colours. Pick one from
+  the new button under the theme switch: each choice is a small preview card
+  drawn in that scheme, and hovering or arrowing onto one shows it on the
+  whole app until you pick or close the menu. In ⌘K, arrowing through the
+  `colours:` commands previews them the same way. Each mode remembers its own
+  scheme, so "system" moves between your dark and light picks with the OS.
+  Every scheme keeps the published palette's hues; where an ink fell below
+  WCAG AA (on the canvas, chrome, a hovered row, the selection tint, or
+  glass), only its lightness was moved. The contract linter now checks every
+  scheme for completeness and contrast, and the accessibility tests scan the
+  workbench in each one.
+
 ## 1.6.0 — 2026-10-19
 
 - **Search as you type, and see the match.** Search runs after a short pause

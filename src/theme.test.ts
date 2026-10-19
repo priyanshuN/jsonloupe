@@ -3,6 +3,8 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// Through Vite's ?raw, as shell.test.ts reads index.html: no node types here.
+import prepaint from '../public/prepaint.js?raw';
 
 // Every case here is a way the old two-state module got the OS wrong, so each
 // one starts from a clean document and a clean localStorage and re-imports:
@@ -41,6 +43,7 @@ async function load() {
 beforeEach(() => {
   localStorage.clear();
   delete document.documentElement.dataset.theme;
+  delete document.documentElement.dataset.scheme;
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -135,6 +138,82 @@ describe('theme · an explicit choice', () => {
       const theme = await load();
       expect(theme.currentChoice(), `stored ${JSON.stringify(junk)}`).toBe('system');
       expect(theme.currentTheme()).toBe('light');
+    }
+  });
+});
+
+describe('theme · colour schemes', () => {
+  const root = () => document.documentElement.dataset;
+
+  it('paints the default scheme of each mode by having no attribute', async () => {
+    stubMatchMedia(false);
+    const theme = await load();
+    expect(theme.currentScheme().id).toBe('loupe-dark');
+    expect(root().scheme).toBeUndefined();
+  });
+
+  it('remembers one scheme per mode, and system moves between them at sunset', async () => {
+    const os = stubMatchMedia(false);
+    const theme = await load();
+    theme.setScheme('dracula');
+    theme.setScheme('solarized');
+    // Picking a light scheme in a dark app shows it: the mode is pinned.
+    expect(theme.currentChoice()).toBe('light');
+    expect(root()).toMatchObject({ theme: 'light', scheme: 'solarized' });
+    theme.setThemeChoice('system');
+    expect(root()).toMatchObject({ theme: 'dark', scheme: 'dracula' });
+    os.flip(true);
+    expect(root()).toMatchObject({ theme: 'light', scheme: 'solarized' });
+    expect(localStorage.getItem('wb-scheme-dark')).toBe('dracula');
+    expect(localStorage.getItem('wb-scheme-light')).toBe('solarized');
+  });
+
+  it('keeps system when the pick is for the mode already on screen', async () => {
+    stubMatchMedia(false);
+    const theme = await load();
+    theme.setScheme('tokyo-night');
+    expect(theme.currentChoice()).toBe('system');
+    expect(localStorage.getItem('wb-theme')).toBeNull();
+    // Back to the default clears the key, as system clears the theme's.
+    theme.setScheme('loupe-dark');
+    expect(localStorage.getItem('wb-scheme-dark')).toBeNull();
+    expect(root().scheme).toBeUndefined();
+  });
+
+  it('previews without choosing, and null puts the choice back', async () => {
+    stubMatchMedia(false);
+    const theme = await load();
+    const seen: string[] = [];
+    theme.onThemeChange((t) => seen.push(t));
+    theme.previewScheme('rose-pine-dawn');
+    // The editor hears the mode change, so a light preview is light in CodeMirror too.
+    expect(root()).toMatchObject({ theme: 'light', scheme: 'rose-pine-dawn' });
+    expect(seen).toEqual(['light']);
+    expect(theme.currentScheme().id).toBe('loupe-dark');
+    expect(localStorage.length).toBe(0);
+    theme.previewScheme(null);
+    expect(root().theme).toBe('dark');
+    expect(root().scheme).toBeUndefined();
+    theme.previewScheme('no-such-scheme');
+    expect(root().theme).toBe('dark');
+    theme.setScheme('no-such-scheme');
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('ignores a stored scheme that is unknown or belongs to the other mode', async () => {
+    stubMatchMedia(false);
+    localStorage.setItem('wb-scheme-dark', 'solarized');
+    expect((await load()).currentScheme().id).toBe('loupe-dark');
+    localStorage.setItem('wb-scheme-dark', '<script>');
+    expect((await load()).currentScheme().id).toBe('loupe-dark');
+  });
+
+  it('agrees with prepaint.js, which paints the scheme before the first frame', async () => {
+    const { SCHEMES } = await load();
+    for (const mode of ['dark', 'light'] as const) {
+      const listed = prepaint.match(new RegExp(`${mode}: \\[([^\\]]*)\\]`))?.[1] ?? '';
+      const ids = [...listed.matchAll(/'([\w-]+)'/g)].map((m) => m[1]);
+      expect(ids, mode).toEqual(SCHEMES.filter((s) => s.mode === mode && !s.id.startsWith('loupe-')).map((s) => s.id));
     }
   });
 });

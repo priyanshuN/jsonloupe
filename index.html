@@ -207,8 +207,14 @@ SPDX-License-Identifier: MIT -->
         <!-- Glass is a material, not a theme, so it is not a fourth segment:
              it is a setting, rule 7's checkbox in its switch shape, opening
              the footer's second row under the switch it modifies. -->
+        <!-- Rule 27: the colour scheme for the mode on screen. A popover
+             (rule 21) of preview cards, each painted in its own scheme by
+             [data-scheme-preview]; hovering one shows it on the whole app,
+             and closing without a pick puts the old one back. -->
+        <button id="scheme-btn" class="btn-quiet" type="button" popovertarget="scheme-menu" aria-haspopup="menu"
+          aria-expanded="false" title="Colour scheme"><span class="scheme-dots" aria-hidden="true"><i></i><i></i><i></i></span><span id="scheme-name">jsonloupe</span></button>
+        <div id="scheme-menu" popover role="menu" aria-label="Colour scheme"></div>
         <label class="glass-opt" id="glass-opt">glass<input type="checkbox" role="switch" class="chk chk-switch" id="glass-toggle" /></label>
-        <span class="lp-spacer"></span>
         <a class="about-link" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec">about</a>
       </div>
     </aside>
