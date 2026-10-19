@@ -2,7 +2,7 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.7.0 — 2026-10-19
 
 - **Colour schemes.** Nine named schemes join jsonloupe's own dark and
   light: Tokyo Night, Catppuccin Mocha, Dracula, Gruvbox and GitHub Dark
