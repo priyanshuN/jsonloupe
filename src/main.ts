@@ -72,7 +72,17 @@ import {
   type ApiKeySource,
 } from './model-auth';
 import { parseKeyFile } from './key-file';
-import { currentChoice, currentTheme, onThemeChange, setThemeChoice, type ThemeChoice } from './theme';
+import {
+  SCHEMES,
+  currentChoice,
+  currentScheme,
+  currentTheme,
+  onThemeChange,
+  previewScheme,
+  setScheme,
+  setThemeChoice,
+  type ThemeChoice,
+} from './theme';
 import type { CodeEditor } from './code';
 import type { ScriptEditor } from './run-editor';
 import {
@@ -6977,6 +6987,14 @@ function paletteCommands(): PaletteCommand[] {
   add('theme', 'theme: dark', click('[data-theme="dark"]'), { keywords: 'appearance night' });
   add('theme', 'theme: light', click('[data-theme="light"]'), { keywords: 'appearance day' });
   add('theme', glassToggle.checked ? 'glass: off' : 'glass: on', () => glassToggle.click(), { keywords: 'material blur translucent' });
+  const chosen = currentScheme().id;
+  for (const sc of SCHEMES) {
+    if (sc.id === chosen) continue;
+    add('theme', `colours: ${sc.name}${sc.name === 'jsonloupe' ? ` ${sc.mode}` : ''}`, () => setScheme(sc.id), {
+      keywords: `scheme palette color colour ${sc.mode}`,
+      preview: () => previewScheme(sc.id),
+    });
+  }
   for (const row of document.querySelectorAll<HTMLElement>('#recents .doc-row')) {
     const open = row.querySelector<HTMLElement>('.doc-row-open');
     const title = row.querySelector('.doc-row-title')?.textContent?.trim();
@@ -7022,6 +7040,7 @@ const palette = new CommandPalette(
   $('#palette-list'),
   paletteCommands,
   paletteFind,
+  () => previewScheme(null),
 );
 
 window.addEventListener('keydown', async (e) => {
@@ -7179,9 +7198,135 @@ themeSwitch.addEventListener('click', (e) => {
 });
 onThemeChange((t) => {
   paintThemeSwitch();
+  paintSchemeBtn();
   codeEditor?.setTheme(t);
 });
+
+// Colour schemes (style.css rule 27). The picker lists every scheme as a card
+// painted in that scheme, dark ones first; hovering or arrowing onto one shows
+// it on the whole app, and only a press keeps it. Every way the menu closes
+// runs the same restore, so a preview can never outlive its menu.
+const schemeBtn = $<HTMLButtonElement>('#scheme-btn');
+const schemeMenu = $('#scheme-menu');
+let schemeMenuOpen = false;
+
+function paintSchemeBtn(): void {
+  const s = currentScheme();
+  $('#scheme-name').textContent = s.name;
+  schemeBtn.title = `Colour scheme: ${s.name} (${s.mode})`;
+  for (const opt of schemeMenu.querySelectorAll<HTMLElement>('.scheme-opt')) {
+    opt.setAttribute('aria-checked', String(opt.dataset.scheme === s.id));
+  }
+}
+
+function buildSchemeMenu(): void {
+  const frag = document.createDocumentFragment();
+  let mode = '';
+  for (const s of SCHEMES) {
+    if (s.mode !== mode) {
+      mode = s.mode;
+      const h = document.createElement('div');
+      h.className = 'scheme-group';
+      h.setAttribute('role', 'presentation');
+      h.textContent = mode;
+      frag.appendChild(h);
+    }
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'scheme-opt';
+    opt.setAttribute('role', 'menuitemradio');
+    opt.dataset.scheme = s.id;
+    const card = document.createElement('span');
+    card.className = 'scheme-card';
+    card.dataset.schemePreview = s.id;
+    card.setAttribute('aria-hidden', 'true');
+    card.innerHTML =
+      '<span class="sc-side"></span><span class="sc-body">' +
+      '<span class="sc-line"><i class="sc-k"></i><i class="sc-s"></i></span>' +
+      '<span class="sc-line"><i class="sc-k"></i><i class="sc-n"></i></span>' +
+      '<span class="sc-line"><i class="sc-b"></i><i class="sc-a"></i></span></span>';
+    const label = document.createElement('span');
+    label.className = 'scheme-label';
+    label.textContent = s.name;
+    opt.append(card, label);
+    frag.appendChild(opt);
+  }
+  schemeMenu.replaceChildren(frag);
+}
+
+function positionAbove(panel: HTMLElement, anchorEl: HTMLElement): void {
+  const anchor = anchorEl.getBoundingClientRect();
+  const box = panel.getBoundingClientRect();
+  const gap = 8;
+  const left = Math.max(gap, Math.min(anchor.left, window.innerWidth - box.width - gap));
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.top = `${Math.round(Math.max(gap, anchor.top - box.height - gap))}px`;
+}
+
+const schemeOpts = () => [...schemeMenu.querySelectorAll<HTMLButtonElement>('.scheme-opt')];
+
+schemeMenu.addEventListener('beforetoggle', (event) => {
+  schemeMenuOpen = (event as ToggleEvent).newState === 'open';
+  schemeBtn.setAttribute('aria-expanded', String(schemeMenuOpen));
+  if (!schemeMenuOpen) {
+    previewScheme(null);
+    return;
+  }
+  paintSchemeBtn();
+  requestAnimationFrame(() => {
+    positionAbove(schemeMenu, schemeBtn);
+    const on = schemeOpts().find((o) => o.getAttribute('aria-checked') === 'true');
+    on?.focus({ preventScroll: true });
+    on?.scrollIntoView({ block: 'nearest' });
+  });
+});
+schemeMenu.addEventListener('click', (e) => {
+  const opt = (e.target as HTMLElement).closest<HTMLElement>('.scheme-opt');
+  if (!opt?.dataset.scheme) return;
+  setScheme(opt.dataset.scheme);
+  if (schemeMenuOpen) schemeMenu.hidePopover();
+  schemeBtn.focus({ preventScroll: true });
+});
+// Pointer and keyboard preview the same way: whatever the menu is ON is what
+// the app shows. Leaving the menu with the pointer shows the focused card
+// again, so the preview always names something the menu is pointing at.
+schemeMenu.addEventListener('pointerover', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('.scheme-opt')?.dataset.scheme;
+  if (id) previewScheme(id);
+});
+schemeMenu.addEventListener('pointerleave', () => {
+  const id = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.scheme-opt')?.dataset.scheme;
+  previewScheme(id ?? null);
+});
+schemeMenu.addEventListener('focusin', (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>('.scheme-opt')?.dataset.scheme;
+  if (id) previewScheme(id);
+});
+schemeMenu.addEventListener('keydown', (e) => {
+  const opts = schemeOpts();
+  const at = opts.indexOf(document.activeElement as HTMLButtonElement);
+  let next = -1;
+  if (e.key === 'ArrowDown') next = (at + 1) % opts.length;
+  else if (e.key === 'ArrowUp') next = (at - 1 + opts.length) % opts.length;
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = opts.length - 1;
+  else if (e.key === 'Escape') {
+    // The popover's own Esc closes it; focus goes back to its button.
+    requestAnimationFrame(() => schemeBtn.focus({ preventScroll: true }));
+    return;
+  }
+  if (next === -1) return;
+  e.preventDefault();
+  opts[next].focus();
+  opts[next].scrollIntoView({ block: 'nearest' });
+});
+window.addEventListener('resize', () => {
+  if (schemeMenuOpen) positionAbove(schemeMenu, schemeBtn);
+});
+
+buildSchemeMenu();
 paintThemeSwitch();
+paintSchemeBtn();
 
 // Glass: a MATERIAL over either theme, not a third theme — so it is its own
 // attribute and its own control rather than a fourth segment above. prepaint.js

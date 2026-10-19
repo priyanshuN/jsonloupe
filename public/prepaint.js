@@ -20,6 +20,17 @@
       theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     document.documentElement.dataset.theme = theme;
 
+    // The colour scheme that mode remembers (style.css rule 27). An allowlist
+    // like the theme's: only a real scheme of THIS mode becomes an attribute.
+    // Mirrors SCHEMES in src/theme.ts (theme.test.ts holds the two together);
+    // the defaults are absent because a default is painted by no attribute.
+    var SCHEMES = {
+      dark: ['tokyo-night', 'catppuccin-mocha', 'dracula', 'gruvbox'],
+      light: ['solarized', 'catppuccin-latte', 'rose-pine-dawn'],
+    };
+    var scheme = localStorage.getItem('wb-scheme-' + theme);
+    if (SCHEMES[theme].indexOf(scheme) !== -1) document.documentElement.dataset.scheme = scheme;
+
     // Glass is a material over either theme, not a third theme, so it is its
     // own attribute. Presence-only: nothing from the query string becomes an
     // attribute VALUE here. Reduced transparency / more contrast are handled

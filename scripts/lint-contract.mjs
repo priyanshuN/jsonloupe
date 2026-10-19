@@ -38,6 +38,10 @@
 //      [data-glass] rules set no geometry, blur only the floats, never touch
 //      the canvas; and the reduced-transparency / more-contrast fallback hands
 //      back the solid theme.
+//  13. rule 27 — every colour scheme block is complete against its mode,
+//      colour-only, carries its preview selector, holds checks 5 and 11 on
+//      its own values, and its id agrees across style.css, theme.ts and
+//      prepaint.js.
 //  12. rule 26 — the hidden sidebar is a 0 track (no icon rail) and
 //      visibility: hidden, both desktop-only, and both toggles carry
 //      aria-controls="sidebar" and aria-expanded.
@@ -184,6 +188,56 @@ const themes = {
   dark: themeTokens(/^:root,\s*\n:root\[data-theme='dark'\]/m),
   light: themeTokens(/^:root\[data-theme='light'\]/m),
 };
+
+// Rule 27: every named scheme is a theme of its own here — same floors, same
+// glass checks — and must restate every colour token of its mode, or the
+// default's value leaks into it. Its mode is the block's color-scheme.
+const schemeIds = [...css.matchAll(/^:root\[data-scheme='([\w-]+)'\]/gm)].map((m) => m[1]);
+const schemeMode = {};
+const schemeRe = (id) => new RegExp(`^:root\\[data-scheme='${id}'\\]`, 'm');
+for (const id of schemeIds) {
+  const m = css.match(schemeRe(id));
+  const [a, b] = blockRange(m.index);
+  const mode = cssRaw.slice(a, b).match(/color-scheme:\s*(dark|light)\s*;/)?.[1];
+  if (!mode) {
+    errors.push(`scheme ${id}: its block has no color-scheme: dark|light — rule 27`);
+    continue;
+  }
+  schemeMode[id] = mode;
+  themes[id] = themeTokens(schemeRe(id));
+  const declared = (re) => {
+    const mm = css.match(re);
+    const [x, y] = blockRange(mm.index);
+    return new Set([...css.slice(x, y).matchAll(/--([\w-]+):/g)].map((t) => t[1]));
+  };
+  const base = declared(mode === 'dark' ? /^:root,\s*\n:root\[data-theme='dark'\]/m : /^:root\[data-theme='light'\]/m);
+  const own = declared(schemeRe(id));
+  // Mode-invariant tokens (timing, the sidebar width) live in the dark block
+  // only because it doubles as :root; a scheme has no business restating them.
+  const invariant = new Set(['dur', 'ease', 'sidebar-w']);
+  const missing = [...base].filter((t) => !invariant.has(t) && !own.has(t));
+  if (missing.length) errors.push(`scheme ${id}: missing ${missing.map((t) => '--' + t).join(', ')} — the ${mode} default leaks through (rule 27)`);
+  const extra = [...own].filter((t) => !base.has(t));
+  if (extra.length) errors.push(`scheme ${id}: sets ${extra.map((t) => '--' + t).join(', ')}, which its mode does not — a scheme is colour only (rule 27)`);
+  if (!new RegExp(`^\\[data-scheme-preview='${id}'\\]`, 'm').test(css.slice(m.index, a + 1))) {
+    errors.push(`scheme ${id}: its block lacks the [data-scheme-preview='${id}'] selector the picker paints with (rule 27)`);
+  }
+}
+// The ids agree across the three places that name them.
+{
+  const ts = readFileSync(join(root, 'src/theme.ts'), 'utf8');
+  const pre = readFileSync(join(root, 'public/prepaint.js'), 'utf8');
+  const tsIds = [...ts.matchAll(/\{ id: '([\w-]+)', name: '[^']+', mode: '(dark|light)' \}/g)].map((m) => [m[1], m[2]]);
+  if (!tsIds.length) errors.push('theme.ts: could not read SCHEMES — linter needs updating (rule 27)');
+  for (const [id, mode] of tsIds) {
+    if (id === 'loupe-dark' || id === 'loupe-light') continue;
+    if (schemeMode[id] !== mode) errors.push(`theme.ts names ${mode} scheme ${id}, but style.css has ${schemeMode[id] ? 'it as ' + schemeMode[id] : 'no block for it'} (rule 27)`);
+    if (!new RegExp(`${mode}:\\s*\\[[^\\]]*'${id}'`).test(pre)) errors.push(`public/prepaint.js: ${id} missing from its ${mode} allowlist (rule 27)`);
+  }
+  for (const id of schemeIds) {
+    if (!tsIds.some(([t]) => t === id)) errors.push(`style.css has scheme ${id}, which theme.ts does not offer (rule 27)`);
+  }
+}
 for (const [name, tokens] of Object.entries(themes)) {
   if (!Object.keys(tokens).length) {
     errors.push(`contrast: could not locate the ${name} token block — linter needs updating`);
@@ -228,6 +282,7 @@ const glassThemes = {
   dark: rgbaTokens(/^:root,\s*\n:root\[data-theme='dark'\]/m),
   light: rgbaTokens(/^:root\[data-theme='light'\]/m),
 };
+for (const id of Object.keys(schemeMode)) glassThemes[id] = rgbaTokens(schemeRe(id));
 for (const [name, glass] of Object.entries(glassThemes)) {
   const hex = themes[name];
   const missing = GLASS_TOKENS.filter((t) => !glass[t]);
@@ -274,9 +329,29 @@ for (const [name, glass] of Object.entries(glassThemes)) {
   check('glass-lens', onTrack, ['text']);
 }
 
+// The selection tint is translucent, so its inks are measured on the
+// composite — over chrome (the active document in Recents) and over the canvas
+// (a selected tree row). Axe caught a scheme's captions at 4.29:1 there that no
+// hex pair above could see.
+for (const [name, glass] of Object.entries(glassThemes)) {
+  const hex = themes[name];
+  const sel = glass['bg-sel'];
+  if (!sel || !hex) continue;
+  for (const ground of ['bg-chrome', 'bg-canvas']) {
+    const under = rgbHex(over(sel, hexRgb(hex[ground])));
+    const inks = ground === 'bg-canvas'
+      ? ['text', 'text-dim', 'text-faint', 'c-key', 'c-string', 'c-number', 'c-boolean', 'c-null', 'c-punct']
+      : ['text', 'text-dim', 'text-faint'];
+    for (const ink of inks) {
+      const r = ratio(hex[ink], under);
+      if (r < 4.5) errors.push(`contrast(${name}): --${ink} on --bg-sel over --${ground} = ${r.toFixed(2)}:1, floor 4.5:1`);
+    }
+  }
+}
+
 // The [data-glass] rules themselves. Innermost `selector { body }` pairs, so a
 // rule nested in @media is read on its own.
-const GLASS_FLOATS = new Set(['.menu', '#dl-name', '#sem-plan-body', '#model-dialog', '#baseline-picker', '#keys-dialog', '#transport-dialog', '#toast']);
+const GLASS_FLOATS = new Set(['.menu', '#dl-name', '#sem-plan-body', '#scheme-menu', '#model-dialog', '#baseline-picker', '#keys-dialog', '#transport-dialog', '#toast']);
 const GEOMETRY = /^(?:border-radius|padding[\w-]*|margin[\w-]*|(?:min-|max-)?(?:width|height)|display|position|top|right|bottom|left|inset[\w-]*|gap|row-gap|column-gap|flex[\w-]*|grid[\w-]*|font[\w-]*|transform|order|line-height|letter-spacing)$/;
 let glassRules = 0;
 for (const m of css.matchAll(/([^{};]+)\{([^{}]*)\}/g)) {
@@ -527,4 +602,4 @@ if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
   process.exit(1);
 }
-console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, glass, type ramp, restatements, hidden sidebar, dead tokens, status layout)');
+console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, glass, schemes, type ramp, restatements, hidden sidebar, dead tokens, status layout)');

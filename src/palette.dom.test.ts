@@ -176,3 +176,34 @@ describe('palette document matches and marks', () => {
     expect(place.run).toHaveBeenCalledOnce();
   });
 });
+
+describe('palette previews', () => {
+  it('previews the highlighted row, and ends the preview when it moves off or the palette closes', () => {
+    document.body.innerHTML = `<dialog><input /><div id="l"></div></dialog>`;
+    const dialog = document.querySelector('dialog')!;
+    dialog.showModal ??= function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    const input = document.querySelector('input')!;
+    const list = document.querySelector<HTMLElement>('#l')!;
+    const preview = vi.fn();
+    const endPreview = vi.fn();
+    const cmds = [cmd('colours: Dracula', 'theme', { preview }), cmd('download')];
+    const palette = new CommandPalette(dialog, input, list, () => cmds, undefined, endPreview);
+    palette.open();
+    expect(preview).toHaveBeenCalledOnce();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    expect(endPreview).toHaveBeenCalledOnce();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' }));
+    expect(preview).toHaveBeenCalledTimes(2);
+    // Typing it away: nothing highlighted, nothing previewed.
+    input.value = 'zzz';
+    input.dispatchEvent(new Event('input'));
+    expect(endPreview).toHaveBeenCalledTimes(2);
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+    dialog.close();
+    dialog.dispatchEvent(new Event('close'));
+    expect(endPreview).toHaveBeenCalledTimes(3);
+  });
+});

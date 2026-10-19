@@ -348,10 +348,22 @@
        rule 12's one speed; below 900px the drawer owns the sidebar and none
        of this applies. The linter holds the 0 track, the hidden state and
        both toggles' aria wiring.
+   27. A COLOUR SCHEME IS A TOKEN BLOCK OVER A MODE (2026-10-19). Dark and
+       light stay the two modes everything keys on; a named scheme (Tokyo
+       Night, Solarized Light…) is one more :root[data-scheme] block that
+       restates EVERY colour token of its mode and nothing else, so any rule
+       that reads tokens is already themed for every scheme, and no rule may
+       name a scheme. Each mode remembers its own scheme (theme.ts); the
+       default is painted by having no attribute. Every scheme meets rule
+       24's contrast floors and rule 25's glass floors on its own values —
+       the linter reads each block as a theme of its own, checks it is
+       complete against its mode, and checks the ids agree across style.css,
+       theme.ts and prepaint.js.
    ========================================================================== */
 
 :root,
-:root[data-theme='dark'] {
+:root[data-theme='dark'],
+[data-scheme-preview='loupe-dark'] {
   color-scheme: dark;
 
   /* Rule 12: the ONE state-transition speed. Every hover/focus/active dressing
@@ -464,7 +476,8 @@
   --glass-lens: rgba(52, 61, 75, 0.94);
 }
 
-:root[data-theme='light'] {
+:root[data-theme='light'],
+[data-scheme-preview='loupe-light'] {
   color-scheme: light;
 
   --bg: #edf1f5;
@@ -552,6 +565,432 @@
   --glass-sheen: rgba(255, 255, 255, 0.8);
   --glass-control: rgba(255, 255, 255, 0.6);
   --glass-track: rgba(27, 37, 49, 0.07);
+  --glass-lens: rgba(255, 255, 255, 1);
+}
+
+/* Rule 27: the named colour schemes. Each is a COMPLETE colour block over
+   its mode — every colour token the mode's own block sets, so nothing of the
+   default leaks through — and nothing else: geometry, type and timing are
+   mode-invariant and stay in the shared :root block below. Identity colours
+   are the published palettes' own values; where one fell below a contrast
+   floor (rule 24's, on canvas, chrome AND a hovered row), only its OKLCH
+   lightness moved, hue and chroma kept, so Solarized still reads as
+   Solarized. Filled buttons keep rule 13's white ink, so each fill is the
+   scheme's accent taken down to 4.5:1 under white. The second selector
+   paints a picker's preview card in its scheme, wherever it sits — so the
+   picker carries no copy of any of these values. */
+
+/* Tokyo Night. */
+:root[data-scheme='tokyo-night'],
+[data-scheme-preview='tokyo-night'] {
+  color-scheme: dark;
+  --bg: #1a1b26;
+  --bg-canvas: #1a1b26;
+  --bg-chrome: #1f2335;
+  --bg-chrome-2: #292e42;
+  --bg-well: #16161e;
+  --bg-elevated: #1f2335;
+  --bg-elevated-2: #292e42;
+  --bg-inset: #171823;
+  --bg-hover: #292e42;
+  --bg-sel: rgba(125, 207, 255, 0.16);
+  --border: #292e42;
+  --border-strong: #3b4261;
+  --border-soft: rgba(59, 66, 97, 0.45);
+  --text: #c0caf5;
+  --text-dim: #a9b1d6;
+  --text-faint: #9ea9d2;
+  --accent: #7dcfff;
+  --brand: #7dcfff;
+  --accent-contrast: #16161e;
+  --accent-soft: rgba(125, 207, 255, 0.14);
+  --accent-line: rgba(125, 207, 255, 0.5);
+  --accent-fill: #247ca8;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #247ca8;
+  --accent-fill-hover: #11709b;
+  --danger: #fe869b;
+  --danger-soft: rgba(254, 134, 155, 0.14);
+  --ok: #9ece6a;
+  --warn: #e0af68;
+  --c-key: #82aafe;
+  --c-string: #9ece6a;
+  --c-number: #ff9e64;
+  --c-boolean: #bb9af7;
+  --c-null: #a0a8d3;
+  --c-punct: #a0a8d3;
+  --btn-bg: #232637;
+  --btn-bg-hover: #292e42;
+  --btn-bg-active: #181924;
+  --btn-border: #3b4261;
+  --btn-border-hover: rgba(158, 169, 210, 0.4);
+  --gutter-bg: #1c1d28;
+  --hero-wash: rgba(125, 207, 255, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+  --glass-chrome: rgba(31, 35, 53, 0.6);
+  --glass-chrome-2: rgba(41, 46, 66, 0.74);
+  --glass-float: rgba(31, 35, 53, 0.94);
+  --glass-tint: rgba(125, 207, 255, 0.03);
+  --glass-glow: rgba(125, 207, 255, 0.2);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-control: rgba(35, 38, 55, 0.62);
+  --glass-track: rgba(0, 0, 0, 0.26);
+  --glass-lens: rgba(41, 46, 66, 0.94);
+}
+
+/* Dracula. */
+:root[data-scheme='dracula'],
+[data-scheme-preview='dracula'] {
+  color-scheme: dark;
+  --bg: #282a36;
+  --bg-canvas: #282a36;
+  --bg-chrome: #21222c;
+  --bg-chrome-2: #343746;
+  --bg-well: #191a21;
+  --bg-elevated: #2e303c;
+  --bg-elevated-2: #343746;
+  --bg-inset: #252733;
+  --bg-hover: #3a3d4e;
+  --bg-sel: rgba(189, 147, 249, 0.16);
+  --border: #343746;
+  --border-strong: #44475a;
+  --border-soft: rgba(68, 71, 90, 0.45);
+  --text: #f8f8f2;
+  --text-dim: #d4d4dc;
+  --text-faint: #a9abc0;
+  --accent: #c197fd;
+  --brand: #c197fd;
+  --accent-contrast: #191a21;
+  --accent-soft: rgba(193, 151, 253, 0.14);
+  --accent-line: rgba(193, 151, 253, 0.5);
+  --accent-fill: #895fc1;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #895fc1;
+  --accent-fill-hover: #7d53b4;
+  --danger: #ff8982;
+  --danger-soft: rgba(255, 137, 130, 0.14);
+  --ok: #50fa7b;
+  --warn: #f1fa8c;
+  --c-key: #8be9fd;
+  --c-string: #f1fa8c;
+  --c-number: #c197fd;
+  --c-boolean: #ff7fc8;
+  --c-null: #98aae0;
+  --c-punct: #98aae0;
+  --btn-bg: #2f3240;
+  --btn-bg-hover: #3a3d4e;
+  --btn-bg-active: #262833;
+  --btn-border: #44475a;
+  --btn-border-hover: rgba(169, 171, 192, 0.4);
+  --gutter-bg: #2a2c38;
+  --hero-wash: rgba(193, 151, 253, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+  --glass-chrome: rgba(33, 34, 44, 0.6);
+  --glass-chrome-2: rgba(52, 55, 70, 0.74);
+  --glass-float: rgba(46, 48, 60, 0.94);
+  --glass-tint: rgba(193, 151, 253, 0.03);
+  --glass-glow: rgba(193, 151, 253, 0.2);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-control: rgba(47, 50, 64, 0.62);
+  --glass-track: rgba(0, 0, 0, 0.26);
+  --glass-lens: rgba(58, 61, 78, 0.94);
+}
+
+/* Catppuccin Mocha. */
+:root[data-scheme='catppuccin-mocha'],
+[data-scheme-preview='catppuccin-mocha'] {
+  color-scheme: dark;
+  --bg: #1e1e2e;
+  --bg-canvas: #1e1e2e;
+  --bg-chrome: #181825;
+  --bg-chrome-2: #313244;
+  --bg-well: #11111b;
+  --bg-elevated: #242434;
+  --bg-elevated-2: #313244;
+  --bg-inset: #1b1b2b;
+  --bg-hover: #313244;
+  --bg-sel: rgba(203, 166, 247, 0.16);
+  --border: #313244;
+  --border-strong: #45475a;
+  --border-soft: rgba(69, 71, 90, 0.45);
+  --text: #cdd6f4;
+  --text-dim: #bac2de;
+  --text-faint: #a6adc8;
+  --accent: #cba6f7;
+  --brand: #cba6f7;
+  --accent-contrast: #11111b;
+  --accent-soft: rgba(203, 166, 247, 0.14);
+  --accent-line: rgba(203, 166, 247, 0.5);
+  --accent-fill: #8965b1;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #8965b1;
+  --accent-fill-hover: #7d59a4;
+  --danger: #f38ba8;
+  --danger-soft: rgba(243, 139, 168, 0.14);
+  --ok: #a6e3a1;
+  --warn: #f9e2af;
+  --c-key: #89b4fa;
+  --c-string: #a6e3a1;
+  --c-number: #fab387;
+  --c-boolean: #cba6f7;
+  --c-null: #9ca2bb;
+  --c-punct: #9ca2bb;
+  --btn-bg: #292a3b;
+  --btn-bg-hover: #313244;
+  --btn-bg-active: #1c1c2b;
+  --btn-border: #45475a;
+  --btn-border-hover: rgba(166, 173, 200, 0.4);
+  --gutter-bg: #202030;
+  --hero-wash: rgba(203, 166, 247, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+  --glass-chrome: rgba(24, 24, 37, 0.6);
+  --glass-chrome-2: rgba(49, 50, 68, 0.74);
+  --glass-float: rgba(36, 36, 52, 0.94);
+  --glass-tint: rgba(203, 166, 247, 0.03);
+  --glass-glow: rgba(203, 166, 247, 0.2);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-control: rgba(41, 42, 59, 0.62);
+  --glass-track: rgba(0, 0, 0, 0.26);
+  --glass-lens: rgba(49, 50, 68, 0.94);
+}
+
+/* Gruvbox. Selects in its warm grey, not its yellow: a yellow wash lifts a
+   row so far that every ink would have to pale to clear it. */
+:root[data-scheme='gruvbox'],
+[data-scheme-preview='gruvbox'] {
+  color-scheme: dark;
+  --bg: #282828;
+  --bg-canvas: #282828;
+  --bg-chrome: #32302f;
+  --bg-chrome-2: #3c3836;
+  --bg-well: #1d2021;
+  --bg-elevated: #32302f;
+  --bg-elevated-2: #3c3836;
+  --bg-inset: #252525;
+  --bg-hover: #3c3836;
+  --bg-sel: rgba(168, 153, 132, 0.16);
+  --border: #3c3836;
+  --border-strong: #504945;
+  --border-soft: rgba(80, 73, 69, 0.45);
+  --text: #ebdbb2;
+  --text-dim: #d5c4a1;
+  --text-faint: #bdae93;
+  --accent: #fabd2f;
+  --brand: #fabd2f;
+  --accent-contrast: #1d2021;
+  --accent-soft: rgba(250, 189, 47, 0.14);
+  --accent-line: rgba(250, 189, 47, 0.5);
+  --accent-fill: #966e02;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #966e02;
+  --accent-fill-hover: #886301;
+  --danger: #fe9281;
+  --danger-soft: rgba(254, 146, 129, 0.14);
+  --ok: #b8bb26;
+  --warn: #fabd2f;
+  --c-key: #94b7a9;
+  --c-string: #b8bb26;
+  --c-number: #e99aaf;
+  --c-boolean: #ff944d;
+  --c-null: #bcad97;
+  --c-punct: #bcad97;
+  --btn-bg: #343230;
+  --btn-bg-hover: #3c3836;
+  --btn-bg-active: #262626;
+  --btn-border: #504945;
+  --btn-border-hover: rgba(189, 174, 147, 0.4);
+  --gutter-bg: #2a2a2a;
+  --hero-wash: rgba(250, 189, 47, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+  --glass-chrome: rgba(50, 48, 47, 0.6);
+  --glass-chrome-2: rgba(60, 56, 54, 0.74);
+  --glass-float: rgba(50, 48, 47, 0.94);
+  --glass-tint: rgba(250, 189, 47, 0.03);
+  --glass-glow: rgba(250, 189, 47, 0.2);
+  --glass-sheen: rgba(255, 255, 255, 0.1);
+  --glass-control: rgba(52, 50, 48, 0.62);
+  --glass-track: rgba(0, 0, 0, 0.26);
+  --glass-lens: rgba(60, 56, 54, 0.94);
+}
+
+/* Solarized Light. */
+:root[data-scheme='solarized'],
+[data-scheme-preview='solarized'] {
+  color-scheme: light;
+  --bg: #fdf6e3;
+  --bg-canvas: #fdf6e3;
+  --bg-chrome: #eee8d5;
+  --bg-chrome-2: #e4ddc8;
+  --bg-well: #e9e2cd;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #fefbf1;
+  --bg-inset: #f6efdc;
+  --bg-hover: #eee8d5;
+  --bg-sel: rgba(38, 139, 210, 0.15);
+  --border: #ddd6c1;
+  --border-strong: #c9c2ad;
+  --border-soft: rgba(201, 194, 173, 0.5);
+  --text: #073642;
+  --text-dim: #4b6067;
+  --text-faint: #4b6068;
+  --accent: #00619a;
+  --brand: #00619a;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(0, 97, 154, 0.14);
+  --accent-line: rgba(0, 97, 154, 0.55);
+  --accent-fill: #047abf;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #047abf;
+  --accent-fill-hover: #036ead;
+  --danger: #bd0112;
+  --danger-soft: rgba(189, 1, 18, 0.09);
+  --ok: #566304;
+  --warn: #765800;
+  --c-key: #00619a;
+  --c-string: #066862;
+  --c-number: #a63702;
+  --c-boolean: #5153a3;
+  --c-null: #4f5f61;
+  --c-punct: #4f5f61;
+  --btn-bg: #fefbf4;
+  --btn-bg-hover: #eee8d5;
+  --btn-bg-active: #e4ddc8;
+  --btn-border: #c9c2ad;
+  --btn-border-hover: #4b6068;
+  --gutter-bg: #f8f1de;
+  --hero-wash: rgba(0, 97, 154, 0.08);
+  --shadow-sm: 0 1px 2px rgba(7, 54, 66, 0.1);
+  --shadow: 0 12px 32px rgba(7, 54, 66, 0.14);
+  --glass-chrome: rgba(255, 255, 255, 0.5);
+  --glass-chrome-2: rgba(255, 255, 255, 0.3);
+  --glass-float: rgba(255, 255, 255, 0.88);
+  --glass-tint: rgba(4, 122, 191, 0.1);
+  --glass-glow: rgba(4, 122, 191, 0.12);
+  --glass-sheen: rgba(255, 255, 255, 0.8);
+  --glass-control: rgba(255, 255, 255, 0.6);
+  --glass-track: rgba(7, 54, 66, 0.07);
+  --glass-lens: rgba(255, 255, 255, 1);
+}
+
+/* Catppuccin Latte. */
+:root[data-scheme='catppuccin-latte'],
+[data-scheme-preview='catppuccin-latte'] {
+  color-scheme: light;
+  --bg: #eff1f5;
+  --bg-canvas: #eff1f5;
+  --bg-chrome: #e6e9ef;
+  --bg-chrome-2: #dce0e8;
+  --bg-well: #dce0e8;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #f7f8fa;
+  --bg-inset: #ebedf2;
+  --bg-hover: #dce0e8;
+  --bg-sel: rgba(136, 57, 239, 0.15);
+  --border: #ccd0da;
+  --border-strong: #bcc0cc;
+  --border-soft: rgba(188, 192, 204, 0.5);
+  --text: #4c4f69;
+  --text-dim: #565971;
+  --text-faint: #56586d;
+  --accent: #781fdb;
+  --brand: #781fdb;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(120, 31, 219, 0.14);
+  --accent-line: rgba(120, 31, 219, 0.55);
+  --accent-fill: #8839ef;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #8839ef;
+  --accent-fill-hover: #7d27e1;
+  --danger: #b7022f;
+  --danger-soft: rgba(183, 2, 47, 0.09);
+  --ok: #196800;
+  --warn: #814f02;
+  --c-key: #014cd7;
+  --c-string: #196800;
+  --c-number: #9e3a01;
+  --c-boolean: #781fdb;
+  --c-null: #56596c;
+  --c-punct: #56596c;
+  --btn-bg: #f9f9fb;
+  --btn-bg-hover: #dce0e8;
+  --btn-bg-active: #dce0e8;
+  --btn-border: #bcc0cc;
+  --btn-border-hover: #56586d;
+  --gutter-bg: #eceef3;
+  --hero-wash: rgba(120, 31, 219, 0.08);
+  --shadow-sm: 0 1px 2px rgba(76, 79, 105, 0.1);
+  --shadow: 0 12px 32px rgba(76, 79, 105, 0.14);
+  --glass-chrome: rgba(255, 255, 255, 0.5);
+  --glass-chrome-2: rgba(255, 255, 255, 0.3);
+  --glass-float: rgba(255, 255, 255, 0.88);
+  --glass-tint: rgba(136, 57, 239, 0.1);
+  --glass-glow: rgba(136, 57, 239, 0.12);
+  --glass-sheen: rgba(255, 255, 255, 0.8);
+  --glass-control: rgba(255, 255, 255, 0.6);
+  --glass-track: rgba(76, 79, 105, 0.07);
+  --glass-lens: rgba(255, 255, 255, 1);
+}
+
+/* Rosé Pine Dawn. */
+:root[data-scheme='rose-pine-dawn'],
+[data-scheme-preview='rose-pine-dawn'] {
+  color-scheme: light;
+  --bg: #faf4ed;
+  --bg-canvas: #faf4ed;
+  --bg-chrome: #f2e9e1;
+  --bg-chrome-2: #e9dfd5;
+  --bg-well: #efe5dc;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #fdfaf6;
+  --bg-inset: #f6efe7;
+  --bg-hover: #f2e9e1;
+  --bg-sel: rgba(144, 122, 169, 0.15);
+  --border: #dfdad9;
+  --border-strong: #cecacd;
+  --border-soft: rgba(206, 202, 205, 0.5);
+  --text: #575279;
+  --text-dim: #5f5981;
+  --text-faint: #5f5b77;
+  --accent: #6a5582;
+  --brand: #6a5582;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(106, 85, 130, 0.14);
+  --accent-line: rgba(106, 85, 130, 0.55);
+  --accent-fill: #826c9a;
+  --accent-fill-ink: #ffffff;
+  --accent-fill-edge: #826c9a;
+  --accent-fill-hover: #76608e;
+  --danger: #93465d;
+  --danger-soft: rgba(147, 70, 93, 0.09);
+  --ok: #23647e;
+  --warn: #855305;
+  --c-key: #23647e;
+  --c-string: #954745;
+  --c-number: #855305;
+  --c-boolean: #6a5582;
+  --c-null: #615c6d;
+  --c-punct: #615c6d;
+  --btn-bg: #fdfbf8;
+  --btn-bg-hover: #f2e9e1;
+  --btn-bg-active: #e9dfd5;
+  --btn-border: #cecacd;
+  --btn-border-hover: #5f5b77;
+  --gutter-bg: #f7f0e9;
+  --hero-wash: rgba(106, 85, 130, 0.08);
+  --shadow-sm: 0 1px 2px rgba(87, 82, 121, 0.1);
+  --shadow: 0 12px 32px rgba(87, 82, 121, 0.14);
+  --glass-chrome: rgba(255, 255, 255, 0.5);
+  --glass-chrome-2: rgba(255, 255, 255, 0.3);
+  --glass-float: rgba(255, 255, 255, 0.88);
+  --glass-tint: rgba(130, 108, 154, 0.1);
+  --glass-glow: rgba(130, 108, 154, 0.12);
+  --glass-sheen: rgba(255, 255, 255, 0.8);
+  --glass-control: rgba(255, 255, 255, 0.6);
+  --glass-track: rgba(87, 82, 121, 0.07);
   --glass-lens: rgba(255, 255, 255, 1);
 }
 
@@ -5848,6 +6287,112 @@ mark.hl {
 .glass-opt:hover { color: var(--text); }
 .glass-opt:has(:disabled) { opacity: 0.6; cursor: default; }
 
+/* ---------- colour scheme picker (rule 27) ---------- */
+
+/* The footer's second row, whole: the scheme names itself and shows three of
+   its inks, since a scheme is recognised by its colours before its name.
+   Sharing a row with glass and about left "Catppuccin Mocha" at "Cappu…", so
+   it takes the row and those two drop to the third, about at its far edge.
+   Quiet tier, footer type size. */
+#scheme-btn {
+  flex: 1 1 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  height: var(--ctl-h-mini);
+  padding: 0 var(--gap-1);
+  gap: var(--gap-2);
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+}
+#scheme-btn:hover:not(:disabled),
+#scheme-btn[aria-expanded='true'] { color: var(--text); }
+#scheme-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-foot:has(#scheme-btn) .about-link { margin-left: auto; }
+.scheme-dots { display: inline-flex; flex: none; }
+.scheme-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--bg-chrome);
+}
+.scheme-dots i + i { margin-left: -2px; }
+.scheme-dots i:nth-child(1) { background: var(--c-key); }
+.scheme-dots i:nth-child(2) { background: var(--c-string); }
+.scheme-dots i:nth-child(3) { background: var(--c-number); }
+
+/* Rule 21: top layer, placed above the button by main.ts. The display pair is
+   #dl-name's: hidden with no popover support, shown when open. */
+#scheme-menu {
+  display: none;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: 248px;
+  max-height: min(78vh, 560px);
+  overflow: auto;
+  padding: var(--gap-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+#scheme-menu:popover-open { display: block; }
+.scheme-group {
+  padding: var(--gap-2) var(--gap-2) var(--gap-1);
+  font: 400 var(--fs-label) var(--sans);
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.scheme-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  width: 100%;
+  height: auto;
+  padding: var(--gap-1) var(--gap-2);
+  border-color: transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-dim);
+  text-align: left;
+}
+.scheme-opt:hover:not(:disabled),
+.scheme-opt:focus-visible { background: var(--bg-hover); border-color: transparent; color: var(--text); }
+/* Rule 18: the chosen scheme is SELECTED, so it wears the selection device. */
+.scheme-opt[aria-checked='true'],
+.scheme-opt[aria-checked='true']:hover:not(:disabled) {
+  background: var(--bg-sel);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
+/* A thumbnail of the workbench in that scheme: sidebar, three rows of ink,
+   and its button fill. Every value is the card's own scheme's token, through
+   [data-scheme-preview] — no colour here is copied. */
+.scheme-card {
+  display: flex;
+  flex: none;
+  width: 54px;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-canvas);
+}
+.sc-side { width: 11px; background: var(--bg-chrome); border-right: 1px solid var(--border); }
+.sc-body { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 3px; padding: 0 5px; }
+.sc-line { display: flex; gap: 3px; }
+.sc-line i { height: 4px; border-radius: 2px; }
+.sc-k { width: 11px; background: var(--c-key); }
+.sc-s { width: 17px; background: var(--c-string); }
+.sc-n { width: 8px; background: var(--c-number); }
+.sc-b { width: 12px; background: var(--c-boolean); }
+.sc-a { width: 14px; background: var(--accent-fill); }
+.scheme-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Rule 7's one checkbox in its SWITCH shape (.chk-switch, role="switch"): an
    on/off SETTING rather than an item ticked in a list. Same component — same
    border, same accent when on, same focus ring — drawn as a track and knob. */
@@ -5934,7 +6479,7 @@ mark.hl {
   box-shadow: inset 0 1px 0 var(--glass-sheen), var(--shadow-sm);
 }
 
-:root[data-glass] :is(.menu, #dl-name, #sem-plan-body, #model-dialog, #baseline-picker, #keys-dialog, #transport-dialog, #toast) {
+:root[data-glass] :is(.menu, #dl-name, #sem-plan-body, #scheme-menu, #model-dialog, #baseline-picker, #keys-dialog, #transport-dialog, #toast) {
   background: var(--glass-float);
   -webkit-backdrop-filter: blur(24px) saturate(150%);
   backdrop-filter: blur(24px) saturate(150%);
@@ -5960,7 +6505,7 @@ mark.hl {
   :root[data-glass] #app .mode-switch { background: var(--bg-canvas); border-color: var(--border); box-shadow: none; }
   :root[data-glass] #app .mode-switch button.on,
   :root[data-glass] #app .mode-switch button.on:hover { background: var(--bg-hover); box-shadow: var(--shadow-sm); }
-  :root[data-glass] :is(.menu, #dl-name, #sem-plan-body, #model-dialog, #baseline-picker, #keys-dialog, #transport-dialog, #toast) {
+  :root[data-glass] :is(.menu, #dl-name, #sem-plan-body, #scheme-menu, #model-dialog, #baseline-picker, #keys-dialog, #transport-dialog, #toast) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

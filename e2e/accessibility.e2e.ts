@@ -229,3 +229,49 @@ test('the command palette is a named combobox, keyboard-driven end to end', asyn
   await expect(palette).toBeHidden();
   await expect(rows.first()).toBeFocused();
 });
+
+test('colour schemes: a keyboard menu that previews, keeps a pick, and passes WCAG in every scheme', async ({ page }) => {
+  await openSample(page);
+  const button = page.locator('#scheme-btn');
+  const menu = page.getByRole('menu', { name: 'Colour scheme' });
+  await button.click();
+  await expect(menu).toBeVisible();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  // Focus lands on the scheme in use, and the menu says which one that is.
+  const checked = menu.getByRole('menuitemradio', { checked: true });
+  await expect(checked).toBeFocused();
+  await expectNoWcagViolations(page, '#scheme-menu');
+
+  // Arrowing previews on the whole app; Escape puts the old scheme back.
+  const html = page.locator('html');
+  const before = await html.getAttribute('data-scheme');
+  await page.keyboard.press('ArrowDown');
+  await expect(html).not.toHaveAttribute('data-scheme', before ?? '');
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(button).toBeFocused();
+  if (before === null) await expect(html).not.toHaveAttribute('data-scheme', /./);
+  else await expect(html).toHaveAttribute('data-scheme', before);
+
+  // Every scheme, picked through the menu, passes the browser's own scan of
+  // the workbench — lint:contract checks the token pairs, this checks them
+  // where they actually land.
+  const schemes = await page
+    .locator('.scheme-opt')
+    .evaluateAll((els) => els.map((el) => [(el as HTMLElement).dataset.scheme!, el.textContent!] as const));
+  expect(schemes.length).toBeGreaterThanOrEqual(9);
+  for (const [id, name] of schemes) {
+    await button.click();
+    await menu.locator(`[data-scheme="${id}"]`).click();
+    await expect(menu).toBeHidden();
+    await expect(button).toContainText(name);
+    // Controls ease between colours at rule 12's speed; scan the settled frame,
+    // not a blend of two schemes.
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+    await expectNoWcagViolations(page);
+  }
+
+  // The last pick survives a reload, painted before first frame.
+  await page.reload();
+  await expect(html).toHaveAttribute('data-scheme', schemes[schemes.length - 1][0]);
+});
