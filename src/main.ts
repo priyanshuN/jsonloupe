@@ -7240,11 +7240,18 @@ function buildSchemeMenu(): void {
     card.className = 'scheme-card';
     card.dataset.schemePreview = s.id;
     card.setAttribute('aria-hidden', 'true');
-    card.innerHTML =
-      '<span class="sc-side"></span><span class="sc-body">' +
-      '<span class="sc-line"><i class="sc-k"></i><i class="sc-s"></i></span>' +
-      '<span class="sc-line"><i class="sc-k"></i><i class="sc-n"></i></span>' +
-      '<span class="sc-line"><i class="sc-b"></i><i class="sc-a"></i></span></span>';
+    // Built node by node — the project allows no innerHTML, constant or not.
+    const el = (tag: string, cls: string, ...kids: Node[]) => {
+      const n = document.createElement(tag);
+      n.className = cls;
+      n.append(...kids);
+      return n;
+    };
+    const line = (a: string, b: string) => el('span', 'sc-line', el('i', a), el('i', b));
+    card.append(
+      el('span', 'sc-side'),
+      el('span', 'sc-body', line('sc-k', 'sc-s'), line('sc-k', 'sc-n'), line('sc-b', 'sc-a')),
+    );
     const label = document.createElement('span');
     label.className = 'scheme-label';
     label.textContent = s.name;
