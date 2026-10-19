@@ -2,7 +2,7 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
-## Unreleased
+## 1.6.0 — 2026-10-19
 
 - **Search as you type, and see the match.** Search runs after a short pause
   as you type, for documents up to 8 MB (Enter still runs it on larger ones).
@@ -18,8 +18,6 @@ Notable changes to jsonloupe. Dates are UTC.
 - **Indent guides in the code view**, matching the tree's.
 - **The drop target says what happens.** Dragging a file over the window now
   reads "opens in this tab · nothing is uploaded", and the frame pulses gently.
-
-## 1.6.0 — 2026-10-18
 
 - **Command palette.** Press ⌘K (Ctrl K elsewhere) from anywhere, even while
   typing, and type a few letters of what you want: a view, an action on the
