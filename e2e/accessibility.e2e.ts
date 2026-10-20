@@ -106,10 +106,13 @@ test('compact documents drawer traps and restores keyboard focus', async ({ page
   const close = drawer.getByRole('button', { name: 'Close documents' });
   await expect(close).toBeFocused();
 
-  const last = drawer.getByRole('link', { name: 'about' });
+  // The footer's last stop is the Sponsor link, after about and GitHub; Tab
+  // from it wraps to the brand. exact: the Sponsor link's name also contains
+  // "jsonloupe".
+  const last = drawer.getByRole('link', { name: 'Sponsor jsonloupe on GitHub' });
   await last.focus();
   await last.press('Tab');
-  await expect(drawer.getByRole('link', { name: 'jsonloupe' })).toBeFocused();
+  await expect(drawer.getByRole('link', { name: 'jsonloupe', exact: true })).toBeFocused();
   await expectNoWcagViolations(page, '#sidebar');
 
   await close.press('Escape');
