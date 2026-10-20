@@ -2344,6 +2344,13 @@ async function openText(
   codecPane.hidden = true;
   viewer.hidden = false;
   closeDocumentsDrawer();
+  // The pitch (#about) and the search pages' handoff routes (#open, #compare)
+  // stop describing the screen once a document is on it. Left in the address,
+  // the next click on "about" would point at the URL already showing and the
+  // browser would do nothing. replaceState fires no hashchange.
+  if (location.hash === '#about' || location.hash === OPEN_ROUTE || location.hash === COMPARE_ROUTE) {
+    history.replaceState(history.state, '', location.pathname + location.search);
+  }
 
   tree.setTotal(res.totalRows);
   treeViewport.scrollTop = 0;

@@ -82,6 +82,16 @@ describe('the app side of the search landing handoff', () => {
     expect(opener).toContain("await compareWith(pair.before, 'before', null, null)");
   });
 
+  it('drops #about, #open and #compare from the address once a document is on screen', () => {
+    // Otherwise the sidebar's "about" link points at the URL already showing,
+    // and clicking it does nothing at all.
+    const openText = mainSource.match(/async function openText\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(openText).toContain("location.hash === '#about' || location.hash === OPEN_ROUTE || location.hash === COMPARE_ROUTE");
+    expect(openText).toContain("history.replaceState(history.state, '', location.pathname + location.search)");
+    // And a same-tab follow of the about link reloads into boot's pitch path.
+    expect(mainSource).toContain("else if (location.hash === '#about') location.reload();");
+  });
+
   it('says so out loud when the text cannot be carried', () => {
     expect(toolLanding).toMatch(/carried === 'no-handoff'/);
     expect(toolLanding).toMatch(/if \(!canCarry\) return 'no-handoff';/);
