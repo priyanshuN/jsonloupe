@@ -1985,23 +1985,52 @@ const CONVERT_ROUTE = '#convert';
 const CONVERT_HANDOFF = 'wb-convert-handoff';
 let convertRouteWaiting = false;
 
-type ConvertHandoff =
+type LandingHandoff =
   | { kind: 'none' }
   | { kind: 'ready'; text: string }
   | { kind: 'unavailable' };
 
-// The dedicated converter landing leaves one document here, for one navigation.
-// Read and remove it in the same guarded operation: if storage is unavailable
-// (or removal is refused), report that state without retaining or opening a
-// payload we could not consume safely.
-function consumeConvertHandoff(): ConvertHandoff {
+// A landing page (the converter's, or one of the search pages below) leaves
+// one document here, for one navigation. Read and remove it in the same
+// guarded operation: if storage is unavailable (or removal is refused), report
+// that state without retaining or opening a payload we could not consume safely.
+function consumeHandoff(key: string): LandingHandoff {
   try {
-    const text = sessionStorage.getItem(CONVERT_HANDOFF);
-    sessionStorage.removeItem(CONVERT_HANDOFF);
+    const text = sessionStorage.getItem(key);
+    sessionStorage.removeItem(key);
     return text === null ? { kind: 'none' } : { kind: 'ready', text };
   } catch {
-    try { sessionStorage.removeItem(CONVERT_HANDOFF); } catch { /* storage unavailable */ }
+    try { sessionStorage.removeItem(key); } catch { /* storage unavailable */ }
     return { kind: 'unavailable' };
+  }
+}
+
+// The search landing pages — json-editor.html and large-json-viewer.html on
+// `#open`, json-diff.html on `#compare` — hand pasted text over the way the
+// converter landing does, each under its own key, so a route only ever opens
+// what its own page sent. `#compare` carries {before, after} as JSON strings:
+// the inner documents stay text, so no number in them is ever parsed here.
+const OPEN_ROUTE = '#open';
+const OPEN_HANDOFF = 'wb-open-handoff';
+const COMPARE_ROUTE = '#compare';
+const COMPARE_HANDOFF = 'wb-compare-handoff';
+
+async function openLandingHandoff(route: string, text: string): Promise<void> {
+  if (route === OPEN_ROUTE) {
+    await openText(text, deriveTitle(text), null);
+    return;
+  }
+  let pair: { before?: unknown; after?: unknown } = {};
+  try { pair = JSON.parse(text) as typeof pair; } catch { /* reported below */ }
+  if (typeof pair.before !== 'string' || typeof pair.after !== 'string') {
+    pasteBox.focus();
+    showToast('the comparison could not be read — paste both documents again', 'bad');
+    return;
+  }
+  // Same order as the baseline picker's paste: the document on screen is the
+  // newer one, and the pasted "before" becomes its baseline.
+  if (await openText(pair.after, deriveTitle(pair.after), null)) {
+    await compareWith(pair.before, 'before', null, null);
   }
 }
 
@@ -7409,8 +7438,15 @@ async function boot(): Promise<void> {
   const wantsConverter = location.hash === CONVERT_ROUTE;
   // The handoff must win over a recent document. It is consumed synchronously
   // before even the sidebar read, so no IndexedDB restore can race ahead of it.
-  const convertHandoff: ConvertHandoff = wantsConverter
-    ? consumeConvertHandoff()
+  const convertHandoff: LandingHandoff = wantsConverter
+    ? consumeHandoff(CONVERT_HANDOFF)
+    : { kind: 'none' };
+  // The search landing pages' handoff, consumed just as early and for the same
+  // reason: a restored recent must not open ahead of the text they pasted.
+  const landingRoute = location.hash === OPEN_ROUTE || location.hash === COMPARE_ROUTE ? location.hash : null;
+  const landingHandoff: LandingHandoff =
+    landingRoute === OPEN_ROUTE ? consumeHandoff(OPEN_HANDOFF)
+    : landingRoute === COMPARE_ROUTE ? consumeHandoff(COMPARE_HANDOFF)
     : { kind: 'none' };
   await renderRecents(); // sidebar is populated the same either way
   if (location.hash === '#about') {
@@ -7433,6 +7469,19 @@ async function boot(): Promise<void> {
     await openText(convertHandoff.text, deriveTitle(convertHandoff.text), null);
     // Invalid input stays in the paste surface with its parse error; a stored
     // recent must not replace it and make the handoff appear to have worked.
+    ungate();
+    return;
+  }
+  if (landingHandoff.kind === 'unavailable') {
+    landing.classList.add('landing--app');
+    ungate();
+    pasteBox.focus();
+    showToast('the page could not hand over your JSON — paste it again', 'bad');
+    return;
+  }
+  if (landingRoute && landingHandoff.kind === 'ready') {
+    landing.classList.add('landing--app');
+    await openLandingHandoff(landingRoute, landingHandoff.text);
     ungate();
     return;
   }

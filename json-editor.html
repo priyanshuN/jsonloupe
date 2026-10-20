@@ -1,0 +1,146 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/json-editor.html" />
+  <!-- A search landing page, built like json-to-excel.html: the title, the
+       description and the <h1> carry the words people type into a search box
+       ("online json editor"), so the result reads as the answer to their question. -->
+  <title>Online JSON Editor for large files — jsonloupe</title>
+  <meta name="description" content="Online JSON editor that runs in your browser. Edit as a tree or as text with undo, repair broken JSON, and keep long ID numbers exact. Nothing is uploaded." />
+  <meta property="og:title" content="Online JSON editor" />
+  <meta property="og:description" content="Edit JSON as a tree or as text, with undo. Broken JSON is repaired, long IDs keep every digit, and the file never leaves your browser." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jsonloupe.dev/json-editor.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <!-- Link-preview card for HN, Reddit, X, Slack and Discord; its source is
+       .github/assets/og-image.svg. Crawlers need an absolute URL and a PNG. -->
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<!-- data-route and data-handoff tell tool-landing.js where to send the pasted
+     text; the app reads that key on that route and on no other. -->
+<body data-route="#open" data-handoff="wb-open-handoff">
+  <!-- index.html's marketing landing, reused whole (same #landing wrapper and
+       the same control ids), so this page needs almost no CSS of its own.
+       main.ts does not run here. -->
+  <section id="landing">
+    <header class="lp-header">
+      <a class="lp-brand" href="./" title="jsonloupe">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span>json<span class="brand-loupe">loupe</span></span>
+      </a>
+      <nav class="lp-nav">
+        <a href="#what">what you get</a>
+        <a href="#how">how it works</a>
+        <a href="#privacy">privacy</a>
+        <a href="./">the viewer</a>
+      </nav>
+      <span class="lp-spacer"></span>
+      <span class="lp-meta">free · no account</span>
+      <button id="cta-open" class="lp-cta" type="button">open the editor →</button>
+    </header>
+
+    <div class="lp-hero">
+      <div class="lp-hero-copy">
+        <span class="lp-pill">runs in this tab <span class="lp-pill-sep">·</span> nothing is uploaded</span>
+        <h1>Online JSON editor</h1>
+        <p class="lp-lede">Paste JSON and edit it as a tree, as text, or both side by side. Every edit can be undone, and the file never leaves this tab.</p>
+        <p class="lp-wedge">Most editors load 1234567890123456789 as 1234567890123456800. This one keeps every digit, through every edit, copy and download.</p>
+        <p class="lp-trust">0 bytes uploaded · no account · free</p>
+      </div>
+      <div class="lp-paste">
+        <div class="lp-paste-head">
+          <span class="lp-paste-title">Paste JSON</span>
+          <span class="lp-paste-status">nothing leaves this tab</span>
+        </div>
+        <div class="lp-paste-body">
+          <textarea id="paste-box" spellcheck="false"
+            placeholder="Paste JSON here, then press edit."></textarea>
+          <p class="lp-paste-hint">broken JSON — trailing commas, single quotes, cut-off logs — is repaired and flagged, and the original text is kept</p>
+          <div class="lp-paste-actions">
+            <button id="parse-btn" type="button">edit</button>
+            <button id="open-btn" type="button" title="Open the app and choose a file there — up to 200 MB">open a file instead</button>
+            <span class="lp-spacer"></span>
+            <span class="lp-note">⌃↵ to edit</span>
+          </div>
+          <div id="parse-error" class="error" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="lp-band" id="what">
+      <h2 class="lp-h2">What this editor does differently</h2>
+      <div class="lp-grid">
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-accent">edit</span>
+          <h3>Tree and text, side by side</h3>
+          <p>Change a value in the tree, or type in the code view with search and folding. Select a value in the tree and the code view jumps to its line. Undo and redo cover every edit.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-ok">repair</span>
+          <h3>Broken JSON gets fixed</h3>
+          <p>Trailing commas, single quotes, Python <code>True</code> and <code>None</code>, and log extracts cut off half way are repaired. The repair is flagged, and the original text is kept.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-number">numbers</span>
+          <h3>Long IDs keep every digit</h3>
+          <p>A 19-digit order number or a long decimal price stays exactly as you typed it. Nothing is turned into a rounded number on the way in or on the way out.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="lp-split" id="how">
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Big files stay fast</h2>
+        <p class="lp-body">The tree draws only the rows on screen, and the heavy work runs in the background, so a file with millions of items opens and scrolls without freezing the tab. Files up to 200 MB open.</p>
+
+      </section>
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Find anything</h2>
+        <p class="lp-body">Search by text or by pattern, filter the tree down to the matches, and copy the path of any value with one click.</p>
+        <div class="lp-chips">
+          <span class="lp-chip">undo / redo</span>
+          <span class="lp-chip">⌘S to apply</span>
+          <span class="lp-chip">download .json</span>
+        </div>
+      </section>
+    </div>
+
+    <section class="lp-band lp-privacy" id="privacy">
+      <div>
+        <h2 class="lp-h2 lp-h2-sm">Why nothing is uploaded</h2>
+        <p class="lp-body lp-body-wide">The editor runs inside this browser tab. Your file is read here and nowhere else. There is no server to send your file to, which is why it keeps working with your wifi off. Nothing is logged, counted, or kept anywhere but your own computer.</p>
+      </div>
+      <div class="lp-facts">
+        <div class="lp-fact"><span>bytes uploaded</span><span class="lp-fact-ok">0</span></div>
+        <div class="lp-fact"><span>account needed</span><span class="lp-fact-ok">none</span></div>
+        <div class="lp-fact"><span>works with wifi off</span><span class="lp-fact-ok">yes</span></div>
+        <div class="lp-fact"><span>price</span><span class="lp-fact-accent">free · MIT</span></div>
+      </div>
+    </section>
+
+    <footer class="lp-footer">
+      <span>jsonloupe — MIT</span>
+      <span class="lp-spacer"></span>
+      <a href="./json-diff.html">json diff</a>
+      <a href="./large-json-viewer.html">large files</a>
+      <a href="./json-to-excel.html">json to excel</a>
+      <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+      <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+    </footer>
+  </section>
+
+  <script src="/tool-landing.js"></script>
+</body>
+</html>

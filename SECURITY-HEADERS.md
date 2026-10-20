@@ -55,7 +55,8 @@ claim to have deployed.
 3. Create a response-header transform rule for hostnames `jsonloupe.dev` and
    `www.jsonloupe.dev`, on all paths, setting the five non-CSP headers above.
 4. Create a second response-header transform rule for the HTML paths `/`,
-   `/index.html`, `/json-to-excel.html`, `/spec.html`, and `/styleguide.html`,
+   `/index.html`, `/json-to-excel.html`, `/json-editor.html`, `/json-diff.html`,
+   `/large-json-viewer.html`, `/spec.html`, and `/styleguide.html`,
    setting `Content-Security-Policy` to the policy above. Limiting CSP to HTML
    leaves the capability-stripped Run worker free to compile only the script a
    user explicitly enters, while the document still restricts worker creation

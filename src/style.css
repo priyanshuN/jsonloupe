@@ -2106,7 +2106,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .lp-paste-body { padding: var(--gap-4) 18px 18px; }
 
-#paste-box {
+#paste-box,
+#paste-before {
   width: 100%;
   height: 212px;
   resize: none;
@@ -2119,7 +2120,18 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   outline: none;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-#paste-box:focus { border-color: var(--accent); box-shadow: var(--ring); }
+#paste-box:focus,
+#paste-before:focus { border-color: var(--accent); box-shadow: var(--ring); }
+/* json-diff.html stacks two boxes in the card, so each is half the height and
+   carries a small label saying which side of the comparison it is. */
+#landing .lp-paste-half { height: 104px; }
+.lp-paste-label {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+}
+.lp-paste-half + .lp-paste-label { margin-top: var(--gap-3); }
 /* Sits directly under the box, in both the marketing hero and the in-app paste
    view, so the decode capability is read before anything is clicked. */
 .lp-paste-hint {

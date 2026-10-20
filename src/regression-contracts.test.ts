@@ -98,10 +98,11 @@ describe('first-paint and navigation regression contracts', () => {
   });
 
   it('consumes a converter handoff before restoring any recent document', () => {
-    const consume = mainSource.match(/function consumeConvertHandoff\(\)[\s\S]*?^\}/m)?.[0] ?? '';
-    expect(consume).toContain('sessionStorage.getItem(CONVERT_HANDOFF)');
-    expect(consume).toContain('sessionStorage.removeItem(CONVERT_HANDOFF)');
+    const consume = mainSource.match(/function consumeHandoff\(key: string\)[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(consume).toContain('sessionStorage.getItem(key)');
+    expect(consume).toContain('sessionStorage.removeItem(key)');
     expect(consume).toContain('catch');
+    expect(mainSource).toContain('consumeHandoff(CONVERT_HANDOFF)');
 
     const bootStart = mainSource.indexOf('async function boot()');
     const handoffRead = mainSource.indexOf('const convertHandoff:', bootStart);

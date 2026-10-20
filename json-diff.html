@@ -1,0 +1,152 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/json-diff.html" />
+  <!-- A search landing page, built like json-to-excel.html: the title, the
+       description and the <h1> carry the words people type into a search box
+       ("compare json online / json diff"), so the result reads as the answer to their question. -->
+  <title>Compare JSON Online — a JSON diff that matches arrays by id — jsonloupe</title>
+  <meta name="description" content="Compare two JSON files in your browser. List items are matched by their id, so a reordered list does not show as all changed. Ignore noisy fields, keep long numbers exact, upload nothing." />
+  <meta property="og:title" content="Compare two JSON files" />
+  <meta property="og:description" content="A JSON diff that matches list items by id, ignores the fields you choose, keeps long numbers exact, and never uploads your files." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jsonloupe.dev/json-diff.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <!-- Link-preview card for HN, Reddit, X, Slack and Discord; its source is
+       .github/assets/og-image.svg. Crawlers need an absolute URL and a PNG. -->
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<!-- data-route and data-handoff tell tool-landing.js where to send the pasted
+     text; the app reads that key on that route and on no other. -->
+<body data-route="#compare" data-handoff="wb-compare-handoff">
+  <!-- index.html's marketing landing, reused whole (same #landing wrapper and
+       the same control ids), so this page needs almost no CSS of its own.
+       main.ts does not run here. -->
+  <section id="landing">
+    <header class="lp-header">
+      <a class="lp-brand" href="./" title="jsonloupe">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span>json<span class="brand-loupe">loupe</span></span>
+      </a>
+      <nav class="lp-nav">
+        <a href="#what">what you get</a>
+        <a href="#how">how it works</a>
+        <a href="#privacy">privacy</a>
+        <a href="./">the viewer</a>
+      </nav>
+      <span class="lp-spacer"></span>
+      <span class="lp-meta">free · no account</span>
+      <button id="cta-open" class="lp-cta" type="button">open the app →</button>
+    </header>
+
+    <div class="lp-hero">
+      <div class="lp-hero-copy">
+        <span class="lp-pill">runs in this tab <span class="lp-pill-sep">·</span> nothing is uploaded</span>
+        <h1>Compare two JSON files</h1>
+        <p class="lp-lede">Paste the older JSON and the newer JSON, and see exactly which values were added, removed or changed — by path, not by line.</p>
+        <p class="lp-wedge">Moved one item to the top of a list? A line-by-line diff marks the whole list as changed. This one matches items by their id.</p>
+        <p class="lp-trust">0 bytes uploaded · no account · free</p>
+      </div>
+      <div class="lp-paste">
+        <div class="lp-paste-head">
+          <span class="lp-paste-title">Paste two JSON documents</span>
+          <span class="lp-paste-status">nothing leaves this tab</span>
+        </div>
+        <div class="lp-paste-body">
+          <label class="lp-paste-label" for="paste-before">older (before)</label>
+          <textarea id="paste-before" class="lp-paste-half" spellcheck="false"
+            placeholder="Paste the older JSON here."></textarea>
+          <label class="lp-paste-label" for="paste-box">newer (after)</label>
+          <textarea id="paste-box" class="lp-paste-half" spellcheck="false"
+            placeholder="Paste the newer JSON here, then press compare."></textarea>
+          <p class="lp-paste-hint">you can also compare against a file, or against an earlier document you opened</p>
+          <div class="lp-paste-actions">
+            <button id="parse-btn" type="button">compare</button>
+            <button id="open-btn" type="button" title="Open the app and choose a file there — up to 200 MB">open a file instead</button>
+            <span class="lp-spacer"></span>
+            <span class="lp-note">⌃↵ to compare</span>
+          </div>
+          <div id="parse-error" class="error" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="lp-band" id="what">
+      <h2 class="lp-h2">The three things that make most JSON diffs noisy</h2>
+      <div class="lp-grid">
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-accent">lists</span>
+          <h3>List items are matched by id</h3>
+          <p>Items are paired by their <code>id</code>, by a key you choose, or by a key found for you. A list in a new order shows no changes, and a changed item shows only its changed fields.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-ok">noise</span>
+          <h3>Ignore the fields that always change</h3>
+          <p>Timestamps and request IDs differ on every run. Ignore them by name or by path, and only the real changes are left.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-number">numbers</span>
+          <h3>Long IDs are compared exactly</h3>
+          <p>Two IDs that differ only in the last digit are different. A diff that rounds both to the same number tells you they are equal.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="lp-split" id="how">
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Changes by path</h2>
+        <p class="lp-body">Every change is listed with its exact path, for example <code>$.orders[3].total</code>. Click a change to see it in the tree, next to the values around it.</p>
+        <pre class="lp-code">changed  $.orders[3].total     <span class="lp-str">41.90 → 44.90</span>
+added    $.orders[7]
+removed  $.customer.fax</pre>
+      </section>
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Large files too</h2>
+        <p class="lp-body">The comparison runs in the background, away from the page you are looking at, so two large files can be compared without freezing the tab.</p>
+        <div class="lp-chips">
+          <span class="lp-chip">match by id</span>
+          <span class="lp-chip">ignore fields</span>
+          <span class="lp-chip">exact numbers</span>
+        </div>
+      </section>
+    </div>
+
+    <section class="lp-band lp-privacy" id="privacy">
+      <div>
+        <h2 class="lp-h2 lp-h2-sm">Why nothing is uploaded</h2>
+        <p class="lp-body lp-body-wide">The comparison runs inside this browser tab. Both files are read here and nowhere else. There is no server to send your file to, which is why it keeps working with your wifi off. Nothing is logged, counted, or kept anywhere but your own computer.</p>
+      </div>
+      <div class="lp-facts">
+        <div class="lp-fact"><span>bytes uploaded</span><span class="lp-fact-ok">0</span></div>
+        <div class="lp-fact"><span>account needed</span><span class="lp-fact-ok">none</span></div>
+        <div class="lp-fact"><span>works with wifi off</span><span class="lp-fact-ok">yes</span></div>
+        <div class="lp-fact"><span>price</span><span class="lp-fact-accent">free · MIT</span></div>
+      </div>
+    </section>
+
+    <footer class="lp-footer">
+      <span>jsonloupe — MIT</span>
+      <span class="lp-spacer"></span>
+      <a href="./json-editor.html">json editor</a>
+      <a href="./large-json-viewer.html">large files</a>
+      <a href="./json-to-excel.html">json to excel</a>
+      <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+      <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+    </footer>
+  </section>
+
+  <script src="/tool-landing.js"></script>
+</body>
+</html>

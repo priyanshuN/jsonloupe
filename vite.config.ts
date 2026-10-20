@@ -83,6 +83,11 @@ export default defineConfig({
         spec: join(root, 'spec.html'),
         styleguide: join(root, 'styleguide.html'),
         jsonToExcel: join(root, 'json-to-excel.html'),
+        // Search landing pages: each answers one query people type, and hands
+        // the pasted text to the app (public/tool-landing.js).
+        jsonEditor: join(root, 'json-editor.html'),
+        jsonDiff: join(root, 'json-diff.html'),
+        largeJsonViewer: join(root, 'large-json-viewer.html'),
       },
     },
   },
