@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!-- Public pages only: styleguide.html is noindex and stays out. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://jsonloupe.dev/</loc></url>
+  <url><loc>https://jsonloupe.dev/json-to-excel.html</loc></url>
+  <url><loc>https://jsonloupe.dev/spec.html</loc></url>
+</urlset>
