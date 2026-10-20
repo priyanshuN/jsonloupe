@@ -7,6 +7,7 @@ SPDX-License-Identifier: MIT -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/" />
   <!-- WebMCP origin trial (Chrome 149-156): enables document.modelContext for
        visitors so in-browser agents can drive the open document. The token is
        origin-bound public data, expires 2026-11-17; renew or drop it when the
@@ -22,6 +23,15 @@ SPDX-License-Identifier: MIT -->
   <meta property="og:title" content="jsonloupe — a loupe for large JSON, and a JSON to Excel converter" />
   <meta property="og:description" content="Local-first JSON viewer, diff and query tool — and a converter that turns nested JSON into linked Excel or CSV tables. Lossless int64, five-million-element arrays, all in your browser tab." />
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jsonloupe.dev/" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <!-- Link-preview card for HN, Reddit, X, Slack and Discord; its source is
+       .github/assets/og-image.svg. Crawlers need an absolute URL and a PNG. -->
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
   <!-- The landing headline is the LCP element and uses Martian Mono; the lede
        right under it uses Space Grotesk. Discover both fonts from HTML instead
        of waiting for the stylesheet to reveal them. -->
