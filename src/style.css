@@ -1842,6 +1842,20 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   padding: 0 var(--gap-1);
 }
 .about-link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+/* GitHub and Sponsor beside the about link: the same dim ink, a square hit
+   area on the mini control height, and the sponsor heart takes the danger
+   hue only on hover, so the footer stays quiet until it is pointed at. */
+.foot-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ctl-h-mini);
+  height: var(--ctl-h-mini);
+  color: var(--text-dim);
+  border-radius: var(--r-sm);
+}
+.foot-icon:hover { color: var(--text); }
+.foot-sponsor:hover { color: var(--danger); }
 
 /* ---------- content shell ---------- */
 

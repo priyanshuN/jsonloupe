@@ -164,6 +164,13 @@ SPDX-License-Identifier: MIT -->
     <symbol id="i-tabler-message-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3 20l1.3 -3.9c-2.324 -3.437 -1.426 -7.872 2.1 -10.374c3.526 -2.501 8.59 -2.296 11.845 .48c3.255 2.777 3.695 7.266 1.029 10.501c-2.666 3.235 -7.615 4.215 -11.574 2.293l-4.7 1" />
     </symbol>
+    <!-- Tabler Icons 3.46.0, MIT: the sidebar footer's two outside links. -->
+    <symbol id="i-tabler-brand-github" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 19c-4.3 1.4 -4.3 -2.5 -6 -3m12 5v-3.5c0 -1 .1 -1.4 -.5 -2c2.8 -.3 5.5 -1.4 5.5 -6a4.6 4.6 0 0 0 -1.3 -3.2a4.2 4.2 0 0 0 -.1 -3.2s-1.1 -.3 -3.5 1.3a12.3 12.3 0 0 0 -6.2 0c-2.4 -1.6 -3.5 -1.3 -3.5 -1.3a4.2 4.2 0 0 0 -.1 3.2a4.6 4.6 0 0 0 -1.3 3.2c0 4.6 2.7 5.7 5.5 6c-.6 .6 -.6 1.2 -.5 2v3.5" />
+    </symbol>
+    <symbol id="i-tabler-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572" />
+    </symbol>
     <symbol id="i-tabler-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0" />
       <path d="M15 9h.01" />
@@ -226,6 +233,12 @@ SPDX-License-Identifier: MIT -->
         <div id="scheme-menu" popover role="menu" aria-label="Colour scheme"></div>
         <label class="glass-opt" id="glass-opt">glass<input type="checkbox" role="switch" class="chk chk-switch" id="glass-toggle" /></label>
         <a class="about-link" href="./#about" target="_blank" rel="noopener" title="About jsonloupe — features, privacy, spec">about</a>
+        <!-- Glyph-only links, so each carries an aria-label (rule 3). They
+             leave the app, so they open in a new tab like the about link. -->
+        <a class="foot-icon" href="https://github.com/priyanshuN/jsonloupe" target="_blank" rel="noopener noreferrer"
+          title="Source code on GitHub" aria-label="Source code on GitHub"><svg class="ic" aria-hidden="true"><use href="#i-tabler-brand-github"></use></svg></a>
+        <a class="foot-icon foot-sponsor" href="https://github.com/sponsors/priyanshuN" target="_blank" rel="noopener noreferrer"
+          title="Sponsor jsonloupe on GitHub" aria-label="Sponsor jsonloupe on GitHub"><svg class="ic" aria-hidden="true"><use href="#i-tabler-heart"></use></svg></a>
       </div>
     </aside>
     <button id="sidebar-scrim" type="button" tabindex="-1" aria-label="Close documents" hidden></button>

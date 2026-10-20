@@ -2052,6 +2052,12 @@ function enterConvertRoute(): void {
 // inside the app changes the address without reloading anything.
 window.addEventListener('hashchange', () => {
   if (location.hash === CONVERT_ROUTE) enterConvertRoute();
+  // The about link opens a new tab, where boot() puts the pitch up. A browser
+  // that follows it in the same tab (an embedded browser pane, a blocked
+  // popup) only changes the hash, and the workbench stayed on screen under an
+  // address that says #about. Reload into that same boot path instead: the
+  // open document is already stored, exactly as for a manual reload.
+  else if (location.hash === '#about') location.reload();
 });
 
 $('#convert-close').addEventListener('click', () => showTree());
