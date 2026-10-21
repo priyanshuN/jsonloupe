@@ -11,8 +11,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { DocPool } from './pool';
 import { threadDocHost } from './thread-host';
 import { TOOLS, ToolRouter } from './tools';
-
-const VERSION = '1.1.0';
+// A named import, so esbuild inlines only the version string, not the manifest.
+import { version as VERSION } from '../../package.json';
 
 const INSTRUCTIONS = `jsonloupe holds large or lossless JSON documents outside your context and answers
 questions about them. Before writing Python for counts, field coverage,

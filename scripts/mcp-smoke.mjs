@@ -134,6 +134,8 @@ try {
     clientInfo: { name: 'jsonloupe-smoke', version: '0' },
   });
   check('initialize handshake', init.result?.serverInfo?.name === 'jsonloupe', JSON.stringify(init).slice(0, 200));
+  const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  check('handshake reports the package version', init.result?.serverInfo?.version === version, init.result?.serverInfo?.version);
   rpc.notify('notifications/initialized', {});
 
   const list = await rpc.request('tools/list', {});
