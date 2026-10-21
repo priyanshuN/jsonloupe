@@ -3,7 +3,9 @@
   "compilerOptions": {
     // vite/client stays for the `?url` asset import in codec.ts, which the MCP
     // bundle resolves to the wasm bytes instead of a URL (see scripts/build-mcp.mjs).
-    "types": ["node", "vite/client"]
+    "types": ["node", "vite/client"],
+    // server.ts reports package.json's version in its MCP handshake.
+    "resolveJsonModule": true
   },
   "include": ["src/mcp"],
   "exclude": []
