@@ -2556,7 +2556,9 @@ async function importFiles(
     // imported function is one `×` away, which is what makes deciding for the
     // user acceptable here — nothing is replaced and nothing is lost.
     if (looksLikePlaybook(payload.text)) {
-      if (await importPlaybookText(payload.text, file.name)) continue;
+      // A playbook refused for room is still a playbook: opening it would
+      // replace the document on screen with the file the user meant to import.
+      if ((await importPlaybookText(payload.text, file.name)) !== 'not-a-playbook') continue;
       // Not actually a playbook after all — fall through and open it, so a
       // document that merely mentions the word still reads as a document.
     }
@@ -6639,11 +6641,14 @@ async function exportPlaybook(): Promise<void> {
  * someone wrote is the one outcome here that cannot be undone, so it is the one
  * thing import will not do; a duplicate, by contrast, is one `×` away.
  */
-async function importPlaybookText(text: string, fileName: string): Promise<boolean> {
+async function importPlaybookText(
+  text: string,
+  fileName: string,
+): Promise<'imported' | 'refused' | 'not-a-playbook'> {
   const res = parsePlaybook(text);
   if (!res.ok) {
     showToast(`${fileName}: ${res.error}`, 'bad');
-    return false;
+    return 'not-a-playbook';
   }
   const scripts = await store.listScripts();
   const checks = await store.listChecks();
@@ -6651,7 +6656,7 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
   const full = playbookRoomError(res.playbook, { functions: scripts.length, checks: checks.length }, store.KEEP_SAVED);
   if (full) {
     showToast(`${fileName}: ${full}`, 'bad');
-    return false;
+    return 'refused';
   }
   const taken = scripts.map((s) => s.name);
   let renamed = 0;
@@ -6674,7 +6679,7 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
   showToast(
     `imported ${fmtNumber(count)} playbook item${count === 1 ? '' : 's'}${renamed ? ` · ${fmtNumber(renamed)} renamed to keep yours` : ''}`,
   );
-  return true;
+  return 'imported';
 }
 
 runExportBtn.addEventListener('click', () => void exportPlaybook());

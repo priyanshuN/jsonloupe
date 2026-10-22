@@ -578,6 +578,16 @@ describe('interactive UI regression contracts', () => {
     expect(check).toBeLessThan(imp.indexOf('await store.saveCheck('));
     expect(imp).toContain('store.KEEP_SAVED');
   });
+
+  it('never opens a playbook that was refused for room as the document', () => {
+    // A boolean read "refused" as "not a playbook", so a drop into a full
+    // library fell through to openText and replaced the document on screen.
+    const imp = mainSource.match(/async function importPlaybookText\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(imp).toMatch(/if \(full\) \{[\s\S]*?return 'refused';/);
+    expect(imp).toMatch(/if \(!res\.ok\) \{[\s\S]*?return 'not-a-playbook';/);
+    const importer = mainSource.match(/async function importFiles\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(importer).toContain("(await importPlaybookText(payload.text, file.name)) !== 'not-a-playbook') continue;");
+  });
 });
 
 describe('document identity regression contracts', () => {
