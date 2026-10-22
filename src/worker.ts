@@ -21,7 +21,7 @@ import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, 
 import { profileQuery } from './profile';
 import { EXPORT_CHUNK_BYTES, MAX_EXPORT_BYTES } from './export-policy';
 import { csvCell, csvField } from './csv';
-import { numberParser } from './lossless';
+import { lparse as sharedParse, numberParser } from './lossless';
 import { convertInspect, convertPreview, convertRun, resetConvertCache } from './convert/session';
 import type { ConvertSpec } from './convert/index';
 import {
@@ -45,7 +45,7 @@ import {
   type PayloadDecodeFailure,
   type PayloadDecodeSuccess,
 } from './codec';
-import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber } from 'lossless-json';
+import { stringify as llStringify, isLosslessNumber, isSafeNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
 import { summarizeRepair } from './repair-summary';
 
@@ -57,8 +57,8 @@ import { summarizeRepair } from './repair-summary';
 // the run panel's warning. isSafeNumber answers the narrower question the panel
 // asks ("would plain JSON.parse round this?"), and it only runs on the boxed
 // minority, so the common document pays nothing for it. The flag is worker
-// state, which is why parsing here wraps the shared predicate instead of
-// calling ./lossless's own `lparse`.
+// state, which is why parsing here hands ./lossless's `lparse` a wrapper of the
+// shared predicate instead of the predicate itself.
 let sawUnsafeNumber = false;
 
 const trackedNumberParser = (v: string): unknown => {
@@ -70,7 +70,7 @@ const trackedNumberParser = (v: string): unknown => {
 };
 
 function lparse(text: string): unknown {
-  return llParse(text, undefined, trackedNumberParser as never);
+  return sharedParse(text, trackedNumberParser);
 }
 
 // A UTF-8 decoder may surface the byte-order mark as U+FEFF. JSON parsers do

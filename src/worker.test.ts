@@ -168,6 +168,30 @@ describe('parse', () => {
     expect(r.jsonl).toBe(true);
     expect(r.repaired).toBe(false);
   });
+
+  it('opens a repeated key with its last value, as JSON.parse does', () => {
+    expect(parse('{"a":1,"a":2}')).toMatchObject({ ok: true, repaired: false });
+    expect(stringify(0)).toBe('{"a":2}');
+
+    // One such line used to throw, and the JSONL fallback with it.
+    expect(parse('{"id":1,"msg":"x"}\n{"id":2,"msg":"y","msg":"z"}\n{"id":3}')).toMatchObject({ ok: true, jsonl: true });
+    expect(stringify(0)).toBe('[{"id":1,"msg":"x"},{"id":2,"msg":"z"},{"id":3}]');
+  });
+
+  it('keeps a "__proto__" member as data, never as the prototype', () => {
+    // The setter made an object value the prototype and dropped a scalar, so
+    // the member vanished and its fields answered queries as phantom keys.
+    const src = '{"__proto__":{"x":1},"a":1,"b":{"__proto__":5,"c":[{"__proto__":null}]}}';
+    expect(parse(src).ok).toBe(true);
+    expect(rows().map((r) => r.key)).toEqual([null, '__proto__', 'a', 'b']);
+    expect(stringify(0)).toBe(src);
+    expect(h<{ total: number }>({ type: 'query', q: '$.x' }).total).toBe(0);
+    expect(h<{ total: number }>({ type: 'query', q: '$.b.c[0].__proto__' }).total).toBe(1);
+
+    // An escaped spelling is the same key, and a boxed number keeps its digits.
+    expect(parse('{"\\u005f_proto__":9007199254740993,"n":1}').ok).toBe(true);
+    expect(stringify(0)).toBe('{"__proto__":9007199254740993,"n":1}');
+  });
 });
 
 // ---------- lossless numbers ----------
