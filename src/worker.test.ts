@@ -562,6 +562,15 @@ describe('setValue', () => {
     expect(stringify(0)).toBe('{"a":99}');
   });
 
+  it('shows the converter the kind an edit introduced', async () => {
+    parse('{"rows":[{"id":1,"v":1},{"id":2,"v":2}]}');
+    expect(await convertFields()).toEqual(['id:number', 'v:number']);
+    const rv = h<Reveal>({ type: 'revealPath', path: ['rows', 0, 'v'] });
+    const v = rows(rv.rowIndex, 1)[0];
+    expect(h<{ ok: boolean }>({ type: 'setValue', id: v.id, text: '"x"', index: v.index }).ok).toBe(true);
+    expect(await convertFields()).toEqual(['id:number', 'v:string,number']);
+  });
+
   it('rejects editing a container (not a leaf)', () => {
     parse('{"obj":{"x":1}}');
     const obj = rows().find((r) => r.key === 'obj')!;
@@ -995,7 +1004,28 @@ describe('unpack', () => {
     expect(h<{ ok: boolean }>({ type: 'unpack', id: p.id, index: p.index, commit: true }).ok).toBe(true);
     expect(await anchors()).toEqual(['$.payload[]']);
   });
+
+  it('shows the converter the fields a committed unpack created', async () => {
+    // The converter caches its inspection by document identity, and a commit
+    // rewrites the parent's slot in place, so the root is the same object after
+    // it. Without a reset the converter kept offering `meta` as a string and
+    // refused a column from `meta.a` as a path that does not exist.
+    parse('{"rows":[{"id":1,"meta":"{\\"a\\":1}"},{"id":2,"meta":"{\\"a\\":2}"}]}');
+    expect(await convertFields()).toEqual(['id:number', 'meta:string']);
+    const rv = h<Reveal>({ type: 'revealPath', path: ['rows', 0, 'meta'] });
+    const meta = rows(rv.rowIndex, 1)[0];
+    expect(h<{ ok: boolean }>({ type: 'unpack', id: meta.id, index: meta.index, commit: true }).ok).toBe(true);
+    expect(await convertFields()).toEqual(['id:number', 'meta:object,string', 'meta.a:number']);
+  });
 });
+
+/** The converter's view of the open document: each field of its first table, as `path:kinds`. */
+async function convertFields(): Promise<string[]> {
+  const res = (await handleAsync({ type: 'convertInspect' })) as {
+    inspection: { tables: { fields: { path: string; kinds: string[] }[] }[] };
+  };
+  return res.inspection.tables[0].fields.map((f) => `${f.path}:${f.kinds.join(',')}`);
+}
 
 // ---------- W1: undo-by-path (cross-boundary edge) ----------
 
