@@ -210,6 +210,20 @@ describe('predicates', () => {
     if (!top.ok || top.kind !== 'rows') throw new Error('bad');
     expect(top.rows).toEqual([[2], [0.5], [0.25], [0]]);
   });
+  it('does not treat inherited Object.prototype names as document keys', () => {
+    const records = [{ a: 1 }, { b: 2 }];
+    expect(value(runQuery(records, '$[?(@.constructor present)] | count'))).toBe(0);
+    expect(value(runQuery(records, '$[?(@.toString missing)] | count'))).toBe(2);
+    expect(value(runQuery(records, '$[?(@.hasOwnProperty)] | count'))).toBe(0);
+    expect(matches(runQuery(records, '$[0].constructor'))).toEqual([]);
+    const grouped = runQuery(records, '$[*] | group(@.valueOf)');
+    if (!grouped.ok || grouped.kind !== 'groups') throw new Error('bad');
+    expect(grouped.groups).toEqual([{ key: '(absent)', count: 2 }]);
+    // An own key with the same name is ordinary data.
+    const own: Record<string, unknown>[] = [{ constructor: 'Point' }, { a: 1 }];
+    expect(value(runQuery(own, "$[?(@.constructor == 'Point')] | count"))).toBe(1);
+    expect(matches(runQuery(own, '$[0].constructor'))).toEqual([{ path: [0, 'constructor'], value: 'Point' }]);
+  });
   it('orders zero below a positive fraction', () => {
     const rates = { items: [{ d: 0 }, { d: 0.3 }, { d: 0.7 }] };
     expect(value(runQuery(rates, '$.items[?(@.d < 0.5)] | count'))).toBe(2);

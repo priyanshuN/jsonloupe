@@ -519,7 +519,8 @@ function isObj(v: unknown): v is Record<string, unknown> {
 function resolveTail(v: unknown, tail: Tail[]): unknown {
   for (const s of tail) {
     if (s.kind === 'key') {
-      if (isObj(v) && s.name! in v) v = v[s.name!];
+      // Own keys only: `in` would find constructor/toString on every object.
+      if (isObj(v) && Object.prototype.hasOwnProperty.call(v, s.name!)) v = v[s.name!];
       else return undefined;
     } else {
       if (Array.isArray(v)) {
@@ -626,7 +627,9 @@ function* walk(root: unknown, segs: Seg[]): Generator<Match> {
     const seg = segs[index];
     switch (seg.kind) {
       case 'key':
-        if (isObj(value) && seg.name in value) yield* at(value[seg.name], [...path, seg.name], index + 1);
+        if (isObj(value) && Object.prototype.hasOwnProperty.call(value, seg.name)) {
+          yield* at(value[seg.name], [...path, seg.name], index + 1);
+        }
         return;
       case 'index': {
         if (!Array.isArray(value)) return;
