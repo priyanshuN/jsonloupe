@@ -974,7 +974,10 @@ export class ConvertView {
       // on the customize head, so the rail reads as a list of sheets rather
       // than as a column of text boxes.
       const name = el('span', 'convert-name', t.name);
-      name.title = t.name;
+      // A tooltip only when the name is cut off; otherwise it repeats the text.
+      name.addEventListener('mouseenter', () => {
+        name.title = name.scrollWidth > name.clientWidth ? t.name : '';
+      });
 
       const det = this.inspection?.tables.find((d) => d.anchor === t.anchor);
       const meta = el('span', 'convert-meta', det ? `${det.rows} row${det.rows === 1 ? '' : 's'}` : '');

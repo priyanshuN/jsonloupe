@@ -3601,6 +3601,8 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: var(--r);
   box-shadow: var(--shadow);
 }
+/* Set by main.ts when hanging leftward would cross the column's left edge. */
+.menu.menu-start { left: 0; right: auto; }
 .menu button {
   text-align: left;
   background: transparent;
@@ -5680,6 +5682,16 @@ mark.hl {
 @container viewer (max-width: 1000px) {
   #convert-title { display: none; }
 }
+/* Below 840px of viewer (a 955px window with the documents column open) the
+   four controls left the sentence ~90px, and "Ready · 2 sheets · 6 rows" stood
+   three lines tall. Here the bar breaks at the spacer instead: title and
+   sentence on the first row, every control on the second. The break is forced,
+   not a wrap, so a sentence changing length still moves no control. */
+@container viewer (max-width: 840px) {
+  /* --gap-1, because the empty spacer row is gapped on both sides. */
+  .convert-bar { flex-wrap: wrap; row-gap: var(--gap-1); }
+  .convert-bar > .spacer { flex-basis: 100%; }
+}
 /* Below the layout's own breakpoint there is no width left to shrink into, and
    a bar that overflows is worse than one that wraps. */
 @media (max-width: 900px) {
@@ -5793,6 +5805,10 @@ mark.hl {
    is named because an id outranks a class no matter which of the two wins the
    file. It keeps tabular figures: the counts in it change on every edit. */
 .convert-outcome { min-width: 0; }
+/* The view's name never gives way. Below ~1000px it shrank to 48px around a
+   67px word, and "Convert" ran underneath the outcome sentence beside it;
+   the outcome is the one that wraps. */
+.convert-bar > .sem-heading { flex-shrink: 0; }
 .convert-outcome #convert-count {
   color: var(--text);
   font-size: var(--fs-body);
