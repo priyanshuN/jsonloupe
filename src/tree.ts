@@ -307,6 +307,10 @@ export class VirtualTree {
     const start = Math.max(0, Math.floor(this.viewport.scrollTop / ROW_H) - OVERSCAN);
     const count = Math.min(this.total - start, Math.ceil(this.viewport.clientHeight / ROW_H) + 2 * OVERSCAN);
     if (count <= 0) {
+      // Still a new paint, so a slice fetched for the old total is stale: left
+      // on the old epoch it would land in the emptied layer and in lastRows.
+      ++this.epoch;
+      this.lastRows = [];
       this.layer.replaceChildren();
       return;
     }

@@ -174,6 +174,23 @@ describe('VirtualTree rendering and selection', () => {
     expect(spacer.style.height).toBe('88px');
   });
 
+  it('drops a slice still in flight when the tree empties under it', async () => {
+    // Run mode's result tree is emptied by setTotal(0) when a new document
+    // resets it; the slice it asked for before that must not paint after.
+    let answer: (rows: Row[]) => void = () => {};
+    const fetchRows = vi.fn(() => new Promise<Row[]>((resolve) => { answer = resolve; }));
+    const { layer, tree, inner } = harness({ fetchRows });
+    inner.total = 3;
+    const pending = inner.render();
+    inner.total = 0;
+    await inner.render();
+    answer([objectRow]);
+    await pending;
+    expect(layer.children).toHaveLength(0);
+    expect(inner.lastRows).toHaveLength(0);
+    expect(tree.getSelected()).toBeNull();
+  });
+
   it('scrolls bounded selections and restores focus after a repaint', async () => {
     const fetchRows = vi.fn(async () => [objectRow, leafRow]);
     const { viewport, layer, tree, inner } = harness({ fetchRows });
