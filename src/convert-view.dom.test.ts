@@ -59,8 +59,8 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K): HTMLElementTagName
   return document.createElement(tag);
 }
 
-function makeHarness(saved: SavedMapping[] = []): Harness {
-  const inspection = inspect({ doc: documentValue });
+function makeHarness(saved: SavedMapping[] = [], doc: unknown = documentValue): Harness {
+  const inspection = inspect({ doc });
   const starter = draftSpec(inspection);
   const count = node('div');
   const tables = node('div');
@@ -135,7 +135,7 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
         ];
         return { errors };
       }
-      return preview({ doc: documentValue }, value, { rows });
+      return preview({ doc }, value, { rows });
     }),
     run: vi.fn(async (value) => {
       if (runMode === 'throw') throw new Error('conversion unavailable');
@@ -222,6 +222,18 @@ function keydown(element: HTMLElement, key: string): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
   element.dispatchEvent(event);
   return event;
+}
+
+/** The open table's row for one output column; rows are rebuilt on most edits, so look it up fresh. */
+function columnRow(h: Harness, name: string): HTMLElement {
+  const row = [...h.els.cols.querySelectorAll<HTMLElement>('.convert-col')]
+    .find((item) => item.querySelector<HTMLInputElement>('.convert-colname')?.value === name);
+  if (!row) throw new Error(`no column row for ${name}`);
+  return row;
+}
+
+function effectiveColumn(h: Harness, table: string, name: string) {
+  return h.view.effective()?.tables.find((t) => t.name === table)?.columns.find((c) => c.name === name);
 }
 
 beforeEach(() => {
@@ -637,6 +649,218 @@ describe('converter view workflow', () => {
     await settlePreview();
     expect(vi.mocked(h.callbacks.inspect)).toHaveBeenCalledTimes(2);
     expect(h.els.tables.querySelectorAll('.convert-table')).toHaveLength(2);
+  });
+
+  it('renames a table without breaking what points at it, and refuses a name already taken', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    // An excluded column is remembered by table name, so it has to follow the rename.
+    const customer = columnRow(h, 'customer').querySelector<HTMLInputElement>('input.chk')!;
+    customer.checked = false;
+    change(customer);
+    h.els.detailName.value = 'shipments';
+    change(h.els.detailName);
+    await settlePreview();
+
+    let spec = h.view.effective()!;
+    expect(spec.tables.map((t) => t.name)).toEqual(['shipments', 'items']);
+    expect(spec.tables[0].columns.map((c) => c.name)).not.toContain('customer');
+    // The child keeps its link: a rename is not an unlink.
+    expect(spec.tables[1].parent).toEqual({ table: 'shipments', key: 'id', as: 'order_id' });
+
+    h.els.detailName.value = 'items';
+    change(h.els.detailName);
+    expect(h.toasts).toHaveBeenCalledWith('there is already a table called items', 'bad');
+    expect(h.els.detailName.value).toBe('shipments');
+    expect(h.view.effective()!.tables.map((t) => t.name)).toEqual(['shipments', 'items']);
+
+    // A blank name is not a rename either; the field gets the current one back.
+    h.els.detailName.value = '   ';
+    change(h.els.detailName);
+    expect(h.els.detailName.value).toBe('shipments');
+
+    // An unticked table stays unticked under its new name.
+    const include = h.els.tables.querySelector<HTMLInputElement>('.convert-table input[type="checkbox"]')!;
+    include.checked = false;
+    change(include);
+    h.els.detailName.value = 'dispatches';
+    change(h.els.detailName);
+    await settlePreview();
+    spec = h.view.effective()!;
+    expect(spec.tables.map((t) => t.name)).toEqual(['items']);
+    expect(spec.tables[0].parent).toBeUndefined();
+
+    const reinclude = h.els.tables.querySelector<HTMLInputElement>('.convert-table input[type="checkbox"]')!;
+    expect(reinclude.checked).toBe(false);
+    reinclude.checked = true;
+    change(reinclude);
+    await settlePreview();
+    spec = h.view.effective()!;
+    expect(spec.tables.map((t) => t.name)).toEqual(['dispatches', 'items']);
+    expect(spec.tables[0].columns.map((c) => c.name)).not.toContain('customer');
+    expect(spec.tables[1].parent?.table).toBe('dispatches');
+  });
+
+  it('switches a column between conversions and keeps only the settings that conversion reads', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    const setMode = (name: string, value: string): void => {
+      const mode = columnRow(h, name).querySelector<HTMLSelectElement>('.convert-mode')!;
+      mode.value = value;
+      change(mode);
+    };
+
+    setMode('customer', 'datetime');
+    expect(effectiveColumn(h, 'orders', 'customer')).toEqual({
+      name: 'customer',
+      from: 'customer',
+      type: 'datetime',
+      parse: 'yyyy-MM-dd HH:mm:ss',
+      out: 'yyyy-MM-dd HH:mm:ss',
+    });
+    // A date brings settings of its own, so its row opens on them.
+    expect(columnRow(h, 'customer').querySelector<HTMLElement>('.convert-col-options')!.hidden).toBe(false);
+
+    setMode('customer', 'lng');
+    expect(effectiveColumn(h, 'orders', 'customer')).toEqual({
+      name: 'customer',
+      from: 'customer',
+      type: 'geo',
+      part: 'lng',
+      form: 'pair',
+    });
+    setMode('customer', 'lat');
+    expect(effectiveColumn(h, 'orders', 'customer')?.part).toBe('lat');
+
+    setMode('customer', 'plain');
+    expect(effectiveColumn(h, 'orders', 'customer')).toEqual({ name: 'customer', from: 'customer' });
+
+    // A constant's text is a value, not a field path: leaving constant mode
+    // picks a real field instead of reading one named after the constant.
+    setMode('customer', 'constant');
+    const source = columnRow(h, 'customer').querySelector<HTMLInputElement>('.convert-source')!;
+    expect(source.getAttribute('aria-label')).toBe('Constant value for customer');
+    source.value = 'approved';
+    input(source);
+    expect(effectiveColumn(h, 'orders', 'customer')).toEqual({ name: 'customer', const: 'approved' });
+    setMode('customer', 'plain');
+    const plain = effectiveColumn(h, 'orders', 'customer')!;
+    expect(plain.const).toBeUndefined();
+    expect(plain.from).not.toBe('approved');
+    expect(h.inspection.tables[0].fields.map((field) => field.path)).toContain(plain.from);
+    await settlePreview();
+    expect(h.els.previewNote.textContent).not.toContain('problem');
+  });
+
+  it('edits how a date is read and written, and what a missing value does to its row', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    // A column that already has settings opens on them.
+    const options = columnRow(h, 'startTime').querySelector<HTMLElement>('.convert-col-options')!;
+    expect(options.hidden).toBe(false);
+    const [read, write] = [...options.querySelectorAll<HTMLSelectElement>('select')];
+    expect(read.value).toBe('HH:mm');
+    read.value = 'HH:mm:ss';
+    change(read);
+    write.value = 'epochMillis';
+    change(write);
+
+    const base = options.querySelector<HTMLInputElement>('input[placeholder^="today"]')!;
+    expect(base.value).toBe('dispatchDate');
+    base.value = ' 2026-08-01 ';
+    input(base);
+    expect(effectiveColumn(h, 'orders', 'startTime')).toMatchObject({
+      parse: 'HH:mm:ss',
+      out: 'epochMillis',
+      baseDate: '2026-08-01',
+    });
+    base.value = '  ';
+    input(base);
+    expect(effectiveColumn(h, 'orders', 'startTime')?.baseDate).toBeUndefined();
+
+    const missing = options.querySelector<HTMLInputElement>('input[placeholder="use default"]')!;
+    missing.value = 'n/a';
+    input(missing);
+    const skip = options.querySelector<HTMLInputElement>('.convert-skip input')!;
+    skip.checked = true;
+    change(skip);
+    expect(effectiveColumn(h, 'orders', 'startTime')).toMatchObject({ onMissing: 'n/a', skipRowIfMissing: true });
+    missing.value = '';
+    input(missing);
+    skip.checked = false;
+    change(skip);
+    const cleared = effectiveColumn(h, 'orders', 'startTime')!;
+    expect(cleared.onMissing).toBeUndefined();
+    expect(cleared.skipRowIfMissing).toBeUndefined();
+
+    // A coordinate's only setting is the shape it is written in.
+    const geo = columnRow(h, 'location_latitude').querySelector<HTMLElement>('.convert-col-options')!;
+    const form = geo.querySelector<HTMLSelectElement>('select')!;
+    expect([...form.options].map((option) => option.value)).toEqual(['pair', 'labelled', 'geojson']);
+    form.value = 'geojson';
+    change(form);
+    expect(effectiveColumn(h, 'orders', 'location_latitude')?.form).toBe('geojson');
+    await settlePreview();
+    const previewed = vi.mocked(h.callbacks.preview).mock.lastCall?.[0];
+    expect(previewed?.tables[0].columns.find((c) => c.name === 'location_latitude')?.form).toBe('geojson');
+  });
+
+  it('asks which day an undated time belongs to instead of quietly using today', async () => {
+    const h = makeHarness([], { shifts: [{ who: 'a', start: '09:30' }, { who: 'b', start: '10:15' }] });
+    await h.view.open();
+    await settlePreview();
+
+    const ask = h.els.cols.querySelector<HTMLElement>('.convert-ask')!;
+    const day = ask.querySelector<HTMLInputElement>('input[type="date"]')!;
+    expect(ask.querySelector('label')?.getAttribute('for')).toBe(day.id);
+    expect(day.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(effectiveColumn(h, 'shifts', 'start')?.baseDate).toBe('today');
+
+    day.value = '2026-08-08';
+    change(day);
+    expect(effectiveColumn(h, 'shifts', 'start')?.baseDate).toBe('2026-08-08');
+    day.value = '';
+    change(day);
+    expect(effectiveColumn(h, 'shifts', 'start')?.baseDate).toBe('today');
+  });
+
+  it('renames the parent-link column of a child table, ignoring a blank heading', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    h.els.tables.querySelectorAll<HTMLElement>('.convert-table')[1].click();
+    const link = h.els.cols.querySelector<HTMLInputElement>('.convert-link-name')!;
+    expect(link.closest('label')?.textContent).toContain('each row links to orders as');
+    expect(link.value).toBe('order_id');
+    link.value = ' order_ref ';
+    input(link);
+    expect(h.view.effective()!.tables[1].parent?.as).toBe('order_ref');
+    link.value = '  ';
+    input(link);
+    expect(h.view.effective()!.tables[1].parent?.as).toBe('order_ref');
+    await settlePreview();
+    expect(h.els.preview.querySelector('thead')?.textContent).toContain('order_ref');
+  });
+
+  it('clears the grid when the preview comes back without the table on screen', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+    expect(h.els.preview.querySelector('table')).not.toBeNull();
+
+    vi.mocked(h.callbacks.preview).mockResolvedValueOnce({ tables: [], warnings: [] });
+    h.els.arrayJoin.value = ' / ';
+    input(h.els.arrayJoin);
+    await settlePreview();
+    expect(h.els.preview.querySelector('table')).toBeNull();
+    expect(h.els.previewNote.textContent).toBe('this table is not included');
   });
 
   it('renders the no-table state and explains that there is nothing to convert', async () => {
