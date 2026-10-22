@@ -114,9 +114,12 @@ const UNKNOWN: UnknownShape = { kind: 'unknown' };
 const SCALAR: ScalarShape = { kind: 'scalar' };
 const SCALAR_TYPES = new Set(['string', 'number', 'boolean', 'null']);
 const MORE_KEYS = /^… \+\d+ more keys$/;
-const ARRAY_OF = /^array\(\d+\) of (.*)$/;
+const ARRAY_OF = /^array\((\d+)\) of (.*)$/;
 const ENTRY = /^(.+): (.*)$/;
 const KEY_CHARS = 120;
+// worker.ts SCHEMA_SAMPLE: the renderer merges only this many elements of an
+// array but still prints its full length.
+const ARRAY_SAMPLE = 30;
 
 /**
  * The rendered form of a key name — the inverse direction of the renderer's
@@ -150,7 +153,11 @@ class ShapeReader {
     const array = ARRAY_OF.exec(text);
     // `array(0) of unknown` — an empty array taught the renderer nothing about
     // its elements, so it teaches this nothing either.
-    if (array) return { kind: 'array', element: this.value(array[1], indent) };
+    if (array) {
+      const element = this.value(array[2], indent);
+      // Past the sample, the unseen elements could hold any key at any depth.
+      return { kind: 'array', element: Number(array[1]) > ARRAY_SAMPLE ? widen(element) : element };
+    }
     if (text === '{') return this.object(indent);
     const types = text.split('|');
     return types.every((type) => SCALAR_TYPES.has(type)) ? SCALAR : UNKNOWN;
@@ -192,6 +199,16 @@ class ShapeReader {
       fields.set(parsed[1], this.value(parsed[2], pad));
     }
   }
+}
+
+/** The shape as a superset: keys it lists still exist, but none it lacks is ruled out. */
+function widen(shape: Shape): Shape {
+  if (shape.kind === 'object') {
+    return { kind: 'object', open: true, fields: new Map([...shape.fields].map(([key, child]) => [key, widen(child)])) };
+  }
+  if (shape.kind === 'array') return { kind: 'array', element: widen(shape.element) };
+  // A scalar in every sampled element may still be an object in a later one.
+  return UNKNOWN;
 }
 
 function parseShape(schema: string): Shape | null {

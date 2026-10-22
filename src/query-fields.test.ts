@@ -338,6 +338,25 @@ describe('shapes the schema renders in ways that must not become false alarms', 
     silent('$..whatever', mixed);
   });
 
+  it('says nothing about keys only an element past the 30-element sample carries', () => {
+    // renderSpec merges the first 30 elements but prints the real length, so
+    // `refund` on elements 36-40 is invisible here and still in the document.
+    const sampled = ['{', '  items: array(40) of {', '    id: number', '    meta: {', '      tag: string', '    }', '  }', '}'].join('\n');
+    silent('$.items[?(@.refund)] | count', sampled);
+    silent('$.items[*].refund | sum', sampled);
+    silent('$.items[*].meta.extra', sampled);
+    clean('$.items[*].id', sampled);
+    clean('$.items[*].meta.tag', sampled);
+    const items = Array.from({ length: 40 }, (_, id) => (id < 35 ? { id } : { id, refund: 5 }));
+    const result = runQuery({ items }, '$.items[?(@.refund)] | count');
+    expect(result.ok && result.kind === 'value' && result.value).toBe(5);
+
+    // Scalars in every sampled element may still be objects further on.
+    silent('$.values[*].x', ['{', '  values: array(40) of number', '}'].join('\n'));
+    // Within the sample, the render is still the whole truth.
+    expect(names('$.items[*].refund', sampled.replace('array(40)', 'array(30)'))).toEqual(['refund']);
+  });
+
   it('says nothing about the elements of an empty array', () => {
     const empty = ['{', '  rows: array(0) of unknown', '}'].join('\n');
     clean('$.rows', empty);
