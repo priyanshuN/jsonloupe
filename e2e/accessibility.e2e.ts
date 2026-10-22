@@ -119,6 +119,19 @@ test('the converter shows a typed missing-value default whole at laptop widths',
   }
 });
 
+test('a long code token on a landing card wraps inside a phone-width card', async ({ page }) => {
+  // `.lp-grid` clips overflow, so a nowrap token lost its last characters at
+  // the card edge rather than scrolling the page, which nothing else catches.
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto('/json-to-excel.html');
+  const overrun = await page.locator('.lp-cell code').first().evaluate((code) => {
+    const cell = code.closest('.lp-cell') as HTMLElement;
+    const right = cell.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(cell).paddingRight);
+    return Math.max(...[...code.getClientRects()].map((r) => r.right)) - right;
+  });
+  expect(overrun).toBeLessThanOrEqual(0.5);
+});
+
 test('the sample compared with a reformatted copy of itself reads as identical', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await openSample(page);

@@ -2325,9 +2325,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: var(--r-xs);
 }
 .lp-cell p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.6; text-wrap: pretty; }
-/* A token is one word: `[0 … 9999]` split at its space read as two fragments
-   of code with prose between them. */
-.lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); white-space: nowrap; }
+/* Code wraps like the prose around it: json-to-excel's 37-character
+   `items/0/sku, …` token is wider than a phone card, and `.lp-grid` clips what
+   overflows. A short token that must not split (`[0 … 9999]`, which read as two
+   fragments of code with prose between them) takes .lp-nobr instead. */
+.lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
 /* Evidence on the flagship card: the same int64 twice, exact then as a float
    parser returns it — stacked so the last digit's drift is the whole story.
    Scoped under .lp-cell because it IS a cell paragraph: `.lp-cell p` outranked

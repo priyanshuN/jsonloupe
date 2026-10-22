@@ -6,6 +6,7 @@ import { runQuery } from './query';
 // which tsconfig.json types for the browser and deliberately denies node types.
 import html from '../index.html?raw';
 import styleguide from '../styleguide.html?raw';
+import excelPage from '../json-to-excel.html?raw';
 
 /** Every module's source, for the checks that ask "does anything use this?". */
 const sources = import.meta.glob<string>('./*.ts', { query: '?raw', import: 'default', eager: true });
@@ -159,6 +160,16 @@ describe('the shell as a landing page', () => {
         { status: 'FAILED', failureReason: 'CAPACITY' },
       ],
     }, query)).toMatchObject({ ok: true, kind: 'groups' });
+  });
+});
+
+describe('code tokens on the landing cards', () => {
+  it('wrap with their prose, and only a short token that must not split is held whole', () => {
+    // `.lp-grid` clips what overflows, so a nowrap token wider than a phone
+    // card (json-to-excel's `items/0/sku, …`) was cut off at its edge. The
+    // wrap itself is measured in e2e; this holds the markup it relies on.
+    expect(excelPage).toContain('<code>items/0/sku, items/1/sku, items/2/sku</code>');
+    expect(html).toContain('<code class="lp-nobr">[0 … 9999]</code>');
   });
 });
 
