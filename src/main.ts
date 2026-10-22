@@ -4610,7 +4610,7 @@ $('#table-close').addEventListener('click', () => showTree());
 type QueryResp =
   | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: { i: number; pathText: string; preview: string }[] }
   | { ok: true; kind: 'value'; label: string; value: number | string | null; note?: string }
-  | { ok: true; kind: 'groups'; label: string; groups: { key: string; count: number }[]; truncated: boolean }
+  | { ok: true; kind: 'groups'; label: string; total: number; groups: { key: string; count: number }[]; truncated: boolean }
   | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean }
   | { ok: false; error: string; pos: number };
 
@@ -5228,8 +5228,9 @@ function queryCsvButton(): HTMLButtonElement {
 
 function queryResultCount(res: QueryResp | null): number | null {
   if (!res?.ok) return null;
-  if (res.kind === 'matches' || res.kind === 'rows') return res.total;
-  if (res.kind === 'groups') return res.groups.length;
+  // `groups` is the first page (the engine caps it at 1000); a check counts
+  // every group, exactly as it counts every match or row.
+  if (res.kind === 'matches' || res.kind === 'rows' || res.kind === 'groups') return res.total;
   if (res.kind === 'value' && typeof res.value === 'number' && Number.isSafeInteger(res.value) && res.value >= 0) {
     return res.value;
   }
@@ -5339,10 +5340,10 @@ function renderAskResult(res: QueryResp, preview = false): void {
       row.append(k, c);
       askResult.appendChild(row);
     }
-    if (res.groups.length > 50) {
+    if (res.total > 50) {
       const more = document.createElement('div');
       more.className = 'ask-label';
-      more.textContent = `… +${res.groups.length - 50} more groups`;
+      more.textContent = `… +${fmtNumber(res.total - 50)} more groups`;
       askResult.appendChild(more);
     }
     if (!preview) askResultActions.appendChild(queryCsvButton());

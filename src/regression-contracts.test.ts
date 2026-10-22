@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
+import { evaluateCheck } from './check';
 import { fmtBytes, hasRawZstdMagic, payloadSniffNeedsDecode } from './intake';
+import { runQuery } from './query';
 import appHtml from '../index.html?raw';
 import converterHtml from '../json-to-excel.html?raw';
 import readme from '../README.md?raw';
@@ -485,6 +487,21 @@ describe('interactive UI regression contracts', () => {
     // Rule 15: the panel no longer narrates a control that is already on screen.
     expect(mainSource).not.toContain('query ready — review it, then run locally');
     expect(mainSource).not.toContain('translating… (only the question and field names are sent)');
+  });
+
+  it('counts a saved check on a group query by every group, not the first page', () => {
+    // The query bar asks for no window, so the engine returns the first 1000
+    // groups and the real number in `total`. A check that counted the page
+    // would pre-fill "exactly 1000" and keep passing on 2000 groups.
+    const items = Array.from({ length: 1500 }, (_, id) => ({ id }));
+    const grouped = runQuery({ items }, '$.items[*] | group(@.id)');
+    if (!grouped.ok || grouped.kind !== 'groups') throw new Error('expected groups');
+    expect(grouped.groups).toHaveLength(1000);
+    expect(evaluateCheck({ type: 'exact-count', count: 1500 }, grouped.total).pass).toBe(true);
+    const count = mainSource.match(/function queryResultCount\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(count).toMatch(/res\.kind === 'groups'\) return res\.total;/);
+    expect(count).not.toContain('groups.length');
+    expect(mainSource).toContain('more.textContent = `… +${fmtNumber(res.total - 50)} more groups`');
   });
 
   it('gives the unknown-field warning a home inside the pipeline card', () => {
