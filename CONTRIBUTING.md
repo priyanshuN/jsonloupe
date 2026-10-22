@@ -62,7 +62,7 @@ The short version, which is enough to place most changes:
   payloads) rather than reaching into internals. Copy the style of the
   neighbouring test.
 - **`npm test` and `npm run build` clean.** The build runs `tsc --noEmit`
-  (strict) before bundling, so a type error fails the build.
+  (strict) alongside bundling, so a type error fails the build.
 - **Comments that say why, not what.** This codebase leans on that heavily. If
   you spent an hour finding out why the obvious version doesn't work, that
   hour belongs in a comment.
@@ -95,8 +95,8 @@ The enforceable parts run in CI:
   in every tracked TypeScript, JavaScript, CSS, and HTML source file;
 - `npm run lint:security` runs Biome's FLOSS security rules and the selected
   TypeScript style rules;
-- `npm run build` runs strict TypeScript checks for browser, CLI, and MCP before
-  producing the bundles;
+- `npm run build` runs strict TypeScript checks for browser, CLI, and MCP
+  alongside producing the bundles, and fails if any check fails;
 - `npm run coverage` runs the FLOSS test suite and fails below 90% statement or
   80% branch coverage; this assertion-rich execution is also the project's
   dynamic analysis and runs again for every proposed release;
