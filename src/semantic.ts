@@ -395,8 +395,8 @@ export function semanticValueEqual(left: unknown, right: unknown): boolean {
   }
   if (isJsonObject(left) || isJsonObject(right)) {
     if (!isJsonObject(left) || !isJsonObject(right)) return false;
-    const leftKeys = Object.keys(left).sort(naturalCompare);
-    const rightKeys = Object.keys(right).sort(naturalCompare);
+    const leftKeys = Object.keys(left).sort(canonicalKeyCompare);
+    const rightKeys = Object.keys(right).sort(canonicalKeyCompare);
     if (leftKeys.length !== rightKeys.length) return false;
     for (let i = 0; i < leftKeys.length; i++) {
       if (leftKeys[i] !== rightKeys[i]) return false;
@@ -1645,7 +1645,7 @@ function canonicalValue(value: unknown): string {
         return `a${value.length}:[${value.map(canonicalValue).join(',')}]`;
       }
       if (isJsonObject(value)) {
-        const keys = Object.keys(value).sort(naturalCompare);
+        const keys = Object.keys(value).sort(canonicalKeyCompare);
         return `o${keys.length}:{${keys
           .map((key) => `${key.length}:${key}=${canonicalValue(value[key])}`)
           .join(',')}}`;
@@ -1665,6 +1665,15 @@ function sameKeys(left: readonly string[], right: readonly string[]): boolean {
 
 function naturalCompare(left: string, right: string): number {
   return naturalCollator.compare(left, right);
+}
+
+// Equality and canonical tokens need a total order over keys. The natural
+// collator ties keys that differ only by case or accent ('a'/'A', 'e'/'é'), and
+// a stable sort then keeps each side's insertion order, so {a,A} and {A,a}
+// sorted differently and key order leaked into the result. Code units break
+// the tie; display sorts keep the plain collator.
+function canonicalKeyCompare(left: string, right: string): number {
+  return naturalCompare(left, right) || (left < right ? -1 : left > right ? 1 : 0);
 }
 
 function ratio(numerator: number, denominator: number): number {

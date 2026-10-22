@@ -35,6 +35,28 @@ describe('schema-free semantic comparison', () => {
     expect(result.root.status).toBe('equal');
   });
 
+  it('ignores key order for keys that differ only by case or accent', () => {
+    // The natural collator ties 'a' with 'A' and 'e' with 'é'; a stable sort
+    // then keeps each side's insertion order, so the two sides disagreed.
+    expect(semanticValueEqual({ a: 1, A: 2 }, { A: 2, a: 1 })).toBe(true);
+    expect(semanticValueEqual({ 'é': 1, e: 2 }, { e: 2, 'é': 1 })).toBe(true);
+    expect(semanticValueEqual({ a: 1, A: 2 }, { A: 1, a: 2 })).toBe(false);
+
+    const unordered = compareSemantic([{ a: 1, A: 2 }], [{ A: 2, a: 1 }], { mode: 'unordered' });
+    expect(unordered.verdict).toBe('identical');
+
+    const embedded = compareSemantic({ s: '{"a":1,"A":2}' }, { s: '{"A":2,"a":1}' });
+    expect(embedded.root.children[0].embedded).toBe('same');
+
+    const identity = compareSemantic(
+      [{ id: 1, a: 1, A: 2 }, { id: 1, x: 1 }, { id: 2 }],
+      [{ id: 1, A: 2, a: 1 }, { id: 1, x: 1 }, { id: 2 }],
+      { rules: { $: { mode: 'identity', keys: ['id'] } } },
+    );
+    expect(identity.verdict).toBe('identical');
+    expect(identity.summary.ambiguous).toBe(0);
+  });
+
   it('auto-aligns shuffled entity arrays and naturally sorts matched identities', () => {
     const left = {
       users: [
