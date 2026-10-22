@@ -13,6 +13,26 @@ describe('exact numeric operations', () => {
     expect(compareExactNumeric(b, new LosslessNumber('9007199254740993.0'))).toBe(0);
   });
 
+  it('orders zero, in any spelling, below the fractions between 0 and 1', () => {
+    // lossless-json normalizes zero to exponent 0 and decides same-sign values
+    // on the exponent first, so 0.5 (exponent -1) once sorted below 0.
+    const zeros = [0, -0, new LosslessNumber('0.0'), new LosslessNumber('-0'), new LosslessNumber('0e5')];
+    for (const zero of zeros) {
+      expect(compareExactNumeric(0.5, zero)).toBe(1);
+      expect(compareExactNumeric(zero, 0.5)).toBe(-1);
+      expect(compareExactNumeric(new LosslessNumber('1e-7'), zero)).toBe(1);
+      expect(compareExactNumeric(-0.5, zero)).toBe(-1);
+      expect(compareExactNumeric(zero, 2)).toBe(-1);
+      expect(compareExactNumeric(zero, 0)).toBe(0);
+    }
+    expect(compareExactNumeric(0.25, 0.5)).toBe(-1);
+
+    const stats = new ExactNumericStats();
+    stats.add(0.5);
+    stats.add(0);
+    expect(stats.summary()).toMatchObject({ min: 0, max: 0.5 });
+  });
+
   it('sums unsafe integers and precise decimals without rounding', () => {
     const stats = new ExactNumericStats();
     stats.add(new LosslessNumber('9007199254740992'));

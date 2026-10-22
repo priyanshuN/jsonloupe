@@ -201,6 +201,15 @@ describe('predicates', () => {
     expect(value(runQuery(ids, '$.rows[?(@.id == 9007199254740993)] | count'))).toBe(1);
     expect(value(runQuery(ids, '$.rows[?(@.id > 9007199254740992)] | count'))).toBe(1);
   });
+  it('orders values between 0 and 1 above zero in filters, min and top', () => {
+    const prices = { rows: [{ p: 0.5 }, { p: 0 }, { p: 2 }, { p: 0.25 }] };
+    expect(value(runQuery(prices, '$.rows[?(@.p > 0)] | count'))).toBe(3);
+    expect(value(runQuery(prices, '$.rows[?(@.p < 0)] | count'))).toBe(0);
+    expect(value(runQuery(prices, '$.rows[*] | min(@.p)'))).toBe(0);
+    const top = runQuery(prices, '$.rows[*] | top(@.p)');
+    if (!top.ok || top.kind !== 'rows') throw new Error('bad');
+    expect(top.rows).toEqual([[2], [0.5], [0.25], [0]]);
+  });
 });
 
 describe('pipes', () => {
