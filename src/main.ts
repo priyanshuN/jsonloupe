@@ -14,7 +14,8 @@ import type {
   CompareError,
 } from './protocol';
 import { SemanticCompareView, type CompareRow } from './compare-view';
-import { ConvertView } from './convert-view';
+// Type only — the converter is fetched the first time it opens (loadConverter).
+import type { ConvertView } from './convert-view';
 import type { ConvertReport, ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
 import { onlyStoredZipEntry } from './one-file-zip';
 // Type only — the module itself is loaded lazily, and only where the browser
@@ -1912,7 +1913,7 @@ compareBtn.addEventListener('click', () => void showBaselinePicker());
 
 // The worker keeps the document; this view keeps the spec. Every call ships the
 // spec down and gets rows back, so the parsed document still never crosses.
-const converter = new ConvertView(
+const converterArgs: ConstructorParameters<typeof ConvertView> = [
   {
     count: $('#convert-count'),
     tables: $('#convert-tables'),
@@ -1963,7 +1964,25 @@ const converter = new ConvertView(
     docStem,
     docRevision: () => currentDocumentRevision,
   },
-);
+];
+
+// convert-view.ts was 32 KB of the 212 KB the landing downloaded before it could
+// paint, and neither the landing nor a freshly opened document needs it, so it
+// is a lazy chunk like ./code: fetched on the first open, constructed once, and
+// kept. `converter` is null until then; the pane's buttons that read it are only
+// on screen after an open has begun the fetch.
+let converter: ConvertView | null = null;
+let converterLoad: Promise<ConvertView> | null = null;
+
+function loadConverter(): Promise<ConvertView> {
+  converterLoad ??= import('./convert-view').then((mod) => {
+    converter = new mod.ConvertView(...converterArgs);
+    return converter;
+  });
+  // A failed fetch is not remembered: the next open asks the network again.
+  converterLoad.catch(() => { converterLoad = null; });
+  return converterLoad;
+}
 
 function openConverter(): void {
   showPane('convert');
@@ -1971,7 +1990,17 @@ function openConverter(): void {
   // before its first await and keeps it live from there, which is more than the
   // shell can do from out here — it knows which table is selected and this does
   // not. The counts stay in the converter's own bar, as the table view's do.
-  void converter.open().catch((err: Error) => showToast(err.message, 'bad'));
+  loadConverter().then(
+    (view) => {
+      // Only the first open waits on the chunk. Someone who moved to another
+      // pane while it arrived keeps that pane's strip.
+      if (activePane !== 'convert') return;
+      void view.open().catch((err: Error) => showToast(err.message, 'bad'));
+    },
+    // Same case ensureEditor meets for the code view: a deploy replaced the
+    // hashed chunk this tab points at.
+    () => showToast('jsonloupe was updated since this tab loaded — reload the page to convert', 'bad'),
+  );
 }
 
 convertBtn.addEventListener('click', openConverter);
@@ -2061,7 +2090,7 @@ window.addEventListener('hashchange', () => {
 });
 
 $('#convert-close').addEventListener('click', () => showTree());
-$('#convert-spec').addEventListener('click', () => converter.downloadSpec());
+$('#convert-spec').addEventListener('click', () => converter?.downloadSpec());
 $('#convert-import').addEventListener('click', () => $<HTMLInputElement>('#convert-import-file').click());
 $<HTMLInputElement>('#convert-import-file').addEventListener('change', async (event) => {
   const input = event.currentTarget as HTMLInputElement;
@@ -2069,7 +2098,7 @@ $<HTMLInputElement>('#convert-import-file').addEventListener('change', async (ev
   input.value = '';
   if (!file) return;
   try {
-    converter.importSpecText(await file.text(), file.name);
+    (await loadConverter()).importSpecText(await file.text(), file.name);
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'bad');
   }
@@ -2081,13 +2110,13 @@ $<HTMLInputElement>('#convert-target-file').addEventListener('change', async (ev
   input.value = '';
   if (!file) return;
   try {
-    converter.importTargetHeadersText(await file.text(), file.name);
+    (await loadConverter()).importTargetHeadersText(await file.text(), file.name);
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'bad');
   }
 });
 $('#convert-dl').addEventListener('click', () => {
-  void converter.downloadResult().catch((err: Error) => showToast(err.message, 'bad'));
+  void converter?.downloadResult().catch((err: Error) => showToast(err.message, 'bad'));
 });
 
 baselineRecents.addEventListener('click', async (event) => {
