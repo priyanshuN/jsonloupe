@@ -11,6 +11,10 @@ const CAPABILITIES = [
   'indexedDB',
   'caches',
   'navigator',
+  'Worker',
+  'SharedWorker',
+  'WebTransport',
+  'BroadcastChannel',
 ] as const;
 
 interface SandboxWorker {
