@@ -852,6 +852,10 @@ function buildIdentityRows(
         plan.counts.matched++;
         if (moved) plan.counts.moved++;
       }
+      // These pairings are a guess, so a position difference between them is
+      // not a reorder: counting it would report a move nobody can vouch for and
+      // list the row under the moved filter. The node still carries both
+      // indices, so the row says where each side sits.
       const pairings = pairSameIndexFirst(exact.leftRemaining, exact.rightRemaining);
       for (const [leftValue, rightValue] of pairings) {
         rows.push({
@@ -860,10 +864,6 @@ function buildIdentityRows(
           left: leftValue,
           right: rightValue,
           status: 'ambiguous',
-          moved:
-            !!leftValue &&
-            !!rightValue &&
-            leftValue.index !== rightValue.index,
         });
         plan.counts.ambiguous++;
       }

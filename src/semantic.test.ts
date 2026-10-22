@@ -295,6 +295,23 @@ describe('schema-free semantic comparison', () => {
     expect(rows.filter((row) => row.right !== null)).toHaveLength(1);
   });
 
+  it('does not count a guessed pairing of ambiguous identities as a move', () => {
+    const result = compareSemantic(
+      { rows: [{ id: 1, v: 1 }, { id: 1, v: 2 }, { id: 3 }] },
+      { rows: [{ id: 3 }, { id: 1, v: 3 }, { id: 1, v: 4 }] },
+      { rules: { '$.rows': { mode: 'identity', keys: 'id' } } },
+    );
+    const plan = planAt(result.plans, '$.rows');
+    const rows = result.root.children[0].children;
+
+    // Only id=3 is known to have moved; the id=1 rows were paired by guess.
+    expect(plan.counts).toMatchObject({ matched: 1, moved: 1, ambiguous: 2 });
+    expect(result.summary.moved).toBe(1);
+    expect(rows.filter((row) => row.status === 'ambiguous' && row.moved)).toEqual([]);
+    // The guessed pair still says where each side sits.
+    expect(rows.some((row) => row.status === 'ambiguous' && row.leftIndex === 0 && row.rightIndex === 2)).toBe(true);
+  });
+
   it('normalizes nested collection paths and applies a wildcard rule', () => {
     const left = {
       teams: [
