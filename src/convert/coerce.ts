@@ -73,7 +73,19 @@ export type Cell = { text: string; kind: 'text' | 'number' | 'datetime' };
 // A number is only worth handing over as a real number when its digits survive
 // a double exactly. Past fifteen of them an int64 id comes back rounded, and
 // those digits are the reason someone opened this tool — so it travels as text.
-const EXACT_AS_DOUBLE = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
+const PLAIN_DECIMAL = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
+
+/**
+ * Whether a plain decimal's digits survive a double. The shape check alone
+ * bounds the integer and the fraction separately, which still lets through 25
+ * significant digits — `123456789012345.678` comes back from a double as
+ * `…345.67`. The limit is on the digits together, so they are counted: sign and
+ * point dropped, then the leading zeros, which only place the point.
+ */
+export function exactAsDouble(text: string): boolean {
+  if (!PLAIN_DECIMAL.test(text)) return false;
+  return text.replace(/^-/, '').replace('.', '').replace(/^0+/, '').length <= 15;
+}
 
 /** Text that was never anything else: constants, fill-ins for missing values. */
 export function textCell(text: string): Cell {
@@ -81,7 +93,7 @@ export function textCell(text: string): Cell {
 }
 
 function numberOrText(text: string): Cell {
-  return EXACT_AS_DOUBLE.test(text) ? { text, kind: 'number' } : { text, kind: 'text' };
+  return exactAsDouble(text) ? { text, kind: 'number' } : { text, kind: 'text' };
 }
 
 /**

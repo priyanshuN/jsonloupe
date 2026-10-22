@@ -166,6 +166,20 @@ describe('a cell is written as what the document said it was', () => {
     expect(cells).toContain('<c r="A3"><v>42</v></c>');
   });
 
+  // Fifteen digits before the point and ten after each fit the old shape check,
+  // so a 25-digit decimal went out as a numeric cell and Excel rounded it.
+  it('keeps a decimal past fifteen significant digits as text', () => {
+    const cells = unzip(
+      buildXlsx([
+        sheet('v', ['v'], [[num('123456789012345.678')], [num('1234567890.1234567')], [num('1.10')], [num('0.000123')]]),
+      ]),
+    ).get('xl/worksheets/sheet1.xml')!.body;
+    expect(cells).toContain('<is><t xml:space="preserve">123456789012345.678</t></is>');
+    expect(cells).toContain('<is><t xml:space="preserve">1234567890.1234567</t></is>');
+    expect(cells).toContain('<c r="A4"><v>1.10</v></c>');
+    expect(cells).toContain('<c r="A5"><v>0.000123</v></c>');
+  });
+
   it('writes the header as a label even where the label reads like a number', () => {
     const cells = unzip(buildXlsx([sheet('t', ['2026'], [[num('1')]])])).get(
       'xl/worksheets/sheet1.xml',
