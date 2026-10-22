@@ -160,6 +160,11 @@ export function csvHeader(text: string): string[] {
   return cells.filter(Boolean);
 }
 
+/** A setting beyond the defaults — the reason a column row starts open. */
+function hasColumnSettings(c: ColumnSpec): boolean {
+  return c.type !== undefined || c.onMissing !== undefined || c.skipRowIfMissing === true;
+}
+
 export function bestSource(target: string, candidates: string[]): string | undefined {
   const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
   const exact = candidates.find((candidate) => normalize(candidate.replace(/^\^+\./, '')) === normalize(target));
@@ -409,6 +414,10 @@ export class ConvertView {
   // whatever field the user is still typing in.
   private errorHosts = new Map<ColumnSpec, HTMLElement>();
   private tableMetas = new Map<string, HTMLElement>();
+  // Which column rows have their settings open, by table and column name. A
+  // row nobody has toggled opens when it has a setting worth seeing.
+  private colOpen = new Map<string, boolean>();
+  private optionIds = 0;
   private problemsHost: HTMLElement | null = null;
   // Writing the file is the one operation here that is neither debounced nor
   // cancellable, so it is the one that has to say it is running.
@@ -423,7 +432,7 @@ export class ConvertView {
     private els: {
       count: HTMLElement;
       tables: HTMLElement;
-      detailName: HTMLElement;
+      detailName: HTMLInputElement;
       detailSrc: HTMLElement;
       cols: HTMLElement;
       previewNote: HTMLElement;
@@ -470,6 +479,13 @@ export class ConvertView {
       title: this.els.download.title,
     };
     this.els.addColumn.addEventListener('click', () => this.addColumn());
+    this.els.detailName.addEventListener('change', () => {
+      const t = this.full?.tables[this.selected];
+      if (!t) return;
+      this.renameTable(t.name, this.els.detailName.value.trim() || t.name);
+      // A refused or blank name puts the current one back in the field.
+      this.els.detailName.value = this.full?.tables[this.selected]?.name ?? '';
+    });
     this.els.saved.addEventListener('change', () => void this.loadSelectedMapping());
     this.els.save.addEventListener('click', () => void this.saveMapping());
     // Enter in a named field commits what the field is for, as it does in the
@@ -527,7 +543,9 @@ export class ConvertView {
     this.els.cols.replaceChildren();
     this.els.preview.replaceChildren();
     this.showPreviewNote('inspecting this document…');
-    this.els.detailName.textContent = '';
+    this.colOpen.clear();
+    this.els.detailName.value = '';
+    this.els.detailName.disabled = true;
     this.els.detailSrc.textContent = '';
     this.els.report.hidden = true;
     this.cbs.setLead(RESTING_LEAD);
@@ -952,13 +970,14 @@ export class ConvertView {
         void this.refreshPreview();
       });
 
-      const name = el('input', 'convert-name') as HTMLInputElement;
-      name.value = t.name;
-      name.spellcheck = false;
-      name.title = 'Name of this sheet or file';
-      name.setAttribute('aria-label', `Output name for ${t.name}`);
-      name.addEventListener('click', (e) => e.stopPropagation());
-      name.addEventListener('change', () => this.renameTable(t.name, name.value.trim() || t.name));
+      // Text, like a workbook's sheet tab. Renaming happens in the sheet field
+      // on the customize head, so the rail reads as a list of sheets rather
+      // than as a column of text boxes.
+      const name = el('span', 'convert-name', t.name);
+      // A tooltip only when the name is cut off; otherwise it repeats the text.
+      name.addEventListener('mouseenter', () => {
+        name.title = name.scrollWidth > name.clientWidth ? t.name : '';
+      });
 
       const det = this.inspection?.tables.find((d) => d.anchor === t.anchor);
       const meta = el('span', 'convert-meta', det ? `${det.rows} row${det.rows === 1 ? '' : 's'}` : '');
@@ -1047,14 +1066,16 @@ export class ConvertView {
     this.problemsHost = null;
     const t = this.full?.tables[this.selected];
     if (!t) {
-      this.els.detailName.textContent = '';
+      this.els.detailName.value = '';
+      this.els.detailName.disabled = true;
       this.els.detailSrc.textContent = '';
       host.append(this.cbs.emptyState('No table selected', 'Pick one on the left to edit its columns.'));
       this.cbs.setLead(RESTING_LEAD);
       this.syncActions();
       return;
     }
-    this.els.detailName.textContent = t.name;
+    this.els.detailName.value = t.name;
+    this.els.detailName.disabled = false;
     this.els.detailSrc.textContent = friendlyPath(t.anchor);
     // The strip says which table the columns below belong to, in the same
     // vocabulary the rail uses.
@@ -1260,6 +1281,8 @@ export class ConvertView {
 
     mode.addEventListener('change', () => {
       this.setColumnMode(c, mode.value, source.value);
+      // Dates and coordinates bring settings of their own; show them.
+      if (c.type) this.colOpen.set(key, true);
       this.renderDetail();
       void this.refreshPreview();
     });
@@ -1267,29 +1290,55 @@ export class ConvertView {
     // The list runs down and the output runs across, so the glyph and the words
     // have to name different axes: the arrows say where the row goes, the labels
     // say what that does to the sheet.
-    const up = el('button', 'btn-icon btn-mini btn-quiet') as HTMLButtonElement;
+    const up = el('button', 'btn-icon btn-mini btn-quiet convert-col-up') as HTMLButtonElement;
     up.type = 'button';
     up.title = 'Move this column earlier in the output';
     up.setAttribute('aria-label', 'Move this column earlier');
     up.append(icon('move-up'));
     up.addEventListener('click', () => this.moveColumn(c, -1));
-    const down = el('button', 'btn-icon btn-mini btn-quiet') as HTMLButtonElement;
+    const down = el('button', 'btn-icon btn-mini btn-quiet convert-col-down') as HTMLButtonElement;
     down.type = 'button';
     down.title = 'Move this column later in the output';
     down.setAttribute('aria-label', 'Move this column later');
     down.append(icon('move-down'));
     down.addEventListener('click', () => this.moveColumn(c, 1));
-    const remove = el('button', 'btn-icon btn-mini btn-quiet', '×') as HTMLButtonElement;
+    const remove = el('button', 'btn-icon btn-mini btn-quiet convert-col-remove', '×') as HTMLButtonElement;
     remove.type = 'button';
     remove.title = 'Remove column';
     remove.setAttribute('aria-label', 'Remove column');
     remove.addEventListener('click', () => this.removeColumn(c));
 
-    row.append(chk, name, mode, source, up, down, remove);
+    // Claimed now and filled by paintErrors, so a problem can appear on this row
+    // without the row being rebuilt underneath whoever is typing in it. It sits
+    // outside the settings so a closed row still says what is wrong with it.
+    const problem = el('span', 'convert-col-error');
+    problem.hidden = true;
+    this.errorHosts.set(c, problem);
+
+    // One line per column; what to do when a value is missing, how to read a
+    // date, and what the chosen field holds open under it on request. A row
+    // with a setting already made opens by itself, so nothing set is hidden.
     const options = this.columnOptions(c);
     options.prepend(hint);
+    options.id = `convert-col-options-${++this.optionIds}`;
+    const open = this.colOpen.get(key) ?? hasColumnSettings(c);
+    options.hidden = !open;
+    const more = el('button', 'btn-icon btn-mini btn-quiet convert-col-more', open ? '▾' : '▸') as HTMLButtonElement;
+    more.type = 'button';
+    more.title = 'Column settings: what fills a missing value, whether to skip the row, how to read dates';
+    more.setAttribute('aria-label', `Settings for ${c.name}`);
+    more.setAttribute('aria-expanded', String(open));
+    more.setAttribute('aria-controls', options.id);
+    more.addEventListener('click', () => {
+      const next = !!options.hidden;
+      options.hidden = !next;
+      more.textContent = next ? '▾' : '▸';
+      more.setAttribute('aria-expanded', String(next));
+      this.colOpen.set(key, next);
+    });
+
+    row.append(more, chk, name, mode, source, up, down, remove, options, problem);
     describe();
-    row.append(options);
     if (this.offCols.has(key)) row.classList.add('off');
     return row;
   }
@@ -1338,12 +1387,6 @@ export class ConvertView {
 
   private columnOptions(c: ColumnSpec): HTMLElement {
     const host = el('div', 'convert-col-options');
-    // Claimed now and filled by paintErrors, so a problem can appear on this row
-    // without the row being rebuilt underneath whoever is typing in it.
-    const problem = el('span', 'convert-col-error');
-    problem.hidden = true;
-    this.errorHosts.set(c, problem);
-    host.append(problem);
     if (c.type === 'datetime') {
       host.append(this.optionSelect('read', c.parse ?? '', DATETIME_FORMATS, (value) => { c.parse = value; }));
       host.append(this.optionSelect('write', c.out ?? '', DATETIME_OUTPUTS, (value) => { c.out = value; }));
@@ -1621,11 +1664,19 @@ export class ConvertView {
     const table = el('table', 'convert-grid');
     const thead = el('thead');
     const hr = el('tr');
+    // The row gutter numbers the rows the way the spreadsheet will: the
+    // headings are row 1, so the first record is row 2.
+    const corner = el('th', 'rownum', '1');
+    corner.setAttribute('aria-hidden', 'true');
+    hr.append(corner);
     for (const c of cols) hr.append(el('th', undefined, c));
     thead.append(hr);
     const tbody = el('tbody');
-    for (const r of rows) {
+    for (const [i, r] of rows.entries()) {
       const tr = el('tr');
+      const num = el('td', 'rownum', String(i + 2));
+      num.setAttribute('aria-hidden', 'true');
+      tr.append(num);
       for (const v of r) {
         const td = el('td', v === '' ? 'empty' : undefined, v);
         td.title = v;

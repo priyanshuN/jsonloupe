@@ -16,7 +16,23 @@
   var convert = document.getElementById('parse-btn');
   var openFile = document.getElementById('open-btn');
   var cta = document.getElementById('cta-open');
+  var sample = document.getElementById('sample-btn');
   var err = document.getElementById('parse-error');
+
+  // The same two orders the example spreadsheet on this page is drawn from,
+  // so the first click produces the sheets the visitor has just looked at.
+  // Kept as text, not an object literal: JSON.stringify would round the
+  // 19-digit ids, which is the exact loss the page promises does not happen.
+  var SAMPLE = [
+    '{"orders":[',
+    '  {"id":1234567890123456789,"status":"shipped","placed_at":"2026-10-01","total":27.50,',
+    '   "items":[{"sku":"MUG-RED","qty":2,"price":8.75},{"sku":"TEA-500G","qty":1,"price":10.00}],',
+    '   "address":{"city":"Pune","postcode":"411001"}},',
+    '  {"id":1234567890123456790,"status":"packing","placed_at":"2026-10-02","total":12.50,',
+    '   "items":[{"sku":"TEA-500G","qty":1,"price":10.00},{"sku":"SPOON","qty":2,"price":1.25}],',
+    '   "address":{"city":"Delhi","postcode":"110001"}}',
+    ']}',
+  ].join('\n');
 
   // Anything left from an earlier visit in this tab is stale by definition:
   // the only reader is the app, and it reads once, on arrival. The same call
@@ -65,6 +81,28 @@
   convert.addEventListener('click', convertNow);
   openFile.addEventListener('click', openApp);
   cta.addEventListener('click', openApp);
+  sample.addEventListener('click', function () {
+    box.value = SAMPLE;
+    convertNow();
+  });
+
+  // The example spreadsheet's sheet tabs. Without scripting the first sheet
+  // stays on screen, which is a complete picture on its own.
+  var tabs = document.querySelectorAll('.lp-sheet-tab');
+  var sheets = document.querySelectorAll('.lp-sheet-grid table');
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var name = tab.getAttribute('data-sheet');
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.classList.toggle('on', on);
+        t.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      sheets.forEach(function (s) {
+        s.hidden = s.getAttribute('data-sheet') !== name;
+      });
+    });
+  });
   box.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();

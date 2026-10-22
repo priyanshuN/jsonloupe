@@ -413,7 +413,9 @@ function nameTables(tables: DetectedTable[]): void {
 }
 
 function leafName(anchor: string): string {
-  const parts = anchor.replace(/[[\]{}]/g, '').split('.').filter(Boolean);
+  // The root `$` is not a segment. Left in, it became the leaf of a top-level
+  // array, and the sheet came out named `$` instead of `rows`.
+  const parts = anchor.replace(/^\$/, '').replace(/[[\]{}]/g, '').split('.').filter(Boolean);
   return parts.length ? parts[parts.length - 1] : 'rows';
 }
 

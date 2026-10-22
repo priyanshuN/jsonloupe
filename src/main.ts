@@ -3248,6 +3248,13 @@ const isMoreMenuOpen = (): boolean => !moreMenu.hidden;
 function setMoreMenu(open: boolean): void {
   moreMenu.hidden = !open;
   moreBtn.setAttribute('aria-expanded', String(open));
+  // The menu hangs leftward from ⋯. When the toolbar wraps, ⋯ can land near
+  // the column's left edge, and #content's overflow cut the menu's first
+  // characters off under the sidebar. Hang it rightward when that would happen.
+  moreMenu.classList.remove('menu-start');
+  if (open && moreMenu.getBoundingClientRect().left < $('#content').getBoundingClientRect().left) {
+    moreMenu.classList.add('menu-start');
+  }
 }
 
 moreBtn.addEventListener('click', () => setMoreMenu(!isMoreMenuOpen()));

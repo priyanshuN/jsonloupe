@@ -37,10 +37,11 @@ SPDX-License-Identifier: MIT -->
   <!-- This is index.html's marketing landing, reused whole rather than
        re-dressed: the same #landing wrapper and the same ids on the paste
        panel's controls, so every rule that dresses that panel — including the
-       one loud button and the red tint on an invalid box — applies here and
-       this page adds no CSS of its own. main.ts does NOT run on this page; the
-       small script at the end of the body is all the behaviour there is, and
-       all it does is hand the pasted text to the app. -->
+       one loud button and the red tint on an invalid box — applies here. The
+       one thing this page adds is the example spreadsheet (.lp-sheet in
+       style.css). main.ts does NOT run on this page; the small script at the
+       end of the body is all the behaviour there is: it switches the example's
+       sheet tabs and hands the pasted text to the app. -->
   <section id="landing">
     <header class="lp-header">
       <a class="lp-brand" href="./" title="jsonloupe">
@@ -49,7 +50,6 @@ SPDX-License-Identifier: MIT -->
       </a>
       <nav class="lp-nav">
         <a href="#what">what you get</a>
-        <a href="#how">how it works</a>
         <a href="#privacy">privacy</a>
         <a href="./">the viewer</a>
       </nav>
@@ -60,14 +60,40 @@ SPDX-License-Identifier: MIT -->
 
     <div class="lp-hero">
       <div class="lp-hero-copy">
-        <span class="lp-pill">runs in this tab <span class="lp-pill-sep">·</span> nothing is uploaded</span>
         <h1>Convert JSON to Excel</h1>
-        <p class="lp-lede">Paste the JSON you were handed and get a spreadsheet back: one sheet per list, already joined up by ID, with every digit of every number intact.</p>
-        <!-- The one line that decides whether this page is worth their next ten
-             seconds: it names the exact mess they got from the last converter
-             they tried. -->
-        <p class="lp-wedge">A list inside your file becomes its own sheet — not sixty columns called items/0/sku, items/1/sku, items/2/sku.</p>
-        <p class="lp-trust">0 bytes uploaded · no account · free</p>
+        <p class="lp-lede">Paste the JSON you were handed and get a spreadsheet back: one sheet per list, joined up by ID, with every digit of every number intact.</p>
+        <!-- What the visitor gets, drawn as the thing itself. These rows are
+             the converter's real output for the sample behind "try a sample",
+             so the picture and the first click agree. -->
+        <figure class="lp-sheet" aria-label="Example spreadsheet with two sheets, orders and items">
+          <div class="lp-sheet-grid">
+            <table data-sheet="orders">
+              <thead><tr><td class="lp-sheet-n"></td><th>id</th><th>status</th><th>total</th><th>address.city</th></tr></thead>
+              <tbody>
+                <tr><td class="lp-sheet-n">2</td><td class="lp-sheet-id">1234567890123456789</td><td>shipped</td><td class="lp-sheet-num">27.50</td><td>Pune</td></tr>
+                <tr><td class="lp-sheet-n">3</td><td class="lp-sheet-id">1234567890123456790</td><td>packing</td><td class="lp-sheet-num">12.50</td><td>Delhi</td></tr>
+                <!-- Blank rows, as a spreadsheet shows them: both sheets are the
+                     same height, so switching tabs never moves the tabs. -->
+                <tr><td class="lp-sheet-n">4</td><td></td><td></td><td></td><td></td></tr>
+                <tr><td class="lp-sheet-n">5</td><td></td><td></td><td></td><td></td></tr>
+              </tbody>
+            </table>
+            <table data-sheet="items" hidden>
+              <thead><tr><td class="lp-sheet-n"></td><th class="lp-sheet-join">order_id</th><th>sku</th><th>qty</th><th>price</th></tr></thead>
+              <tbody>
+                <tr><td class="lp-sheet-n">2</td><td class="lp-sheet-id">1234567890123456789</td><td>MUG-RED</td><td class="lp-sheet-num">2</td><td class="lp-sheet-num">8.75</td></tr>
+                <tr><td class="lp-sheet-n">3</td><td class="lp-sheet-id">1234567890123456789</td><td>TEA-500G</td><td class="lp-sheet-num">1</td><td class="lp-sheet-num">10.00</td></tr>
+                <tr><td class="lp-sheet-n">4</td><td class="lp-sheet-id">1234567890123456790</td><td>TEA-500G</td><td class="lp-sheet-num">1</td><td class="lp-sheet-num">10.00</td></tr>
+                <tr><td class="lp-sheet-n">5</td><td class="lp-sheet-id">1234567890123456790</td><td>SPOON</td><td class="lp-sheet-num">2</td><td class="lp-sheet-num">1.25</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="lp-sheet-tabs">
+            <button type="button" class="lp-sheet-tab on" data-sheet="orders" aria-pressed="true">orders</button>
+            <button type="button" class="lp-sheet-tab" data-sheet="items" aria-pressed="false">items</button>
+          </div>
+          <figcaption class="lp-sheet-note">Each order's items land on their own sheet, with an order_id column filled in so they join back.</figcaption>
+        </figure>
       </div>
       <div class="lp-paste">
         <div class="lp-paste-head">
@@ -80,6 +106,7 @@ SPDX-License-Identifier: MIT -->
           <p class="lp-paste-hint">you see the sheets it found, and can rename or drop columns, before anything downloads</p>
           <div class="lp-paste-actions">
             <button id="parse-btn" type="button">convert</button>
+            <button id="sample-btn" type="button" title="Convert the two example orders shown on this page">try a sample</button>
             <button id="open-btn" type="button" title="Open the converter and choose a file there — no size limit">open a file instead</button>
             <span class="lp-spacer"></span>
             <span class="lp-note">⌃↵ to convert</span>
@@ -90,7 +117,7 @@ SPDX-License-Identifier: MIT -->
     </div>
 
     <section class="lp-band" id="what">
-      <h2 class="lp-h2">The three things that usually go wrong</h2>
+      <h2 class="lp-h2">What this converter gets right</h2>
       <div class="lp-grid">
         <article class="lp-cell">
           <span class="lp-tag lp-tag-accent">lists</span>
@@ -98,41 +125,27 @@ SPDX-License-Identifier: MIT -->
           <p>An order with three items does not become <code>items/0/sku, items/1/sku, items/2/sku</code>. The items land on their own sheet with the order's ID on every row, so a lookup or a pivot works the way you already know.</p>
         </article>
         <article class="lp-cell">
-          <span class="lp-tag lp-tag-ok">privacy</span>
-          <h3>The file never leaves your browser</h3>
-          <p>There is nothing to upload, no account to make, and no server behind this page that could keep a copy. Turn your wifi off once the page has loaded and the conversion still works.</p>
-        </article>
-        <article class="lp-cell">
           <span class="lp-tag lp-tag-number">numbers</span>
           <h3>Long IDs keep every digit</h3>
           <p>A 19-digit order number comes out as the number you put in, not rounded off in the last four digits. The same goes for prices and quantities: what went in is what comes out.</p>
         </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-ok">your say</span>
+          <h3>You approve it before it downloads</h3>
+          <p>You see real rows from your own file first, and rename headings or drop columns. Save the setup, and next month's file gives you the same sheets with the same headings.</p>
+          <div class="lp-chips lp-cell-chips">
+            <span class="lp-chip">.xlsx</span>
+            <span class="lp-chip">one CSV per sheet</span>
+            <span class="lp-chip">saved setups</span>
+          </div>
+        </article>
       </div>
     </section>
 
-    <div class="lp-split" id="how">
-      <section class="lp-split-cell">
-        <h2 class="lp-h2 lp-h2-sm">Your file, as sheets</h2>
-        <p class="lp-body">One sheet per list, joined by an ID column that is filled in for you. Download it as an Excel file, or as a folder of CSVs if you are feeding it to something else.</p>
-        <pre class="lp-code">orders        id · customer · placed_at
-order_items   <span class="lp-str">order_id</span> · sku · qty · price
-addresses     <span class="lp-str">order_id</span> · line1 · city · postcode</pre>
-      </section>
-      <section class="lp-split-cell">
-        <h2 class="lp-h2 lp-h2-sm">You approve it before it downloads</h2>
-        <p class="lp-body">You see real rows from your own file first, and rename headings or drop the columns you do not want. Save the setup when it looks right, and next month's file gives you the same sheets with the same headings — no redoing it by hand.</p>
-        <div class="lp-chips">
-          <span class="lp-chip">.xlsx</span>
-          <span class="lp-chip">one CSV per sheet</span>
-          <span class="lp-chip">saved setups</span>
-        </div>
-      </section>
-    </div>
-
     <section class="lp-band lp-privacy" id="privacy">
       <div>
-        <h2 class="lp-h2 lp-h2-sm">Why nothing is uploaded</h2>
-        <p class="lp-body lp-body-wide">The conversion runs inside this browser tab, the way a formula runs inside Excel. Your file is read here and nowhere else — there is no server to send it to, which is why it keeps working with your wifi off. Nothing is logged, counted, or kept anywhere but your own computer, so a file you are not allowed to email is a file you are allowed to convert.</p>
+        <h2 class="lp-h2 lp-h2-sm">The file never leaves your browser</h2>
+        <p class="lp-body lp-body-wide">The conversion runs inside this tab, the way a formula runs inside Excel. There is no server to send your file to, so it keeps working with your wifi off. A file you are not allowed to email is a file you are allowed to convert.</p>
       </div>
       <div class="lp-facts">
         <div class="lp-fact"><span>bytes uploaded</span><span class="lp-fact-ok">0</span></div>
