@@ -7,6 +7,7 @@ import {
   draftSpec,
   inspect,
   preview,
+  validateSpec,
   type ConvertReport,
   type ConvertSpec,
   type Inspection,
@@ -283,6 +284,27 @@ describe('converter view workflow', () => {
     rows[0].focus();
     expect(keydown(rows[0], ' ').defaultPrevented).toBe(true);
     expectSelected(0, 'orders');
+  });
+
+  it('drops the parent link to a table whose every column is unticked', async () => {
+    // effective() judged the links before it dropped column-less tables, so
+    // `parts` kept pointing at the `lines` it had just removed and the mapping
+    // failed with an unknown parent.
+    const h = makeHarness([], { orders: [{ id: 1, lines: [{ note: 'n', parts: [{ sku: 'x' }] }] }] });
+    await h.view.open();
+    await settlePreview();
+    const lines = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')]
+      .find((row) => row.textContent?.includes('lines'))!;
+    lines.click();
+    await settlePreview();
+    const chk = columnRow(h, 'note').querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    chk.checked = false;
+    change(chk);
+    await settlePreview();
+    const spec = h.view.effective()!;
+    expect(spec.tables.map((t) => t.name)).toEqual(['orders', 'parts']);
+    expect(spec.tables[1].parent).toBeUndefined();
+    expect(validateSpec(spec)).toEqual({ ok: true });
   });
 
   it('keeps row clicks selectable without stealing checkbox or name interactions', async () => {

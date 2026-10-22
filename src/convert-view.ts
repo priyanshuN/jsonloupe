@@ -633,7 +633,13 @@ export class ConvertView {
   /** The spec as currently edited: excluded tables and columns actually removed. */
   effective(): ConvertSpec | null {
     if (!this.full) return null;
-    const kept = this.full.tables.filter((t) => !this.offTables.has(t.name));
+    // Columns first: a table with every column unticked is dropped too, and the
+    // parent links below have to be judged against the tables that survive
+    // that, or a child kept its link to the dropped one and failed validation.
+    const kept = this.full.tables
+      .filter((t) => !this.offTables.has(t.name))
+      .map((t) => ({ ...t, columns: t.columns.filter((c) => !this.offCols.has(`${t.name}\u0000${c.name}`)) }))
+      .filter((t) => t.columns.length > 0);
     const names = new Set(kept.map((t) => t.name));
     return {
       ...this.full,
@@ -642,8 +648,7 @@ export class ConvertView {
         // A parent link to a table the user has just unticked is not an error to
         // show them — it is a link that no longer means anything.
         parent: t.parent && names.has(t.parent.table) ? t.parent : undefined,
-        columns: t.columns.filter((c) => !this.offCols.has(`${t.name}\u0000${c.name}`)),
-      })).filter((t) => t.columns.length > 0),
+      })),
     };
   }
 
