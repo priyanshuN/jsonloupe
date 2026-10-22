@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // @vitest-environment happy-dom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Row } from './protocol';
 import { VirtualTree, type TreeCallbacks } from './tree';
 
@@ -327,5 +327,340 @@ describe('VirtualTree search marks', () => {
     expect(leaf.querySelector('.val mark.hl')?.textContent).toBe('pay');
     tree.setHighlight('');
     expect(inner.rowEl(leafRow).querySelector('mark')).toBeNull();
+  });
+});
+
+// A plain primitive leaf: no unpack offer, no annotations, its own type class.
+const numberRow: Row = {
+  id: 5,
+  index: 2,
+  depth: 2,
+  key: 'count',
+  type: 'number',
+  preview: '41',
+  hasChildren: false,
+  childCount: 0,
+  expanded: false,
+};
+
+/** A tree already painted with `rows`, so the delegated handlers can find them. */
+async function painted(rows: Row[], overrides: Partial<TreeCallbacks> = {}) {
+  const h = harness({ fetchRows: vi.fn(async () => rows), ...overrides });
+  h.inner.total = rows.length + 1;
+  await h.inner.render();
+  const rowAt = (index: number) => h.layer.querySelector<HTMLElement>(`.row[data-index="${index}"]`)!;
+  return { ...h, rowAt };
+}
+
+const dblclick = (target: Element): MouseEvent => {
+  const event = new MouseEvent('dblclick', { bubbles: true, cancelable: true });
+  target.dispatchEvent(event);
+  return event;
+};
+
+describe('VirtualTree double-click', () => {
+  it('toggles a container row, but leaves its action chips to their own clicks', async () => {
+    const { callbacks, rowAt } = await painted([objectRow, numberRow]);
+
+    const event = dblclick(rowAt(1).querySelector('.val')!);
+    expect(event.defaultPrevented).toBe(true);
+    expect(callbacks.onToggle).toHaveBeenCalledWith(2, 1);
+
+    vi.mocked(callbacks.onToggle).mockClear();
+    dblclick(rowAt(1).querySelector('.btn-copy')!);
+    expect(callbacks.onToggle).not.toHaveBeenCalled();
+  });
+
+  it('opens the inline editor only on a primitive’s value text', async () => {
+    const getEditText = vi.fn(async () => '41');
+    const onEditCommit = vi.fn(async () => ({ ok: true }));
+    const emptyObject: Row = { ...numberRow, id: 6, index: 3, key: 'meta', type: 'object', preview: '{}' };
+    const { rowAt } = await painted([objectRow, numberRow, emptyObject], { getEditText, onEditCommit });
+
+    // The key is document content to select, and an empty `{}` is still a container.
+    dblclick(rowAt(2).querySelector('.key')!);
+    dblclick(rowAt(3).querySelector('.val')!);
+    expect(getEditText).not.toHaveBeenCalled();
+
+    const event = dblclick(rowAt(2).querySelector('.val')!);
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(rowAt(2).querySelector<HTMLInputElement>('.val-edit')?.value).toBe('41'));
+    expect(getEditText).toHaveBeenCalledWith(5);
+  });
+
+  it('never edits where the host has no document to commit to', async () => {
+    // The run result's tree is derived data: it grants no edit capability.
+    const { rowAt } = await painted([objectRow, numberRow]);
+    const event = dblclick(rowAt(2).querySelector('.val')!);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(rowAt(2).querySelector('.val-edit')).toBeNull();
+  });
+});
+
+describe('VirtualTree inline editing lifecycle', () => {
+  // Every way out of the editor schedules a repaint. Frames never come here, so
+  // the only paint is the 50 ms fallback, and the test decides when it runs.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestAnimationFrame', vi.fn());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function editing(commit: NonNullable<TreeCallbacks['onEditCommit']> = vi.fn(async () => ({ ok: true }))) {
+    const getEditText = vi.fn(async () => '41');
+    const onEditCommit = vi.fn(commit);
+    const h = await painted([objectRow, numberRow], { getEditText, onEditCommit });
+    const row = h.rowAt(2);
+    await h.inner.startEdit(row, numberRow);
+    const input = row.querySelector<HTMLInputElement>('.val-edit')!;
+    return { ...h, getEditText, onEditCommit, input };
+  }
+
+  const key = (input: HTMLInputElement, name: string): void => {
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+  };
+
+  it('cancels on Escape without committing, and repaints the original value', async () => {
+    const { input, onEditCommit, rowAt, callbacks } = await editing();
+    input.value = '99';
+    key(input, 'Escape');
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(onEditCommit).not.toHaveBeenCalled();
+    expect(callbacks.fetchRows).toHaveBeenCalledTimes(2);
+    expect(rowAt(2).querySelector('.val-edit')).toBeNull();
+    expect(rowAt(2).querySelector('.val')?.textContent).toBe('41');
+  });
+
+  it('commits on blur, the way leaving any text field keeps what was typed', async () => {
+    const { input, onEditCommit } = await editing();
+    input.value = '42';
+    input.dispatchEvent(new FocusEvent('blur'));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onEditCommit).toHaveBeenCalledWith(5, 2, '42');
+  });
+
+  it('commits once when Enter is followed by the blur its repaint causes', async () => {
+    let settle: (result: { ok: boolean }) => void = () => {};
+    const { input, onEditCommit } = await editing(() => new Promise((resolve) => { settle = resolve; }));
+    input.value = '42';
+    key(input, 'Enter');
+    input.dispatchEvent(new FocusEvent('blur'));
+    settle({ ok: true });
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(onEditCommit).toHaveBeenCalledOnce();
+  });
+
+  it('holds every repaint while the editor is open, and resumes once it commits', async () => {
+    const { input, inner, callbacks, rowAt } = await editing();
+    await inner.render();
+    expect(callbacks.fetchRows).toHaveBeenCalledOnce();
+    expect(rowAt(2).querySelector('.val-edit')).toBe(input);
+
+    key(input, 'Enter');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(callbacks.fetchRows).toHaveBeenCalledTimes(2);
+    expect(rowAt(2).querySelector('.val-edit')).toBeNull();
+  });
+
+  it('keeps the editor open with the rejected text when a commit fails', async () => {
+    const { input, onEditCommit, callbacks, rowAt } = await editing(async () => ({ ok: false, error: 'invalid JSON' }));
+    input.value = '4 2';
+    key(input, 'Enter');
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(onEditCommit).toHaveBeenCalledOnce();
+    // Nothing repainted: the typed text is still there to fix.
+    expect(callbacks.fetchRows).toHaveBeenCalledOnce();
+    expect(rowAt(2).querySelector('.val-edit')).toBe(input);
+    expect(input.value).toBe('4 2');
+    expect(input.classList).toContain('bad');
+  });
+
+  it('keeps typing out of the tree’s own keyboard shortcuts', async () => {
+    const { input, layer } = await editing();
+    const treeKeys = vi.fn();
+    layer.addEventListener('keydown', treeKeys);
+
+    key(input, 'j');
+    expect(treeKeys).not.toHaveBeenCalled();
+  });
+
+  it('opens one editor at a time', async () => {
+    const { getEditText, inner, rowAt } = await editing();
+    await inner.startEdit(rowAt(1), objectRow);
+
+    expect(getEditText).toHaveBeenCalledOnce();
+    expect(rowAt(1).querySelector('.val-edit')).toBeNull();
+  });
+
+  it('abandons the edit when the row was repainted away before its text arrived', async () => {
+    let deliver: (text: string) => void = () => {};
+    const getEditText = vi.fn(() => new Promise<string>((resolve) => { deliver = resolve; }));
+    const onEditCommit = vi.fn(async () => ({ ok: true }));
+    const { inner, layer, rowAt, callbacks } = await painted([objectRow, numberRow], { getEditText, onEditCommit });
+
+    const pending = inner.startEdit(rowAt(2), numberRow);
+    layer.replaceChildren();
+    deliver('41');
+    await pending;
+
+    expect(layer.querySelector('.val-edit')).toBeNull();
+    // Not stuck "editing": the repaint it asks for goes through.
+    await vi.advanceTimersByTimeAsync(50);
+    expect(callbacks.fetchRows).toHaveBeenCalledTimes(2);
+    expect(rowAt(2).querySelector('.val')?.textContent).toBe('41');
+  });
+});
+
+describe('VirtualTree selection by pointer, focus and keyboard', () => {
+  it('selects a leaf on click without toggling it, and ignores clicks between rows', async () => {
+    const { layer, callbacks, tree, rowAt } = await painted([objectRow, numberRow]);
+
+    layer.click();
+    expect(callbacks.onSelect).not.toHaveBeenCalled();
+
+    rowAt(2).querySelector<HTMLElement>('.val')!.click();
+    expect(tree.selectedIndex()).toBe(2);
+    expect(callbacks.onToggle).not.toHaveBeenCalled();
+  });
+
+  it('does not select when focus lands on a row action, nor re-announce a row already selected', async () => {
+    const { callbacks, tree, rowAt } = await painted([objectRow, numberRow]);
+
+    rowAt(1).querySelector('.btn-path')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    expect(tree.selectedIndex()).toBe(-1);
+
+    rowAt(1).dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    rowAt(1).dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    expect(callbacks.onSelect).toHaveBeenCalledOnce();
+  });
+
+  it('scrolls a keyboard selection below the pane just far enough to show it', async () => {
+    const { viewport, tree, inner } = harness();
+    inner.total = 50;
+
+    // 56 px tall: row 5 spans 110–132, so its bottom edge lands on the pane's.
+    tree.select(5);
+    expect(viewport.scrollTop).toBe(132 - 56);
+
+    // Already on screen: the pane stays where the reader left it.
+    tree.select(4);
+    expect(viewport.scrollTop).toBe(132 - 56);
+  });
+
+  it('names a keyless root by its preview alone', () => {
+    const { inner } = harness();
+    const root = inner.rowEl({ ...objectRow, index: 0, depth: 0, key: null, expanded: false });
+
+    expect(root.getAttribute('aria-label')).toBe('{ inner } · 1 key');
+    expect(root.querySelector('.key')).toBeNull();
+    expect(root.querySelector('.btn-key')).toBeNull();
+  });
+
+  it('offers only the actions its host granted', () => {
+    const { inner } = harness({ onCopyKey: undefined });
+    const row = inner.rowEl({ ...objectRow, type: 'array' });
+    const labels = [...row.querySelectorAll('.actions button')].map((button) => button.textContent);
+
+    // No onCopyKey, no onTable: no `key`, no `tbl`, never a dead chip.
+    expect(labels).toEqual(['path', 'copy']);
+  });
+});
+
+describe('VirtualTree paint scheduling', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('drops a row slice that a newer paint has superseded', async () => {
+    const stale = [{ ...numberRow, preview: 'stale' }];
+    const fresh = [{ ...numberRow, preview: '42' }];
+    let deliver: (rows: Row[]) => void = () => {};
+    const fetchRows = vi.fn()
+      .mockImplementationOnce(() => new Promise<Row[]>((resolve) => { deliver = resolve; }))
+      .mockResolvedValueOnce(fresh);
+    const { layer, inner } = harness({ fetchRows });
+    inner.total = 3;
+
+    const first = inner.render();
+    await inner.render();
+    deliver(stale);
+    await first;
+
+    expect(layer.querySelector('.val')?.textContent).toBe('42');
+    expect(inner.lastRows).toEqual(fresh);
+  });
+
+  it('paints from a timer when no animation frame comes, once per burst of requests', async () => {
+    vi.useFakeTimers();
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    const fetchRows = vi.fn(async () => [objectRow]);
+    const { tree } = harness({ fetchRows });
+
+    tree.setTotal(2);
+    tree.setHighlight('pay');
+    tree.refresh();
+    expect(frames).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(49);
+    expect(fetchRows).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    // The frame arriving late must not paint the same request a second time.
+    frames[0](0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchRows).toHaveBeenCalledOnce();
+  });
+
+  it('pins nothing when the pane is too short to spare a third of it', async () => {
+    const fetchSticky = vi.fn(async () => [objectRow]);
+    const { viewport, inner } = await painted([numberRow], { fetchSticky });
+    viewport.scrollTop = 22 * 10;
+
+    // 56 px is under three rows: a pinned stack would cover the whole view.
+    await inner.render();
+    await Promise.resolve();
+    expect(fetchSticky).not.toHaveBeenCalled();
+    expect(viewport.querySelector('.tree-sticky')!.children).toHaveLength(0);
+  });
+
+  it('drops a pinned-parent answer that a newer scroll position has superseded', async () => {
+    let deliver: (rows: Row[]) => void = () => {};
+    const fetchSticky = vi.fn()
+      .mockImplementationOnce(() => new Promise<Row[]>((resolve) => { deliver = resolve; }))
+      .mockResolvedValueOnce([{ ...objectRow, key: 'fresh' }]);
+    const { viewport, inner } = harness({ fetchRows: vi.fn(async () => [numberRow]), fetchSticky });
+    Object.defineProperty(viewport, 'clientHeight', { value: 22 * 30 });
+    inner.total = 100;
+    viewport.scrollTop = 22 * 10;
+
+    await inner.render();
+    viewport.scrollTop = 22 * 20;
+    await inner.render();
+    expect(fetchSticky.mock.calls).toEqual([[10, 6], [20, 6]]);
+    deliver([{ ...objectRow, key: 'stale' }]);
+    // One macrotask: every pending continuation, stale or fresh, has run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const keys = [...viewport.querySelectorAll('.tree-sticky .key')].map((key) => key.textContent);
+    expect(keys).toEqual(['fresh:']);
+  });
+
+  it('ignores a click on the pinned strip that misses every pinned row', async () => {
+    const fetchSticky = vi.fn(async () => [objectRow]);
+    const { viewport, tree } = harness({ fetchSticky });
+    viewport.scrollTop = 44;
+
+    (viewport.querySelector('.tree-sticky') as HTMLElement).click();
+    expect(viewport.scrollTop).toBe(44);
+    expect(tree.selectedIndex()).toBe(-1);
   });
 });
