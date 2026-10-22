@@ -77,7 +77,7 @@ export default defineConfig({
     // converter page is its own entry rather than a section of index.html
     // because it has to be a URL a search result can point at, and because it
     // must paint its pitch without booting the app.
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         main: join(root, 'index.html'),
         spec: join(root, 'spec.html'),
@@ -88,6 +88,32 @@ export default defineConfig({
         jsonEditor: join(root, 'json-editor.html'),
         jsonDiff: join(root, 'json-diff.html'),
         largeJsonViewer: join(root, 'large-json-viewer.html'),
+      },
+      output: {
+        // CodeMirror reaches the page only through the lazy ./code and
+        // ./run-editor imports. Left to automatic splitting it came out as nine
+        // files all named dist-<hash>.js (each package's entry is dist/index.js),
+        // and opening the code view fetched eight of them. The JavaScript
+        // language is the one seam worth keeping: one chunk for the editor the
+        // code view needs, one for what only the Run editor adds. Run also gets
+        // search and the JSON grammar it does not use (~8 KB gzipped), which
+        // the code view's idle warm-up has usually fetched by then anyway. The
+        // base group has the higher priority so it claims the shared packages
+        // before the JavaScript group's dependency walk can pull them in.
+        codeSplitting: {
+          groups: [
+            {
+              name: 'codemirror',
+              test: /node_modules[\\/](@codemirror[\\/](state|view|language|commands|search|lang-json)|@lezer[\\/](common|highlight|lr|json)|@marijn|style-mod|w3c-keyname|crelt)[\\/]/,
+              priority: 2,
+            },
+            {
+              name: 'codemirror-javascript',
+              test: /node_modules[\\/](@codemirror[\\/](lang-javascript|autocomplete)|@lezer[\\/]javascript)[\\/]/,
+              priority: 1,
+            },
+          ],
+        },
       },
     },
   },
