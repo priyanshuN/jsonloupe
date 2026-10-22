@@ -99,6 +99,26 @@ test('converter exposes its tables and mapping controls without WCAG violations'
   await expectNoWcagViolations(page, '#convert-view');
 });
 
+test('the converter shows a typed missing-value default whole at laptop widths', async ({ page }) => {
+  // The field's shell did not grow, so its input sat at 51px and a default like
+  // `not provided` scrolled out of view with half the strip empty beside it.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openSample(page);
+  await page.getByRole('button', { name: 'Convert this document to tables' }).click();
+  await page.getByRole('button', { name: 'customize' }).click();
+  const missing = page.locator('#convert-missing');
+  await missing.fill('not provided');
+  for (const width of [1280, 1440, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    const fit = await missing.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(fit, `at ${width}px`).toBeLessThanOrEqual(0);
+    // …and the strip still keeps `name` beside the field it labels.
+    const label = await page.locator('label[for="convert-map-name"]').boundingBox();
+    const field = await page.locator('#convert-map-name').boundingBox();
+    expect(Math.abs((label?.y ?? 0) + (label?.height ?? 0) / 2 - ((field?.y ?? 0) + (field?.height ?? 0) / 2))).toBeLessThan(4);
+  }
+});
+
 test('the sample compared with a reformatted copy of itself reads as identical', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await openSample(page);

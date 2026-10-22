@@ -6059,14 +6059,25 @@ mark.hl {
 /* The field is as wide as its label plus room for the value. A fixed 150px
    held the label alone — `missing values` took all of it and the value got
    0-2px, so the field read as an empty caps box with nothing to type into. */
-.convert-inline-field { flex: 0 0 auto; width: auto; min-width: 0; }
+/* It grows, to a cap, into whatever the row has left: a wrapping row breaks
+   on each item's basis, never on its grown size, so growing cannot push `name`
+   off the row the way a wide basis did. Without the grow the shell stayed at
+   its own max-content, the input inside had nothing to grow into, and a
+   default like `not provided` scrolled out of a 51px box at every laptop
+   width. */
+.convert-inline-field { flex: 1 1 auto; width: auto; min-width: 0; max-width: 18rem; }
 /* The width is the field's intrinsic size, not just its basis: a bare input
    reports its 20-character default as max-content, so each of these two shells
    came out ~300px wide and pushed `name` and its field onto separate rows of
    the strip at a 1280px window — the label ended one row, the box it names
    began the next. 6ch, the basis it already had, holds a separator or a short
-   default and still grows with the row once the strip has width to give. */
+   default, and the shell's grow above gives it the rest. */
 .convert-inline-field > input { flex: 1 0 6ch; width: 6ch; }
+/* At a 1280px window the top row has ~24px to spare, shared evenly, so the
+   split of the 12ch follows what each field holds: a separator is a character
+   or two, a missing-value default is a word like `not provided`. */
+.convert-inline-field > #convert-missing { flex-basis: 8ch; width: 8ch; }
+.convert-inline-field > #convert-array-join { flex-basis: 4ch; width: 4ch; }
 .convert-link-name { width: 130px; padding: 0 var(--gap-2); }
 /* A label wrapping a field, not a caption, so it takes --text-dim's floor —
    the same call .convert-col-options gets above. */
