@@ -98,7 +98,16 @@ const SECURITY_HEADERS = {
 };
 
 const server = createServer(async (req, res) => {
-  const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  let path;
+  try {
+    path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  } catch {
+    // A bare or truncated %-escape survives URL parsing and makes the decode
+    // throw. Uncaught in this async handler, that rejection would end the
+    // process: one stray request (an <img> on any page) would kill the viewer.
+    res.writeHead(400, { ...SECURITY_HEADERS, 'content-type': 'text/plain' }).end('bad request');
+    return;
+  }
   if (keyEndpoint && path === '/__api-key') {
     // Loopback proof on both sides (Host it was addressed to, Origin it came
     // from) before the file is opened — a hostile domain rebound to 127.0.0.1

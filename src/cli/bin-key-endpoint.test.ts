@@ -329,6 +329,20 @@ describe.skipIf(!built)('bin/jsonloupe.mjs /__api-key (skipped unless dist/ and 
       expect(page.body).toContain('<html');
       expectSecurityHeaders(page);
     });
+
+    it('answers 400 to a malformed %-escape and keeps serving', async () => {
+      // The URL parser leaves a bare or truncated escape in the pathname, and
+      // decoding it throws. Uncaught in the async handler, that rejection ended
+      // the process, so any page in the browser could kill the viewer with an
+      // <img> pointed at one of these paths.
+      for (const path of ['/%', '/%E0%A4%A', '/%ZZ']) {
+        const res = await request(plain.at(path));
+        expect(res.status).toBe(400);
+        expectSecurityHeaders(res);
+      }
+      expect((await request(plain.at('/'))).status).toBe(200);
+      expect(plain.log).not.toMatch(/URIError|\n\s+at /);
+    });
   });
 
   describe('the flag itself', () => {
