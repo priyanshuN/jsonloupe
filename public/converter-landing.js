@@ -25,10 +25,10 @@
   // 19-digit ids, which is the exact loss the page promises does not happen.
   var SAMPLE = [
     '{"orders":[',
-    '  {"id":1234567890123456789,"customer":"Ravi","placed_at":"2026-10-01","total":27.50,',
+    '  {"id":1234567890123456789,"status":"shipped","placed_at":"2026-10-01","total":27.50,',
     '   "items":[{"sku":"MUG-RED","qty":2,"price":8.75},{"sku":"TEA-500G","qty":1,"price":10.00}],',
     '   "address":{"city":"Pune","postcode":"411001"}},',
-    '  {"id":1234567890123456790,"customer":"Asha","placed_at":"2026-10-02","total":12.50,',
+    '  {"id":1234567890123456790,"status":"packing","placed_at":"2026-10-02","total":12.50,',
     '   "items":[{"sku":"TEA-500G","qty":1,"price":10.00},{"sku":"SPOON","qty":2,"price":1.25}],',
     '   "address":{"city":"Delhi","postcode":"110001"}}',
     ']}',
