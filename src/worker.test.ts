@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
-import { describe, it, expect } from 'vitest';
-import { fmtWhen, handle } from './worker';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { fmtWhen, handle, handleAsync } from './worker';
 import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';
 import type { CompareRow } from './protocol';
 import { EXPORT_CHUNK_BYTES } from './export-policy';
@@ -1726,5 +1726,250 @@ describe('semantic compare worker RPC', () => {
     expect(visible.find((row) => row.pathText === '$.id')?.status).toBe('equal');
     expect(visible.find((row) => row.pathText === '$.qty')?.status).toBe('changed');
     expect(stringify(0)).toBe('{"id":1234567890123456789,"qty":2}');
+  });
+
+  it('repairs a baseline the way it repairs an opened file, and reports the original error when it cannot', () => {
+    parse('{"a":1,"b":2}');
+    const repaired = h<{ ok: boolean; verdict: string }>({ type: 'compareInit', baselineText: "{'a': 1, \"b\": 2,}" });
+    expect(repaired).toMatchObject({ ok: true, verdict: 'identical' });
+
+    // jsonrepair gives up on a doubled comma; the parser's own message is the useful one.
+    const broken = h<{ ok: boolean; error: string }>({ type: 'compareInit', baselineText: '{"a":1,,"b":2}' });
+    expect(broken.ok).toBe(false);
+    expect(broken.error).toMatch(/^baseline is not valid JSON: .*position 7/);
+    // Text that never looked like JSON is not handed to the repairer at all.
+    expect(h<{ ok: boolean; error: string }>({ type: 'compareInit', baselineText: 'KLUv/QBY' })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^baseline is not valid JSON: /),
+    });
+    expect(stringify()).toBe('{"a":1,"b":2}');
+  });
+});
+
+// ---------- table view ----------
+
+describe('table view over an array node', () => {
+  type TableInit = { ok: boolean; cols?: string[]; count?: number; pathText?: string };
+  const tableInit = (id: number): TableInit => h<TableInit>({ type: 'tableInit', id });
+  const tableSort = (col: string | null, dir: number): { count: number } => h({ type: 'tableSort', col, dir });
+  const tableRows = (start = 0, count = 100): { index: number; cells: string[] }[] =>
+    h<{ rows: { index: number; cells: string[] }[] }>({ type: 'tableRows', start, count }).rows;
+  const order = (): number[] => tableRows().map((row) => row.index);
+
+  it('gives elements that are not objects a (value) column ahead of the object keys', () => {
+    parse('{"items":[{"a":1,"b":"x"},{"b":"y","c":null},7]}');
+    const items = rows()[1];
+    expect(tableInit(items.id)).toEqual({
+      ok: true,
+      cols: ['(value)', 'a', 'b', 'c'],
+      count: 3,
+      pathText: h<{ text: string }>({ type: 'nodePath', id: items.id }).text,
+    });
+    // An object has no (value); a primitive has no keys. Missing is blank, null is spelled.
+    expect(tableRows()).toEqual([
+      { index: 0, cells: ['', '1', 'x', ''] },
+      { index: 1, cells: ['', '', 'y', 'null'] },
+      { index: 2, cells: ['7', '', '', ''] },
+    ]);
+  });
+
+  it('writes grid cells: long text cut at 80 characters, containers summarized, int64 digits kept', () => {
+    const long = 'x'.repeat(81);
+    parse(`[{"s":"${long}","arr":[1,2,3],"obj":{"k":1,"j":2},"n":12345678901234567890,"t":true,"short":"ok"}]`);
+    tableInit(rows()[0].id);
+    expect(tableRows()[0].cells).toEqual([`${'x'.repeat(80)}…`, '[3]', '{2}', '12345678901234567890', 'true', 'ok']);
+  });
+
+  it('finds columns in the first 500 elements only, and keeps at most 40 of one object', () => {
+    const wide = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`k${i}`, i]));
+    parse(JSON.stringify([wide]));
+    expect(tableInit(rows()[0].id).cols).toEqual(Object.keys(wide).slice(0, 40));
+
+    parse(JSON.stringify([...Array.from({ length: 500 }, () => ({ a: 1 })), { late: 1 }]));
+    const init = tableInit(rows()[0].id);
+    expect(init.cols).toEqual(['a']);
+    expect(init.count).toBe(501);
+  });
+
+  it('sorts numbers by value (int64 included) and text by code point, missing last, ties in document order', () => {
+    parse('[{"v":10,"k":"b"},{"k":"a"},{"v":9,"k":"c"},{"v":12345678901234567890},{"v":9,"k":"d"}]');
+    tableInit(rows()[0].id);
+    expect(tableSort('v', 1)).toEqual({ count: 5 });
+    expect(order()).toEqual([2, 4, 0, 3, 1]);
+    // Re-sorting starts from the current order, so the tie-break must not depend on it.
+    tableSort('k', 1);
+    expect(order()).toEqual([1, 0, 2, 4, 3]);
+    // Rows are paged out of the sorted order; a negative start reads from the top.
+    expect(tableRows(-3, 2).map((row) => row.index)).toEqual([1, 0]);
+    expect(tableRows(3, 10).map((row) => row.index)).toEqual([4, 3]);
+    // No column means document order again.
+    tableSort(null, 1);
+    expect(order()).toEqual([0, 1, 2, 3, 4]);
+
+    parse('[{"v":1},{"v":3},{"v":1},{"v":2}]');
+    tableInit(rows()[0].id);
+    tableSort('v', -1);
+    expect(order()).toEqual([1, 3, 0, 2]);
+  });
+
+  it('opens only on an array node, and a reparse closes the open table', () => {
+    parse('{"a":{"b":1}}');
+    expect(tableInit(rows()[0].id)).toEqual({ ok: false });
+    expect(tableInit(987_654)).toEqual({ ok: false });
+
+    parse('[1,2]');
+    tableInit(rows()[0].id);
+    expect(tableRows()).toHaveLength(2);
+    parse('[1,2,3]');
+    expect(tableRows()).toEqual([]);
+    expect(tableSort('(value)', 1)).toEqual({ count: 0 });
+  });
+});
+
+describe('query export as JSONL', () => {
+  const exportQuery = (query: string, format: 'csv' | 'jsonl'): { ok: boolean; text?: string; rows?: number; error?: string } =>
+    h({ type: 'exportQuery', query, format });
+
+  it('writes a table query as one object per row, keyed by its columns, with exact digits', () => {
+    parse('{"tasks":[{"id":1234567890123456789,"eta":50},{"id":7},{"id":8,"eta":null}]}');
+    // A field the row does not have stays absent; it is not invented as null.
+    expect(exportQuery('$.tasks[*] | pluck(@.id, @.eta)', 'jsonl')).toEqual({
+      ok: true,
+      text: '{"id":1234567890123456789,"eta":50}\n{"id":7}\n{"id":8,"eta":null}\n',
+      rows: 3,
+    });
+  });
+
+  it('writes bare matches as one value per line, but refuses them as CSV', () => {
+    parse('{"tasks":[{"eta":50},{"eta":60}]}');
+    expect(exportQuery('$.tasks[*].eta', 'jsonl')).toMatchObject({ ok: true, text: '50\n60\n', rows: 2 });
+    expect(exportQuery('$.tasks[*].eta', 'csv')).toEqual({
+      ok: false,
+      error: 'CSV needs a table query; append | pluck(...), | group(...) or | distinct',
+    });
+  });
+});
+
+describe('converter RPC', () => {
+  type Spec = { tables: { name: string; columns: { name: string; from?: string }[] }[]; output: { format: string } };
+  const orders = (n: number): string =>
+    JSON.stringify({ orders: Array.from({ length: n }, (_, i) => ({ id: i + 1, name: `n${i + 1}` })) });
+  const inspectDoc = async (): Promise<{ inspection: { tables: { name: string; rows: number }[] }; spec: Spec }> =>
+    (await handleAsync({ type: 'convertInspect' })) as never;
+
+  it('answers "no document open" rather than converting nothing', async () => {
+    // A fresh copy of the module is a worker that has not been sent a document.
+    vi.resetModules();
+    const fresh = await import('./worker');
+    vi.resetModules();
+    for (const type of ['convertInspect', 'convertPreview', 'convertRun']) {
+      await expect(fresh.handleAsync({ type })).resolves.toEqual({ error: 'no document open' });
+    }
+  });
+
+  it('drafts a mapping, previews 20 rows unless told otherwise, and measures the whole table', async () => {
+    parse(orders(25));
+    const { inspection, spec } = await inspectDoc();
+    expect(inspection.tables.map((t) => [t.name, t.rows])).toEqual([['orders', 25]]);
+    expect(spec.tables[0].columns.map((c) => c.name)).toEqual(['id', 'name']);
+
+    const preview = (await handleAsync({ type: 'convertPreview', spec })) as { tables: { rows: string[][]; total: number }[] };
+    expect(preview.tables[0].rows).toHaveLength(20);
+    expect(preview.tables[0].rows[0]).toEqual(['1', 'n1']);
+    expect(preview.tables[0].total).toBe(25);
+    const three = (await handleAsync({ type: 'convertPreview', spec, rows: 3 })) as { tables: { rows: string[][] }[] };
+    expect(three.tables[0].rows).toHaveLength(3);
+  });
+
+  it('writes xlsx and zipped csv for the whole document', async () => {
+    parse(orders(25));
+    const { spec } = await inspectDoc();
+    const zipMagic = [0x50, 0x4b, 0x03, 0x04];
+    const xlsx = (await handleAsync({ type: 'convertRun', spec })) as { format: string; bytes: Uint8Array; rows: number };
+    expect(xlsx.format).toBe('xlsx');
+    expect(xlsx.rows).toBe(25);
+    expect([...xlsx.bytes.slice(0, 4)]).toEqual(zipMagic);
+
+    const csv = (await handleAsync({
+      type: 'convertRun',
+      spec: { ...spec, output: { ...spec.output, format: 'csv' } },
+    })) as { format: string; bytes: Uint8Array; rows: number };
+    expect(csv.format).toBe('csv');
+    expect(csv.rows).toBe(25);
+    expect([...csv.bytes.slice(0, 4)]).toEqual(zipMagic);
+  });
+
+  it("returns an invalid mapping's problems as data, from preview and run alike", async () => {
+    parse(orders(2));
+    const { spec } = await inspectDoc();
+    const first = spec.tables[0].columns[0];
+    const broken = { ...spec, tables: [{ ...spec.tables[0], columns: [first, first] }] };
+    for (const type of ['convertPreview', 'convertRun']) {
+      const res = (await handleAsync({ type, spec: broken })) as { errors?: { code: string }[] };
+      expect(res.errors?.map((e) => e.code)).toContain('E_DUP_COLUMN');
+    }
+  });
+
+  it('converts the values as edited, and re-detects tables after a new document opens', async () => {
+    parse('{"orders":[{"id":1,"name":"a"}]}');
+    h({ type: 'expandSubtree' });
+    const name = rows().find((row) => row.key === 'name')!;
+    expect(h<{ ok: boolean }>({ type: 'setValue', id: name.id, text: '"renamed"', index: name.index }).ok).toBe(true);
+    const { spec } = await inspectDoc();
+    const preview = (await handleAsync({ type: 'convertPreview', spec })) as { tables: { rows: string[][] }[] };
+    expect(preview.tables[0].rows).toEqual([['1', 'renamed']]);
+
+    parse('{"users":[{"email":"a@example.com"}]}');
+    const next = await inspectDoc();
+    expect(next.inspection.tables.map((t) => t.name)).toEqual(['users']);
+  });
+});
+
+describe('worker message glue', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  type Reply = { reqId: number } & Record<string, unknown>;
+  // The glue only installs itself where a worker global exists, so stand one up
+  // and load a fresh copy of the module against it.
+  async function startWorker(): Promise<{ replies: Reply[]; send(data: Record<string, unknown>): void }> {
+    const replies: Reply[] = [];
+    const scope: { postMessage(reply: Reply): void; onmessage?: (event: MessageEvent) => void } = {
+      postMessage: (reply) => replies.push(reply),
+    };
+    vi.stubGlobal('self', scope);
+    vi.resetModules();
+    await import('./worker');
+    expect(scope.onmessage).toBeTypeOf('function');
+    return { replies, send: (data) => scope.onmessage!({ data } as MessageEvent) };
+  }
+
+  it('answers every request under its reqId, and turns a throw into an error reply instead of silence', async () => {
+    const worker = await startWorker();
+    // No document yet: stringify has no root to read and throws.
+    worker.send({ reqId: 1, type: 'stringify' });
+    expect(worker.replies.at(-1)).toEqual({ reqId: 1, error: expect.stringMatching(/^TypeError/) });
+
+    worker.send({ reqId: 2, type: 'parse', text: '{"a":1}' });
+    expect(worker.replies.at(-1)).toMatchObject({ reqId: 2, ok: true, totalRows: 2 });
+    worker.send({ reqId: 3, type: 'nope' });
+    expect(worker.replies.at(-1)).toEqual({ reqId: 3, error: 'unknown message: nope' });
+  });
+
+  it('routes the asynchronous operations through handleAsync, rejections included', async () => {
+    const worker = await startWorker();
+    worker.send({ reqId: 7, type: 'compressPayload', text: '{"a":1}', format: 'base64' });
+    worker.send({ reqId: 8, type: 'decodePayload', input: 42 });
+    worker.send({ reqId: 9, type: 'convertInspect' });
+    await vi.waitFor(() => expect(worker.replies).toHaveLength(3));
+    const byId = new Map(worker.replies.map((reply) => [reply.reqId, reply]));
+    expect(byId.get(7)).toEqual({ reqId: 7, ok: true, b64: btoa('{"a":1}'), sourceBytes: 7 });
+    expect(byId.get(8)).toEqual({
+      reqId: 8,
+      error: 'TypeError: decodePayload input must be a string, ArrayBuffer, or Uint8Array',
+    });
+    expect(byId.get(9)).toEqual({ reqId: 9, error: 'no document open' });
   });
 });
