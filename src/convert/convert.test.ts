@@ -314,6 +314,35 @@ describe('table-per-array normalization', () => {
     expect(sink.byName('group_items')!.rows).toEqual([['0', '1'], ['1', '2']]);
   });
 
+  // Numbered over every row the anchor reached, one skipped parent moved every
+  // later child onto its neighbour's row — and the last one past the sheet's end.
+  it('numbers the synthetic row index over the parent rows actually written', async () => {
+    const groups = {
+      groups: [
+        { name: 'x', members: [{ m: 1 }] },
+        { members: [{ m: 2 }] },
+        { name: 'z', members: [{ m: 3 }] },
+      ],
+    };
+    const s = table({
+      output: { format: 'csv', onMissing: '-' },
+      tables: [
+        { name: 'groups', anchor: '$.groups[]', columns: [{ name: 'name', from: 'name', skipRowIfMissing: true }] },
+        {
+          name: 'members',
+          anchor: '$.groups[].members[]',
+          parent: { table: 'groups', key: '_parent_row', as: '_parent_row' },
+          columns: [{ name: 'm', from: 'm' }],
+        },
+      ],
+    });
+    const { sink } = await run(groups, s);
+    expect(sink.byName('groups')!.rows).toEqual([['x'], ['z']]);
+    expect(sink.byName('members')!.rows).toEqual([['0', '1'], ['-', '2'], ['1', '3']]);
+    const shown = await preview({ doc: groups }, s, { now: NOW });
+    expect(shown.tables[1].rows).toEqual([['0', '1'], ['-', '2'], ['1', '3']]);
+  });
+
   it('pulls ancestors down for the denormalized one-wide-table shape', async () => {
     const s = table({
       tables: [{
