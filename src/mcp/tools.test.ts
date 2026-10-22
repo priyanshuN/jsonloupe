@@ -375,6 +375,36 @@ describe('multi-doc', () => {
     expect((await call('run_query', { docId: 'd1', query: '$.n | count' })).text).toBe('count: 1');
   });
 
+  it('evicts nothing for a load or one-shot call that fails in a full pool', async () => {
+    // The pool used to make room before the load was tried, so a mistyped path
+    // destroyed the coldest document the agent was still using, and the pool
+    // was left one short.
+    const filePath = join(dir, 'full-pool.json');
+    await writeFile(filePath, DOC);
+    for (let i = 0; i < MAX_DOCS; i++) await load(`{"n":${i}}`);
+    const failures = [
+      await call('load_doc', { path: join(dir, 'not-here.json') }),
+      await load('not json'),
+      await call('run_query', { filePath, query: '$.tasks | nope' }),
+    ];
+    for (const failed of failures) {
+      expect(failed.isError).toBe(true);
+      expect(failed.text).not.toContain('evicted');
+    }
+    expect(pool.list()).toHaveLength(MAX_DOCS);
+    expect((await call('get_schema', { docId: 'd1' })).isError).toBe(false);
+  });
+
+  it('evicts the coldest document when a one-shot call succeeds in a full pool', async () => {
+    const filePath = join(dir, 'full-pool-one-shot.json');
+    await writeFile(filePath, DOC);
+    for (let i = 0; i < MAX_DOCS; i++) await load(`{"n":${i}}`);
+    const counted = await call('run_query', { filePath, query: '$.tasks[*] | count' });
+    expect(counted.text).toContain('note: evicted d1');
+    expect(counted.text).toContain(`docId: d${MAX_DOCS + 1}`);
+    expect(pool.list()).toHaveLength(MAX_DOCS);
+  });
+
   it('explains an unknown docId and lists what is open', async () => {
     await load(DOC);
     const r = await call('get_schema', { docId: 'd9' });
