@@ -6814,8 +6814,11 @@ mark.hl {
     linear-gradient(var(--glass-tint), var(--glass-tint));
 }
 /* What the frame is glass OVER: the solid chrome, read on body, where it is
-   still the theme's own value. */
-:root[data-glass] body { background: var(--bg-chrome); }
+   still the theme's own value. Only where there is a frame: the spec page and
+   the styleguide have no #app, and there this filled body — one viewport tall
+   (height: 100%) — over the page's --bg, a lighter screen that the page
+   scrolled out of into the darker one below. */
+:root[data-glass] body:has(#app) { background: var(--bg-chrome); }
 /* The public landing is not the workbench: it keeps its own hero wash. */
 :root[data-glass] #app:has(#landing:not([hidden]):not(.landing--app)) { background: none; }
 :root[data-glass] body:has(#landing:not([hidden]):not(.landing--app)) { background: var(--bg); }

@@ -205,6 +205,33 @@ test('glass is a named, persistent switch that never reaches reduced-transparenc
   expect(toolbar).not.toMatch(/rgba\(.*, 0\.\d+\)$/);
 });
 
+test('glass paints no screen-tall band on the pages that have no app frame', async ({ page }) => {
+  // The glass body colour is the app frame's ground. On a page without the
+  // frame it filled body, which is one viewport tall, so the page scrolled
+  // out of a lighter screen into the darker one below it.
+  for (const path of ['/spec.html', '/styleguide.html']) {
+    await page.goto(`${path}?glass`);
+    await expect(page.locator('html')).toHaveAttribute('data-glass', '');
+    const [html, body] = await page.evaluate(() =>
+      [document.documentElement, document.body].map((el) => getComputedStyle(el).backgroundColor),
+    );
+    expect(body, path).toBe(html);
+  }
+});
+
+test('the spec page leads a returning visitor back to the about page, not the workbench', async ({ page }) => {
+  // Anyone with a stored document boots into the workbench at `/`, so a back
+  // link to `./` skipped the about page the spec was opened from.
+  await openSample(page);
+  await page.goto('/#about');
+  await expect(page.locator('#landing')).not.toHaveClass(/landing--app/);
+  await page.locator('#landing a[href="./spec.html"]').first().click();
+  await expect(page).toHaveURL(/\/spec\.html$/);
+  await page.getByRole('link', { name: '← back' }).click();
+  await expect(page.locator('#landing')).toBeVisible();
+  await expect(page.locator('#landing')).not.toHaveClass(/landing--app/);
+});
+
 test('desktop sidebar hides whole, by button and Mod+B, and stays hidden across a reload', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openSample(page);
