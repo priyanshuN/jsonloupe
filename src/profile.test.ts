@@ -41,6 +41,21 @@ describe('profileQuery', () => {
     });
   });
 
+  it('reports zero as the minimum next to positive fractions', () => {
+    const result = profileQuery({ items: [{ d: 0 }, { d: 0.3 }, { d: 0.7 }] }, '$.items[*]', ['d']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.fields[0]).toMatchObject({ min: 0, max: 0.7 });
+  });
+
+  it('reports inherited Object.prototype names as missing', () => {
+    const result = profileQuery([{ a: 1 }, { b: 2 }], '$[*]', ['@.constructor', 'toString']);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.fields[0]).toMatchObject({ present: 0, missing: 2 });
+    expect(result.fields[1]).toMatchObject({ present: 0, missing: 2 });
+  });
+
   it('auto-discovers record fields and profiles their full coverage', () => {
     const result = profileQuery(doc, '$.tasks[*]');
     expect(result.ok).toBe(true);

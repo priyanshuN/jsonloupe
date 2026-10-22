@@ -222,7 +222,13 @@ export class VirtualTree {
       const top = this.selected * ROW_H;
       const st = this.viewport.scrollTop;
       const h = this.viewport.clientHeight;
-      if (top < st) this.viewport.scrollTop = top;
+      // Pinned ancestors cover the first rows in view, so scrolled to the top a
+      // row would sit under them, focus and all. The worker pins a depth-(k+1)
+      // ancestor in slot k and stops at a row of that depth, so slot depth-1
+      // (or the stack's cap) is the first one a row of this depth can show in.
+      const depth = this.lastRows.find((r) => r.index === this.selected)?.depth ?? 1;
+      const reserve = this.stickyEl ? Math.min(this.stickyMax(), Math.max(0, depth - 1)) * ROW_H : 0;
+      if (top < st + reserve) this.viewport.scrollTop = Math.max(0, top - reserve);
       else if (top + ROW_H > st + h) this.viewport.scrollTop = top + ROW_H - h;
       this.schedule();
     }
@@ -301,6 +307,10 @@ export class VirtualTree {
     const start = Math.max(0, Math.floor(this.viewport.scrollTop / ROW_H) - OVERSCAN);
     const count = Math.min(this.total - start, Math.ceil(this.viewport.clientHeight / ROW_H) + 2 * OVERSCAN);
     if (count <= 0) {
+      // Still a new paint, so a slice fetched for the old total is stale: left
+      // on the old epoch it would land in the emptied layer and in lastRows.
+      ++this.epoch;
+      this.lastRows = [];
       this.layer.replaceChildren();
       return;
     }
@@ -325,12 +335,16 @@ export class VirtualTree {
     }
   }
 
+  // At most six levels, and never more than a third of the pane: the stack is
+  // context for the rows below it, not a second document on top of them.
+  private stickyMax(): number {
+    return Math.min(6, Math.floor(this.viewport.clientHeight / ROW_H / 3));
+  }
+
   private async renderSticky(): Promise<void> {
     if (!this.stickyEl || !this.cbs.fetchSticky) return;
     const top = Math.floor(this.viewport.scrollTop / ROW_H);
-    // At most six levels, and never more than a third of the pane: the stack
-    // is context for the rows below it, not a second document on top of them.
-    const max = Math.min(6, Math.floor(this.viewport.clientHeight / ROW_H / 3));
+    const max = this.stickyMax();
     const ep = ++this.stickyEpoch;
     const rows = top > 0 && max > 0 ? await this.cbs.fetchSticky(top, max) : [];
     if (ep !== this.stickyEpoch) return;

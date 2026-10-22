@@ -64,6 +64,17 @@ describe('a cell carries what the value was, not what its text looks like', () =
     });
   });
 
+  it('counts significant digits together, not the integer and fraction apart', () => {
+    expect(cellText(new LosslessNumber('123456789012345.678'), '; ')).toEqual({
+      text: '123456789012345.678',
+      kind: 'text',
+    });
+    expect(cellText(new LosslessNumber('1234567890.12345'), '; ')).toEqual({
+      text: '1234567890.12345',
+      kind: 'number',
+    });
+  });
+
   it('keeps a joined array of scalars as one text cell — a list is not a quantity', () => {
     expect(cellText([1, 2, 3], '; ')).toEqual({ text: '1; 2; 3', kind: 'text' });
   });

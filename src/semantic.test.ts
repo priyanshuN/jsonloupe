@@ -35,6 +35,28 @@ describe('schema-free semantic comparison', () => {
     expect(result.root.status).toBe('equal');
   });
 
+  it('ignores key order for keys that differ only by case or accent', () => {
+    // The natural collator ties 'a' with 'A' and 'e' with 'é'; a stable sort
+    // then keeps each side's insertion order, so the two sides disagreed.
+    expect(semanticValueEqual({ a: 1, A: 2 }, { A: 2, a: 1 })).toBe(true);
+    expect(semanticValueEqual({ 'é': 1, e: 2 }, { e: 2, 'é': 1 })).toBe(true);
+    expect(semanticValueEqual({ a: 1, A: 2 }, { A: 1, a: 2 })).toBe(false);
+
+    const unordered = compareSemantic([{ a: 1, A: 2 }], [{ A: 2, a: 1 }], { mode: 'unordered' });
+    expect(unordered.verdict).toBe('identical');
+
+    const embedded = compareSemantic({ s: '{"a":1,"A":2}' }, { s: '{"A":2,"a":1}' });
+    expect(embedded.root.children[0].embedded).toBe('same');
+
+    const identity = compareSemantic(
+      [{ id: 1, a: 1, A: 2 }, { id: 1, x: 1 }, { id: 2 }],
+      [{ id: 1, A: 2, a: 1 }, { id: 1, x: 1 }, { id: 2 }],
+      { rules: { $: { mode: 'identity', keys: ['id'] } } },
+    );
+    expect(identity.verdict).toBe('identical');
+    expect(identity.summary.ambiguous).toBe(0);
+  });
+
   it('auto-aligns shuffled entity arrays and naturally sorts matched identities', () => {
     const left = {
       users: [
@@ -197,6 +219,39 @@ describe('schema-free semantic comparison', () => {
     expect(result.root.children[0].children.filter((node) => node.moved)).toHaveLength(2);
   });
 
+  it('pairs moved keyless objects in a sequence by value, not by position', () => {
+    const sequence = { rules: { '$.v': 'sequence' as const } };
+    const swapped = compareSemantic(
+      { v: [{ nested: { id: 1 } }, { nested: { id: 2 } }] },
+      { v: [{ nested: { id: 2 } }, { nested: { id: 1 } }] },
+      sequence,
+    );
+    const rows = swapped.root.children[0].children;
+    expect(swapped.verdict).toBe('reordered');
+    expect(swapped.summary).toMatchObject({ changed: 0, moved: 2 });
+    expect(rows.map((row) => [row.status, row.leftIndex, row.rightIndex])).toEqual([
+      ['moved', 0, 1],
+      ['moved', 1, 0],
+    ]);
+
+    const prepended = compareSemantic(
+      { v: [{ a: 1 }, { b: 2 }, { c: 3 }] },
+      { v: [{ z: 0 }, { a: 1 }, { b: 2 }, { c: 3 }] },
+      sequence,
+    );
+    expect(prepended.summary).toMatchObject({ changed: 0, added: 1, removed: 0, moved: 3 });
+    expect(planAt(prepended.plans, '$.v').counts).toMatchObject({ matched: 3, added: 1, removed: 0, moved: 3 });
+
+    // An element edited where it stands still shows its field change.
+    const edited = compareSemantic(
+      { v: [{ a: 1 }, { b: 2 }] },
+      { v: [{ a: 1 }, { b: 3 }] },
+      sequence,
+    );
+    expect(edited.summary).toMatchObject({ changed: 1, added: 0, removed: 0, moved: 0 });
+    expect(allNodes(edited.root).some((node) => node.matchLabel === 'b' && node.status === 'changed')).toBe(true);
+  });
+
   it('uses a reliable identity to align moved objects in an ordered sequence', () => {
     const result = compareSemantic(
       {
@@ -271,6 +326,23 @@ describe('schema-free semantic comparison', () => {
     expect(rows).toHaveLength(2);
     expect(rows.filter((row) => row.left !== null)).toHaveLength(2);
     expect(rows.filter((row) => row.right !== null)).toHaveLength(1);
+  });
+
+  it('does not count a guessed pairing of ambiguous identities as a move', () => {
+    const result = compareSemantic(
+      { rows: [{ id: 1, v: 1 }, { id: 1, v: 2 }, { id: 3 }] },
+      { rows: [{ id: 3 }, { id: 1, v: 3 }, { id: 1, v: 4 }] },
+      { rules: { '$.rows': { mode: 'identity', keys: 'id' } } },
+    );
+    const plan = planAt(result.plans, '$.rows');
+    const rows = result.root.children[0].children;
+
+    // Only id=3 is known to have moved; the id=1 rows were paired by guess.
+    expect(plan.counts).toMatchObject({ matched: 1, moved: 1, ambiguous: 2 });
+    expect(result.summary.moved).toBe(1);
+    expect(rows.filter((row) => row.status === 'ambiguous' && row.moved)).toEqual([]);
+    // The guessed pair still says where each side sits.
+    expect(rows.some((row) => row.status === 'ambiguous' && row.leftIndex === 0 && row.rightIndex === 2)).toBe(true);
   });
 
   it('normalizes nested collection paths and applies a wildcard rule', () => {
@@ -508,6 +580,24 @@ describe('schema-free semantic comparison', () => {
       inferredKind: 'mixed-unknown',
     });
     expect(planAt(mixed.plans, '$.values').warnings.join(' ')).toContain('Heterogeneous');
+  });
+
+  it('asks no review of an array that is empty on one side', () => {
+    // Every element is added or removed whatever the alignment, so neither the
+    // heterogeneous nor the primitive-order warning has anything to decide.
+    const cases: [unknown[], unknown[]][] = [
+      [[], [{ id: 1 }, { id: 2 }]],
+      [[{ id: 1 }], []],
+      [[], [1, 2]],
+      [[], [[1], [2]]],
+    ];
+    for (const [left, right] of cases) {
+      const result = compareSemantic({ items: left }, { items: right });
+      const plan = planAt(result.plans, '$.items');
+      expect(plan, JSON.stringify([left, right])).toMatchObject({ mode: 'position', inferredKind: 'empty-unknown' });
+      expect(plan.warnings, JSON.stringify([left, right])).toEqual([]);
+      expect(result.summary.added + result.summary.removed).toBe(Math.max(left.length, right.length));
+    }
   });
 
   it('explains low-confidence and unavailable identity discovery', () => {

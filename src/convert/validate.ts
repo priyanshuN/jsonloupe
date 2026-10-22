@@ -18,7 +18,9 @@
 
 import {
   anchorDepth,
+  formatAnchor,
   isAnchorPrefix,
+  joinPath,
   parseAnchor,
   parseFrom,
   type AnchorSeg,
@@ -403,7 +405,9 @@ function checkPaths(
   spec.tables.forEach((t, ti) => {
     const a = parseAnchor(t.anchor);
     if (!a.ok) return;
-    const det = byAnchor.get(t.anchor);
+    // Looked up in its canonical spelling, so `$["api.v1"][]` and an
+    // equivalent hand-written form find the same detected table.
+    const det = byAnchor.get(formatAnchor(a.value));
     if (!det) {
       err('E_PATH_NOT_FOUND', `tables[${ti}].anchor`,
         `this table's rows are not in this file — nothing was found at \`${t.anchor}\``,
@@ -419,7 +423,7 @@ function checkPaths(
       const level = depth - f.value.up;
       const target = f.value.up === 0 ? det : byAnchor.get(ancestorAnchorOf(t.anchor, level));
       if (!target) return;
-      const path = f.value.segs.map((s) => (s as { name: string }).name).join('.');
+      const path = f.value.segs.reduce((p, s) => joinPath(p, (s as { name: string }).name), '');
       if (!target.fields.some((fd) => fd.path === path)) {
         err('E_PATH_NOT_FOUND', `tables[${ti}].columns[${ci}].from`,
           `nothing called \`${c.from}\` was found anywhere in this file`,
@@ -440,5 +444,5 @@ export function ancestorAnchorOf(anchor: string, level: number): string {
     out.push(s);
     if (s.kind !== 'key') seen++;
   }
-  return '$' + out.map((s) => (s.kind === 'key' ? '.' + s.name : s.kind === 'array' ? '[]' : '{}')).join('');
+  return formatAnchor(out);
 }

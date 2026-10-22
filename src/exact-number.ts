@@ -38,10 +38,21 @@ export function exactNumericText(value: ExactNumeric): string {
 /** Compare numeric values without ever passing an unsafe value through a float. */
 export function compareExactNumeric(a: unknown, b: unknown): -1 | 0 | 1 | null {
   if (!isExactNumeric(a) || !isExactNumeric(b)) return null;
-  return compareLosslessNumber(
-    new LosslessNumber(exactNumericText(a)),
-    new LosslessNumber(exactNumericText(b)),
-  );
+  const left = exactNumericText(a);
+  const right = exactNumericText(b);
+  // lossless-json normalizes every zero to exponent 0 and compares same-sign
+  // values by exponent first, so it puts 0.5 (exponent -1) below 0. Settle any
+  // comparison with a zero by sign before the library sees it.
+  const leftSign = numericSign(left);
+  const rightSign = numericSign(right);
+  if (leftSign === 0 || rightSign === 0) return leftSign === rightSign ? 0 : leftSign > rightSign ? 1 : -1;
+  return compareLosslessNumber(new LosslessNumber(left), new LosslessNumber(right));
+}
+
+/** The sign of a JSON number literal; every spelling of zero (`-0`, `0.0`, `0e5`) is 0. */
+function numericSign(text: string): -1 | 0 | 1 {
+  if (/^-?[0.]+(?:[eE][+-]?\d+)?$/.test(text)) return 0;
+  return text.startsWith('-') ? -1 : 1;
 }
 
 /** Stable identity for grouping/distinct; equal numeric spellings share one bucket. */

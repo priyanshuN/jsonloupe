@@ -138,6 +138,16 @@ describe('decodeJsonPayload Zstd containers', () => {
     ]);
   });
 
+  it('decodes bytea with the newline psql -At writes and a copied leading space', async () => {
+    const bytea = bytesToBytea(await compressToBytes(exactJson));
+    for (const padded of [`${bytea}\n`, `${bytea}\r\n`, ` ${bytea}\n`]) {
+      expect(sniffPayloadText(padded)).toMatchObject({ recognized: true, format: 'postgres-bytea-zstd' });
+      const decoded = unwrap(await decodeJsonPayload(padded));
+      expect(decoded.text).toBe(exactJson);
+      expect(decoded.metadata.format).toBe('postgres-bytea-zstd');
+    }
+  });
+
   it('unwraps single/double quoted cells and PostgreSQL E strings', async () => {
     const base64 = await compressToB64(exactJson);
     const compressed = b64Bytes(base64);
@@ -311,6 +321,25 @@ describe('decodeJsonPayload limits and structured errors', () => {
       inputKind: 'text',
       maxDecodedBytes: 64 * 1024 * 1024,
     });
+  });
+
+  it('decodes concatenated Zstd frames, as zstd -d does, and caps their sum', async () => {
+    const first = await compressToBytes('[1,');
+    const second = await compressToBytes('2]');
+    // A skippable frame (magic 0x184D2A50, 2-byte body) is metadata zstd -d ignores.
+    const skippable = Uint8Array.from([0x50, 0x2a, 0x4d, 0x18, 0x02, 0x00, 0x00, 0x00, 0xaa, 0xbb]);
+    const stream = Uint8Array.from([...first, ...skippable, ...second]);
+
+    const decoded = unwrap(await decodeJsonPayload(stream));
+    expect(decoded.text).toBe('[1,2]');
+    expect(decoded.metadata.declaredDecodedByteLength).toBe('5');
+
+    // Each frame fits a 4-byte limit on its own; together they do not.
+    const capped = await decodeJsonPayload(stream, { maxDecodedBytes: 4 });
+    expect(capped.ok).toBe(false);
+    if (capped.ok) return;
+    expect(capped.error).toMatchObject({ code: 'too-large', stage: 'zstd' });
+    expect(capped.metadata.layers).toEqual([]);
   });
 
   it('reports corrupt raw Zstd as decompression-failed', async () => {

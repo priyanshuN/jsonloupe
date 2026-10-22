@@ -318,7 +318,7 @@ function buildRow(
     const pf = frames[t.parentLevel];
     let v: unknown;
     if (t.spec.parent.key === PARENT_ROW) {
-      v = parentIndex?.get(pf?.value) ?? '';
+      v = parentIndex?.get(pf?.value);
     } else if (t.spec.parent.key === MAP_KEY) {
       v = pf?.key ?? '';
     } else {
@@ -411,11 +411,27 @@ function fillDate(
 const PARENT_ROW = '_parent_row';
 const MAP_KEY = '{key}';
 
-/** Identity index of a parent table's rows, for the synthetic `_parent_row` key. */
+/** Whether buildRow drops this row: a `skipRowIfMissing` source resolved to nothing. */
+function dropsRow(t: CompiledTable, frames: Frame[]): boolean {
+  return t.columns.some((col) => {
+    if (!col.spec.skipRowIfMissing || col.spec.const !== undefined) return false;
+    const raw = col.from ? resolveFrom(frames, col.from) : undefined;
+    return raw === undefined || raw === null || raw === '';
+  });
+}
+
+/**
+ * Identity index of a parent table's rows, for the synthetic `_parent_row` key.
+ * It counts the rows the parent table actually writes (§8.2: the index of the
+ * parent row "in its own table"). Counted over every row the anchor reaches,
+ * one skipped parent shifted every later child onto its neighbour's row; now a
+ * child of a dropped parent misses the index and gets `onMissing` instead.
+ */
 function indexParentRows(root: unknown, parent: CompiledTable): Map<unknown, number> {
   const m = new Map<unknown, number>();
   let i = 0;
   for (const frames of iterateRows(root, parent.segs)) {
+    if (dropsRow(parent, frames)) continue;
     const v = frames[frames.length - 1].value;
     if (!m.has(v)) m.set(v, i);
     i++;

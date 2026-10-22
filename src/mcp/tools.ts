@@ -475,6 +475,7 @@ export class ToolRouter {
     if (!path && !text) return { ok: false, error: 'load_doc needs a path or text' };
     const opened = await this.openDoc(path, text);
     if (!opened.ok) return opened;
+    this.pool.settle(opened.doc.id);
     return success(renderLoad(opened.doc.id, opened.load), { ...opened.load, docId: opened.doc.id });
   }
 
@@ -610,6 +611,7 @@ export class ToolRouter {
       await this.pool.close(opened.doc.id);
       return result;
     }
+    this.pool.settle(opened.doc.id);
     return success(
       `docId: ${opened.doc.id}\n${result.text}`,
       { ...result.data, docId: opened.doc.id },

@@ -11,7 +11,7 @@
 // everywhere. `compressor` is the seam for adding it later.
 
 import { csvSerialize, UTF8_BOM } from '../csv';
-import type { Cell } from './coerce';
+import { exactAsDouble, type Cell } from './coerce';
 import type { TableSink, TableWriter } from './engine';
 
 /** Hard format limits. Refusing is safer than producing a workbook Excel repairs. */
@@ -240,15 +240,13 @@ const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const NS_MAIN = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const NS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
-// A 15-digit integer or plain decimal survives a double exactly, so it may be a
-// real numeric cell. Anything longer — an int64 id, the case this tool exists
-// for — stays text, because Excel would round it and the digits are the point.
-const SAFE_NUMBER = /^-?(0|[1-9]\d{0,14})(\.\d{1,10})?$/;
-
 // Control characters outside tab/LF/CR cannot be represented in XML 1.0 at
 // all, so they are dropped rather than escaped — one unescapable byte in a
-// cell must not produce a workbook Excel refuses to open.
-const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
+// cell must not produce a workbook Excel refuses to open. The same goes for
+// the non-characters U+FFFE and U+FFFF: legal in a JSON string, outside XML's
+// Char production. A lone surrogate needs nothing here, because TextEncoder
+// already writes it as U+FFFD.
+const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
 
 function esc(s: string): string {
   return s
@@ -477,7 +475,11 @@ function cellXml(ref: string, c: Cell, date: DateColumn | null): string {
   // A datetime whose output form is a count rather than a calendar — minutes of
   // day, epoch millis — is a number and sorts like one. A quoted "007" is not:
   // its kind says the document wrote it as text, and that is what it stays.
-  if ((c.kind === 'number' || c.kind === 'datetime') && SAFE_NUMBER.test(c.text)) {
+  //
+  // Only fifteen significant digits survive a double, so only those may be a
+  // real numeric cell. Anything longer — an int64 id, the case this tool exists
+  // for — stays text, because Excel would round it and the digits are the point.
+  if ((c.kind === 'number' || c.kind === 'datetime') && exactAsDouble(c.text)) {
     return `<c r="${ref}"><v>${c.text}</v></c>`;
   }
   return stringCell(ref, c.text);

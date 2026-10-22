@@ -37,7 +37,10 @@ function inspectionFor(doc: unknown): Inspection {
   return inspection;
 }
 
-/** Dropped when the document is replaced, so a reparse cannot serve stale tables. */
+/**
+ * Dropped when the document is replaced or edited in place, so neither a
+ * reparse nor an edit can serve stale tables.
+ */
 export function resetConvertCache(): void {
   cache = null;
 }

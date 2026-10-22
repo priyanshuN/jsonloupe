@@ -46,6 +46,28 @@ test('tree and code workflows are named and keyboard operable', async ({ page })
   await expectNoWcagViolations(page, '#code-view');
 });
 
+test('a filter that matches nothing says so instead of showing a bare root', async ({ page }) => {
+  await openSample(page);
+  await page.locator('#search-box').fill('no-such-text-anywhere');
+  await page.getByRole('button', { name: 'Filter the tree to matches' }).click();
+  // The funnel's count was the only signal; the pruned tree is one collapsed
+  // root row, which reads as a broken document rather than an empty answer.
+  const panel = page.locator('#search-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Nothing matches the filter');
+  // The box's live search fires 160 ms after typing; it used to land after the
+  // filter and swap this for the plain search's "No matches". Wait it out.
+  await expect(page.getByRole('button', { name: 'Filter the tree to matches' })).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForTimeout(400);
+  await expect(panel).toContainText('Nothing matches the filter');
+  await expectNoWcagViolations(page);
+
+  // Turning the filter off is the way back the hint names.
+  await page.getByRole('button', { name: 'Filter the tree to matches' }).click();
+  await expect(panel).toBeHidden();
+  await expect(page.getByRole('treeitem').nth(1)).toBeVisible();
+});
+
 test('query results can become an accessible reusable check', async ({ page }) => {
   await openSample(page);
   await page.getByRole('button', { name: 'query', exact: true }).click();
@@ -75,6 +97,46 @@ test('converter exposes its tables and mapping controls without WCAG violations'
   await page.getByRole('button', { name: 'customize' }).click();
   await expect(page.getByRole('list', { name: 'Columns' })).toBeVisible();
   await expectNoWcagViolations(page, '#convert-view');
+});
+
+test('the converter shows a typed missing-value default whole at laptop widths', async ({ page }) => {
+  // The field's shell did not grow, so its input sat at 51px and a default like
+  // `not provided` scrolled out of view with half the strip empty beside it.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openSample(page);
+  await page.getByRole('button', { name: 'Convert this document to tables' }).click();
+  await page.getByRole('button', { name: 'customize' }).click();
+  const missing = page.locator('#convert-missing');
+  await missing.fill('not provided');
+  for (const width of [1280, 1440, 1536]) {
+    await page.setViewportSize({ width, height: 900 });
+    // At 1280 the strip's top row has only a few px of slack, and how many
+    // depends on the system font it is set in: ~24px with macOS's, about 9px
+    // too few with the Linux font CI renders. Whether a 12-character default
+    // fits there is the font's call, not the layout's. From 1440 every font has
+    // room, and a shell that stops growing fails here as the 51px box did.
+    if (width > 1280) {
+      const fit = await missing.evaluate((el) => el.scrollWidth - el.clientWidth);
+      expect(fit, `at ${width}px`).toBeLessThanOrEqual(0);
+    }
+    // …and the strip still keeps `name` beside the field it labels.
+    const label = await page.locator('label[for="convert-map-name"]').boundingBox();
+    const field = await page.locator('#convert-map-name').boundingBox();
+    expect(Math.abs((label?.y ?? 0) + (label?.height ?? 0) / 2 - ((field?.y ?? 0) + (field?.height ?? 0) / 2))).toBeLessThan(4);
+  }
+});
+
+test('a long code token on a landing card wraps inside a phone-width card', async ({ page }) => {
+  // `.lp-grid` clips overflow, so a nowrap token lost its last characters at
+  // the card edge rather than scrolling the page, which nothing else catches.
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto('/json-to-excel.html');
+  const overrun = await page.locator('.lp-cell code').first().evaluate((code) => {
+    const cell = code.closest('.lp-cell') as HTMLElement;
+    const right = cell.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(cell).paddingRight);
+    return Math.max(...[...code.getClientRects()].map((r) => r.right)) - right;
+  });
+  expect(overrun).toBeLessThanOrEqual(0.5);
 });
 
 test('the sample compared with a reformatted copy of itself reads as identical', async ({ page, context }) => {

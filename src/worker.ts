@@ -21,7 +21,7 @@ import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, 
 import { profileQuery } from './profile';
 import { EXPORT_CHUNK_BYTES, MAX_EXPORT_BYTES } from './export-policy';
 import { csvCell, csvField } from './csv';
-import { numberParser } from './lossless';
+import { lparse as sharedParse, numberParser } from './lossless';
 import { convertInspect, convertPreview, convertRun, resetConvertCache } from './convert/session';
 import type { ConvertSpec } from './convert/index';
 import {
@@ -45,7 +45,7 @@ import {
   type PayloadDecodeFailure,
   type PayloadDecodeSuccess,
 } from './codec';
-import { parse as llParse, stringify as llStringify, isLosslessNumber, isSafeNumber } from 'lossless-json';
+import { stringify as llStringify, isLosslessNumber, isSafeNumber } from 'lossless-json';
 import { jsonrepair } from 'jsonrepair';
 import { summarizeRepair } from './repair-summary';
 
@@ -57,8 +57,8 @@ import { summarizeRepair } from './repair-summary';
 // the run panel's warning. isSafeNumber answers the narrower question the panel
 // asks ("would plain JSON.parse round this?"), and it only runs on the boxed
 // minority, so the common document pays nothing for it. The flag is worker
-// state, which is why parsing here wraps the shared predicate instead of
-// calling ./lossless's own `lparse`.
+// state, which is why parsing here hands ./lossless's `lparse` a wrapper of the
+// shared predicate instead of the predicate itself.
 let sawUnsafeNumber = false;
 
 const trackedNumberParser = (v: string): unknown => {
@@ -70,7 +70,7 @@ const trackedNumberParser = (v: string): unknown => {
 };
 
 function lparse(text: string): unknown {
-  return llParse(text, undefined, trackedNumberParser as never);
+  return sharedParse(text, trackedNumberParser);
 }
 
 // A UTF-8 decoder may surface the byte-order mark as U+FEFF. JSON parsers do
@@ -1333,6 +1333,9 @@ function ancestorUnpacked(id: number): boolean {
 // container — so the true slot is written, not a synthetic one.
 function writeLeaf(n: NodeRec, parsed: unknown): void {
   clearCompareState();
+  // The converter's inspection is cached by root identity, which an in-place
+  // edit keeps, so detection would go on serving the tables from before it.
+  resetConvertCache();
   if (n.parent === -1) {
     n.value = parsed; // primitive root document
   } else {
@@ -2331,11 +2334,13 @@ function tableInit(id: number): { ok: boolean; cols?: string[]; count?: number; 
   let hasPrimitive = false;
   for (const item of v.slice(0, 500)) {
     if (isPlainObject(item)) {
+      // The cap is on the table, not on each record: checked per key, a break
+      // here only left this record and every later one added another column.
       for (const k of Object.keys(item)) {
+        if (cols.length >= 40) break;
         if (!seen.has(k)) {
           seen.add(k);
           cols.push(k);
-          if (cols.length >= 40) break;
         }
       }
     } else {
@@ -2372,7 +2377,15 @@ function tableSort(col: string | null, dir: number): { count: number } {
   if (col === null) {
     tableIdx = tableArr.map((_, i) => i);
   } else {
-    tableIdx.sort((a, b) => dir * cmpCell(tableCell(a, col), tableCell(b, col)) || a - b);
+    // A missing cell sorts last in BOTH directions, as a spreadsheet's blank
+    // does: cmpCell puts it last, and multiplying that by -1 put every record
+    // without the field at the top of a descending sort.
+    tableIdx.sort((a, b) => {
+      const va = tableCell(a, col);
+      const vb = tableCell(b, col);
+      if ((va === undefined) !== (vb === undefined)) return va === undefined ? 1 : -1;
+      return dir * cmpCell(va, vb) || a - b;
+    });
   }
   return { count: tableIdx.length };
 }

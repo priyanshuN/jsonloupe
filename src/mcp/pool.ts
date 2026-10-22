@@ -27,7 +27,11 @@ export interface DocEntry {
   origin: string;
 }
 
-/** Eight live documents is already an unusual session; the ninth evicts the coldest. */
+/**
+ * Eight live documents is already an unusual session; the ninth evicts the
+ * coldest. While a load is in flight the pool briefly runs one thread over this,
+ * because the eviction waits until the new document has actually been kept.
+ */
 export const MAX_DOCS = 8;
 
 export class DocPool {
@@ -39,14 +43,28 @@ export class DocPool {
 
   constructor(private readonly createHost: DocHostFactory) {}
 
-  /** A fresh, empty document host under a new id, evicting the coldest if full. */
+  /**
+   * A fresh, empty document host under a new id. It evicts nothing: the load may
+   * still fail, and a typo in a path must not cost a live document. The caller
+   * calls settle() once the document is kept, or close() when it is not.
+   */
   open(origin: string): DocEntry {
-    if (this.docs.size >= MAX_DOCS) this.evictOldest();
     const id = `d${++this.seq}`;
     const entry: DocEntry = { id, host: this.createHost(), origin };
     this.docs.set(id, entry);
     this.touch(id);
     return entry;
+  }
+
+  /**
+   * Make room for a document that was kept: mark it most-recently-used, then
+   * evict the coldest others until the pool is back within MAX_DOCS. Touching it
+   * first matters when other calls ran during its load, which could otherwise
+   * leave the new document itself as the coldest.
+   */
+  settle(id: string): void {
+    if (this.docs.has(id)) this.touch(id);
+    for (let over = this.docs.size - MAX_DOCS; over > 0; over--) this.evictOldest();
   }
 
   /** Look a document up and mark it most-recently-used. */

@@ -188,6 +188,25 @@ describe('predicates', () => {
     expect(stateful).toMatchObject({ ok: false, error: expect.stringContaining('flags') });
     expect(nested).toMatchObject({ ok: false, error: expect.stringContaining('nested unbounded') });
   });
+  it('sees nested unbounded quantifiers through inner groups', () => {
+    // Whole queries, as a user types them, like the test above: the patterns
+    // only ever reach the engine inside a query, never as a RegExp of their own.
+    for (const query of [
+      '$.tasks[?(@.status =~ /^((a+))+$/)]',
+      '$.tasks[?(@.status =~ /^((\\w+)\\s?)+$/)]',
+      '$.tasks[?(@.status =~ /((ab)+)+/)]',
+      '$.tasks[?(@.status =~ /(?:(x*)y)*/)]',
+      '$.tasks[?(@.status =~ /(a+){2,}/)]',
+    ]) {
+      expect(runQuery(doc, query), query).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('nested unbounded'),
+      });
+    }
+    for (const re of ['(ab)+', '([+*])+', '(\\+)+', '(a|b)+', '((ab))+', '(a+)b(c+)']) {
+      expect(runQuery(doc, `$.tasks[?(@.status =~ /${re}/)]`).ok, re).toBe(true);
+    }
+  });
   it('field vs field — overbooked slots', () => {
     expect(matches(runQuery(doc, '$.slots[?(@.capacity.used > @.capacity.max)]')).map((m) => (m.value as { id: string }).id)).toEqual(['S2']);
   });
@@ -200,6 +219,41 @@ describe('predicates', () => {
     };
     expect(value(runQuery(ids, '$.rows[?(@.id == 9007199254740993)] | count'))).toBe(1);
     expect(value(runQuery(ids, '$.rows[?(@.id > 9007199254740992)] | count'))).toBe(1);
+  });
+  it('orders values between 0 and 1 above zero in filters, min and top', () => {
+    const prices = { rows: [{ p: 0.5 }, { p: 0 }, { p: 2 }, { p: 0.25 }] };
+    expect(value(runQuery(prices, '$.rows[?(@.p > 0)] | count'))).toBe(3);
+    expect(value(runQuery(prices, '$.rows[?(@.p < 0)] | count'))).toBe(0);
+    expect(value(runQuery(prices, '$.rows[*] | min(@.p)'))).toBe(0);
+    const top = runQuery(prices, '$.rows[*] | top(@.p)');
+    if (!top.ok || top.kind !== 'rows') throw new Error('bad');
+    expect(top.rows).toEqual([[2], [0.5], [0.25], [0]]);
+  });
+  it('does not treat inherited Object.prototype names as document keys', () => {
+    const records = [{ a: 1 }, { b: 2 }];
+    expect(value(runQuery(records, '$[?(@.constructor present)] | count'))).toBe(0);
+    expect(value(runQuery(records, '$[?(@.toString missing)] | count'))).toBe(2);
+    expect(value(runQuery(records, '$[?(@.hasOwnProperty)] | count'))).toBe(0);
+    expect(matches(runQuery(records, '$[0].constructor'))).toEqual([]);
+    const grouped = runQuery(records, '$[*] | group(@.valueOf)');
+    if (!grouped.ok || grouped.kind !== 'groups') throw new Error('bad');
+    expect(grouped.groups).toEqual([{ key: '(absent)', count: 2 }]);
+    // An own key with the same name is ordinary data.
+    const own: Record<string, unknown>[] = [{ constructor: 'Point' }, { a: 1 }];
+    expect(value(runQuery(own, "$[?(@.constructor == 'Point')] | count"))).toBe(1);
+    expect(matches(runQuery(own, '$[0].constructor'))).toEqual([{ path: [0, 'constructor'], value: 'Point' }]);
+  });
+  it('orders zero below a positive fraction', () => {
+    const rates = { items: [{ d: 0 }, { d: 0.3 }, { d: 0.7 }] };
+    expect(value(runQuery(rates, '$.items[?(@.d < 0.5)] | count'))).toBe(2);
+    expect(value(runQuery(rates, '$.items[?(@.d > 0.5)] | count'))).toBe(1);
+    expect(value(runQuery(rates, '$.items[*].d | min'))).toBe(0);
+    expect(value(runQuery(rates, '$.items[*].d | max'))).toBe(0.7);
+    const bottom = runQuery(rates, '$.items[*] | bottom(@.d)');
+    const top = runQuery(rates, '$.items[*] | top(@.d)');
+    if (!bottom.ok || bottom.kind !== 'rows' || !top.ok || top.kind !== 'rows') throw new Error('bad');
+    expect(bottom.rows).toEqual([[0], [0.3], [0.7]]);
+    expect(top.rows).toEqual([[0.7], [0.3], [0]]);
   });
 });
 

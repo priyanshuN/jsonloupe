@@ -259,7 +259,8 @@ function resolve(value: unknown, segments: (string | number)[]): unknown {
       if (index < 0 || index >= current.length) return undefined;
       current = current[index];
     } else {
-      if (!isRecord(current) || !(segment in current)) return undefined;
+      // Own keys only, as in query.ts: `in` would also find Object.prototype names.
+      if (!isRecord(current) || !Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
       current = current[segment];
     }
   }

@@ -96,6 +96,33 @@ const WORD_OPS = new Set(['in', 'contains', 'startsWith', 'endsWith', 'present',
 const MAX_REGEX_CHARS = 256;
 const SAFE_REGEX_FLAGS = /^[imsu]*$/;
 
+// True when a quantified group contains an unbounded quantifier at any depth.
+// A flat regex over the source cannot see through an inner group, so
+// `((a+))+` and `((\w+)\s?)+` slipped past one; track depth instead.
+function hasNestedUnboundedQuantifier(body: string): boolean {
+  const groups: boolean[] = [];
+  let inClass = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '\\') {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') inClass = true;
+    else if (c === '(') groups.push(false);
+    else if (c === ')') {
+      const inner = groups.pop() ?? false;
+      if (inner && /^\s*(?:[+*]|\{)/.test(body.slice(i + 1))) return true;
+      if (inner && groups.length) groups[groups.length - 1] = true;
+    } else if ((c === '+' || c === '*') && groups.length) groups[groups.length - 1] = true;
+  }
+  return false;
+}
+
 function regexSafetyError(body: string, flags: string): string | null {
   if (body.length > MAX_REGEX_CHARS) return `regex is longer than ${MAX_REGEX_CHARS} characters`;
   if (!SAFE_REGEX_FLAGS.test(flags)) return 'regex flags are limited to i, m, s and u';
@@ -103,9 +130,7 @@ function regexSafetyError(body: string, flags: string): string | null {
   // Native JavaScript regexes have no timeout. Reject the most common
   // catastrophic-backtracking shape: a quantified group containing another
   // unbounded quantifier, e.g. `(a+)+` or `(.*)*`.
-  if (/\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)\s*(?:[+*]|\{)/.test(body)) {
-    return 'regex contains nested unbounded quantifiers';
-  }
+  if (hasNestedUnboundedQuantifier(body)) return 'regex contains nested unbounded quantifiers';
   return null;
 }
 
@@ -519,7 +544,8 @@ function isObj(v: unknown): v is Record<string, unknown> {
 function resolveTail(v: unknown, tail: Tail[]): unknown {
   for (const s of tail) {
     if (s.kind === 'key') {
-      if (isObj(v) && s.name! in v) v = v[s.name!];
+      // Own keys only: `in` would find constructor/toString on every object.
+      if (isObj(v) && Object.prototype.hasOwnProperty.call(v, s.name!)) v = v[s.name!];
       else return undefined;
     } else {
       if (Array.isArray(v)) {
@@ -626,7 +652,9 @@ function* walk(root: unknown, segs: Seg[]): Generator<Match> {
     const seg = segs[index];
     switch (seg.kind) {
       case 'key':
-        if (isObj(value) && seg.name in value) yield* at(value[seg.name], [...path, seg.name], index + 1);
+        if (isObj(value) && Object.prototype.hasOwnProperty.call(value, seg.name)) {
+          yield* at(value[seg.name], [...path, seg.name], index + 1);
+        }
         return;
       case 'index': {
         if (!Array.isArray(value)) return;

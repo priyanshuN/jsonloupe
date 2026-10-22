@@ -166,6 +166,32 @@ describe('a cell is written as what the document said it was', () => {
     expect(cells).toContain('<c r="A3"><v>42</v></c>');
   });
 
+  // Fifteen digits before the point and ten after each fit the old shape check,
+  // so a 25-digit decimal went out as a numeric cell and Excel rounded it.
+  it('keeps a decimal past fifteen significant digits as text', () => {
+    const cells = unzip(
+      buildXlsx([
+        sheet('v', ['v'], [[num('123456789012345.678')], [num('1234567890.1234567')], [num('1.10')], [num('0.000123')]]),
+      ]),
+    ).get('xl/worksheets/sheet1.xml')!.body;
+    expect(cells).toContain('<is><t xml:space="preserve">123456789012345.678</t></is>');
+    expect(cells).toContain('<is><t xml:space="preserve">1234567890.1234567</t></is>');
+    expect(cells).toContain('<c r="A4"><v>1.10</v></c>');
+    expect(cells).toContain('<c r="A5"><v>0.000123</v></c>');
+  });
+
+  // Both are legal in a JSON string and both are outside XML 1.0's Char
+  // production, so one of them in a cell, a key or a table name made the part
+  // unparseable and Excel offered to repair the workbook.
+  it('drops U+FFFE and U+FFFF wherever they would reach the XML', () => {
+    const files = unzip(buildXlsx([sheet('t\uFFFF', ['k\uFFFF'], [[text('x\uFFFFy')], [text('z\uFFFE')]])]));
+    const cells = files.get('xl/worksheets/sheet1.xml')!.body;
+    expect(cells).toContain('<is><t xml:space="preserve">k</t></is>');
+    expect(cells).toContain('<is><t xml:space="preserve">xy</t></is>');
+    expect(cells).toContain('<is><t xml:space="preserve">z</t></is>');
+    for (const { body } of files.values()) expect(body).not.toMatch(/[\uFFFE\uFFFF]/);
+  });
+
   it('writes the header as a label even where the label reads like a number', () => {
     const cells = unzip(buildXlsx([sheet('t', ['2026'], [[num('1')]])])).get(
       'xl/worksheets/sheet1.xml',

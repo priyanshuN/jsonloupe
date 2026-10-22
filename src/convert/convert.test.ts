@@ -79,6 +79,57 @@ describe('path dialect', () => {
   it('requires {key} to come last', () => {
     expect(parseFrom('{key}.x').ok).toBe(false);
   });
+
+  it('reaches a key the bare form cannot spell through a quoted segment', () => {
+    const key = (name: string) => ({ kind: 'key', name });
+    expect(parseFrom('["user.id"]')).toEqual({ ok: true, value: { up: 0, segs: [key('user.id')] } });
+    expect(parseFrom('meta["a.b"].c')).toEqual({ ok: true, value: { up: 0, segs: [key('meta'), key('a.b'), key('c')] } });
+    expect(parseFrom('^.["$ref"]')).toEqual({ ok: true, value: { up: 1, segs: [key('$ref')] } });
+    expect(parseAnchor('$["api.v1"][]')).toEqual({ ok: true, value: [key('api.v1'), { kind: 'array' }] });
+    expect(parseFrom('["unterminated').ok).toBe(false);
+    expect(parseFrom('["a"]b').ok).toBe(false);
+    expect(parseFrom('a.').ok).toBe(false);
+  });
+});
+
+// A flattened export (`"user.id"`, `"meta.source"`) is common input. Joined
+// with a bare `.`, such a key read back as `user` → `id`: the drafted mapping
+// validated, and the export came out with an empty column or a 0-row sheet.
+describe('keys that contain a dot', () => {
+  async function drafted(input: { doc: unknown } | { text: string; format: 'csv' }) {
+    const ins = inspect(input, 'text' in input ? 'csv' : 'json');
+    const spec = draftSpec(ins);
+    expect(validateSpec(spec, ins)).toEqual({ ok: true });
+    const sink = memorySink();
+    const report = await convert(input, spec, sink, { now: NOW });
+    return { spec, sink, report };
+  }
+
+  it('keeps the values of a flat dotted field, under its own name', async () => {
+    const doc = JSON.parse('{"rows":[{"user.id":7,"name":"a"},{"user.id":8,"name":"b"}]}');
+    const { spec, sink } = await drafted({ doc });
+    expect(spec.tables[0].columns[0]).toEqual({ name: 'user.id', from: '["user.id"]' });
+    expect(sink.byName('rows')!.rows).toEqual([['7', 'a'], ['8', 'b']]);
+  });
+
+  it('keeps the rows of a collection whose key has a dot', async () => {
+    const { spec, sink, report } = await drafted({ doc: JSON.parse('{"api.v1":[{"a":1},{"a":2}]}') });
+    expect(spec.tables[0]).toMatchObject({ name: 'api.v1', anchor: '$["api.v1"][]' });
+    expect(report.tables[0].rows).toBe(2);
+    expect(sink.byName('api.v1')!.rows).toEqual([['1'], ['2']]);
+  });
+
+  it('keeps a dotted CSV header', async () => {
+    const { sink } = await drafted({ text: 'user.id,name\n7,a\n8,b\n', format: 'csv' });
+    expect(sink.tables[0].rows).toEqual([['7', 'a'], ['8', 'b']]);
+  });
+
+  it('tells a dotted key from the nested record it reads like', async () => {
+    const doc = { rows: [{ 'user.id': 1, user: { id: 2 } }] };
+    const { spec, sink } = await drafted({ doc });
+    expect(spec.tables[0].columns.map((c) => c.name)).toEqual(['["user.id"]', 'user.id']);
+    expect(sink.byName('rows')!.rows).toEqual([['1', '2']]);
+  });
 });
 
 // ------------------------------------------------------------------ validation
@@ -312,6 +363,35 @@ describe('table-per-array normalization', () => {
     });
     const { sink } = await run(anon, s);
     expect(sink.byName('group_items')!.rows).toEqual([['0', '1'], ['1', '2']]);
+  });
+
+  // Numbered over every row the anchor reached, one skipped parent moved every
+  // later child onto its neighbour's row — and the last one past the sheet's end.
+  it('numbers the synthetic row index over the parent rows actually written', async () => {
+    const groups = {
+      groups: [
+        { name: 'x', members: [{ m: 1 }] },
+        { members: [{ m: 2 }] },
+        { name: 'z', members: [{ m: 3 }] },
+      ],
+    };
+    const s = table({
+      output: { format: 'csv', onMissing: '-' },
+      tables: [
+        { name: 'groups', anchor: '$.groups[]', columns: [{ name: 'name', from: 'name', skipRowIfMissing: true }] },
+        {
+          name: 'members',
+          anchor: '$.groups[].members[]',
+          parent: { table: 'groups', key: '_parent_row', as: '_parent_row' },
+          columns: [{ name: 'm', from: 'm' }],
+        },
+      ],
+    });
+    const { sink } = await run(groups, s);
+    expect(sink.byName('groups')!.rows).toEqual([['x'], ['z']]);
+    expect(sink.byName('members')!.rows).toEqual([['0', '1'], ['-', '2'], ['1', '3']]);
+    const shown = await preview({ doc: groups }, s, { now: NOW });
+    expect(shown.tables[1].rows).toEqual([['0', '1'], ['-', '2'], ['1', '3']]);
   });
 
   it('pulls ancestors down for the denormalized one-wide-table shape', async () => {

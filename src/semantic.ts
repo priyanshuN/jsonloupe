@@ -395,8 +395,8 @@ export function semanticValueEqual(left: unknown, right: unknown): boolean {
   }
   if (isJsonObject(left) || isJsonObject(right)) {
     if (!isJsonObject(left) || !isJsonObject(right)) return false;
-    const leftKeys = Object.keys(left).sort(naturalCompare);
-    const rightKeys = Object.keys(right).sort(naturalCompare);
+    const leftKeys = Object.keys(left).sort(canonicalKeyCompare);
+    const rightKeys = Object.keys(right).sort(canonicalKeyCompare);
     if (leftKeys.length !== rightKeys.length) return false;
     for (let i = 0; i < leftKeys.length; i++) {
       if (leftKeys[i] !== rightKeys[i]) return false;
@@ -561,7 +561,7 @@ function buildComparableChildren(
   countSummary: boolean,
 ): void {
   if (Array.isArray(left) && Array.isArray(right)) {
-    buildPositionalRows(ctx, node, left, right, location, 'position', false, countSummary);
+    buildPositionalRows(ctx, node, left, right, location, 'position', countSummary);
   } else if (isJsonObject(left) && isJsonObject(right)) {
     buildObjectChildren(ctx, node, left, right, location, countSummary);
   }
@@ -674,6 +674,7 @@ function buildArrayChildren(
   const requestedMode = rule?.mode ?? ctx.defaultMode;
   const explicitKeys = rule?.keys ?? [];
   const objectArrays = allObjects(left) && allObjects(right) && left.length > 0 && right.length > 0;
+  const oneSidedEmpty = (left.length === 0) !== (right.length === 0);
   const primitiveArrays = allScalars(left) && allScalars(right);
   const tupleArrays = allArrays(left) && allArrays(right);
   const candidates = objectArrays ? discoverIdentityCandidates(left, right) : [];
@@ -690,6 +691,13 @@ function buildArrayChildren(
       inferredKind = 'entity';
       keys = bestCandidate.keys;
       confidence = bestCandidate.confidence;
+    } else if (oneSidedEmpty) {
+      // Every element is added or removed whatever the alignment, so there is
+      // no inference left to review. Falling through would call a list that
+      // became populated "heterogeneous" and flag it on the plan button.
+      mode = 'position';
+      inferredKind = 'empty-unknown';
+      confidence = 0;
     } else if (objectArrays) {
       mode = 'position';
       inferredKind = left.length === 0 && right.length === 0 ? 'empty-unknown' : 'mixed-unknown';
@@ -796,21 +804,12 @@ function buildArrayChildren(
     buildIdentityRows(ctx, node, left, right, location, keys, plan);
   } else if (mode === 'unordered') {
     buildUnorderedRows(ctx, node, left, right, location, plan);
-  } else if (mode === 'sequence' && (keys.length > 0 || primitiveArrays)) {
+  } else if (mode === 'sequence') {
     if (keys.length > 0) buildIdentityRows(ctx, node, left, right, location, keys, plan);
-    else buildUnorderedRows(ctx, node, left, right, location, plan);
+    else if (primitiveArrays) buildUnorderedRows(ctx, node, left, right, location, plan);
+    else buildSequenceRows(ctx, node, left, right, location, plan);
   } else {
-    buildPositionalRows(
-      ctx,
-      node,
-      left,
-      right,
-      location,
-      mode,
-      mode === 'sequence',
-      true,
-      plan,
-    );
+    buildPositionalRows(ctx, node, left, right, location, mode, true, plan);
   }
   node.status = aggregateStatus(node.children);
   if (node.status === 'equal' && !node.truncated) {
@@ -852,6 +851,10 @@ function buildIdentityRows(
         plan.counts.matched++;
         if (moved) plan.counts.moved++;
       }
+      // These pairings are a guess, so a position difference between them is
+      // not a reorder: counting it would report a move nobody can vouch for and
+      // list the row under the moved filter. The node still carries both
+      // indices, so the row says where each side sits.
       const pairings = pairSameIndexFirst(exact.leftRemaining, exact.rightRemaining);
       for (const [leftValue, rightValue] of pairings) {
         rows.push({
@@ -860,10 +863,6 @@ function buildIdentityRows(
           left: leftValue,
           right: rightValue,
           status: 'ambiguous',
-          moved:
-            !!leftValue &&
-            !!rightValue &&
-            leftValue.index !== rightValue.index,
         });
         plan.counts.ambiguous++;
       }
@@ -995,28 +994,24 @@ function buildPositionalRows(
   left: unknown[],
   right: unknown[],
   location: BuildLocation,
-  mode: 'position' | 'sequence',
-  detectMoves: boolean,
+  mode: 'position',
   countSummary: boolean,
   plan?: AlignmentPlan,
 ): void {
-  const moveTargets = detectMoves ? positionalMoveTargets(left, right) : new Map<number, number>();
   const length = Math.max(left.length, right.length);
   if (plan) {
     plan.counts.matched = Math.min(left.length, right.length);
     plan.counts.removed = Math.max(0, left.length - right.length);
     plan.counts.added = Math.max(0, right.length - left.length);
-    plan.counts.moved = moveTargets.size;
   }
   for (let i = 0; i < length; i++) {
     const hasLeft = i < left.length;
     const hasRight = i < right.length;
-    const moveTarget = moveTargets.get(i);
     const childLocation = arrayChildLocation(
       location,
       hasLeft ? i : null,
       hasRight ? i : null,
-      moveTarget === undefined ? String(i) : `${i} → ${moveTarget}`,
+      String(i),
     );
     const child = buildNode(
       ctx,
@@ -1034,58 +1029,56 @@ function buildPositionalRows(
       markTruncated(ctx, node, location.normalizedPath, length - i);
       break;
     }
-    if (moveTarget !== undefined) {
-      child.moved = true;
-      ctx.summary.moved++;
-    }
     node.children.push(child);
   }
   node.arrayMode = mode;
 }
 
-function positionalMoveTargets(left: unknown[], right: unknown[]): Map<number, number> {
-  const targets = new Map<number, number>();
-  let leftGroups: Map<string, IndexedValue[]>;
-  let rightGroups: Map<string, IndexedValue[]>;
-  if (allObjects(left) && allObjects(right) && left.length > 0 && right.length > 0) {
-    const candidate = discoverIdentityCandidates(left, right)[0];
-    if (candidate?.reliable) {
-      leftGroups = groupByIdentityToken(left, candidate.keys, '$');
-      rightGroups = groupByIdentityToken(right, candidate.keys, '$');
+// A sequence with no identity key whose elements are not all scalars: objects,
+// tuples or a mix. Canonically equal elements are certain partners wherever
+// they stand, so they pair first and a position change between them is a move.
+// (Labelling such a move while still comparing left[i] with right[i] reported
+// every swapped element as changed too.) A leftover pairs only with the
+// leftover at its own index, so an element edited in place keeps its field
+// changes; any other leftover is removed or added rather than paired by guess.
+function buildSequenceRows(
+  ctx: Context,
+  node: SemanticNode,
+  left: unknown[],
+  right: unknown[],
+  location: BuildLocation,
+  plan: AlignmentPlan,
+): void {
+  const indexed = (values: unknown[], basePath: string): IndexedValue[] =>
+    values.map((value, index) => ({ value, index, path: `${basePath}[${index}]` }));
+  const exact = pairCanonicalExact(indexed(left, location.leftPath), indexed(right, location.rightPath));
+  const rows: AlignedRow[] = [];
+  for (const [leftValue, rightValue] of exact.pairs) {
+    const moved = leftValue.index !== rightValue.index;
+    const label = moved ? `${leftValue.index} → ${rightValue.index}` : String(leftValue.index);
+    rows.push({ token: label, label, left: leftValue, right: rightValue, moved });
+    plan.counts.matched++;
+  }
+  const rightByIndex = new Map(exact.rightRemaining.map((value) => [value.index, value]));
+  for (const leftValue of exact.leftRemaining) {
+    const label = String(leftValue.index);
+    const rightValue = rightByIndex.get(leftValue.index);
+    if (rightValue) {
+      rightByIndex.delete(leftValue.index);
+      rows.push({ token: label, label, left: leftValue, right: rightValue });
+      plan.counts.matched++;
     } else {
-      leftGroups = groupByCanonical(left, '$');
-      rightGroups = groupByCanonical(right, '$');
-    }
-  } else {
-    leftGroups = groupByCanonical(left, '$');
-    rightGroups = groupByCanonical(right, '$');
-  }
-  for (const [token, leftValues] of leftGroups) {
-    const rightValues = rightGroups.get(token);
-    if (!rightValues) continue;
-    for (const [leftValue, rightValue] of pairSameIndexFirst(leftValues, rightValues)) {
-      if (leftValue && rightValue && leftValue.index !== rightValue.index) {
-        targets.set(leftValue.index, rightValue.index);
-      }
+      rows.push({ token: label, label, left: leftValue, status: 'removed' });
+      plan.counts.removed++;
     }
   }
-  return targets;
-}
-
-function groupByIdentityToken(
-  values: unknown[],
-  keys: string[],
-  basePath: string,
-): Map<string, IndexedValue[]> {
-  const groups = new Map<string, IndexedValue[]>();
-  values.forEach((value, index) => {
-    const identity = identityToken(value, keys);
-    if (!identity) return;
-    const group = groups.get(identity.token) ?? [];
-    group.push({ value, index, path: `${basePath}[${index}]` });
-    groups.set(identity.token, group);
-  });
-  return groups;
+  for (const rightValue of rightByIndex.values()) {
+    const label = String(rightValue.index);
+    rows.push({ token: label, label, right: rightValue, status: 'added' });
+    plan.counts.added++;
+  }
+  sortAlignedRows(rows, ctx.displayMode);
+  materializeAlignedRows(ctx, node, rows, location, plan);
 }
 
 function allocateNode(
@@ -1645,7 +1638,7 @@ function canonicalValue(value: unknown): string {
         return `a${value.length}:[${value.map(canonicalValue).join(',')}]`;
       }
       if (isJsonObject(value)) {
-        const keys = Object.keys(value).sort(naturalCompare);
+        const keys = Object.keys(value).sort(canonicalKeyCompare);
         return `o${keys.length}:{${keys
           .map((key) => `${key.length}:${key}=${canonicalValue(value[key])}`)
           .join(',')}}`;
@@ -1665,6 +1658,15 @@ function sameKeys(left: readonly string[], right: readonly string[]): boolean {
 
 function naturalCompare(left: string, right: string): number {
   return naturalCollator.compare(left, right);
+}
+
+// Equality and canonical tokens need a total order over keys. The natural
+// collator ties keys that differ only by case or accent ('a'/'A', 'e'/'é'), and
+// a stable sort then keeps each side's insertion order, so {a,A} and {A,a}
+// sorted differently and key order leaked into the result. Code units break
+// the tie; display sorts keep the plain collator.
+function canonicalKeyCompare(left: string, right: string): number {
+  return naturalCompare(left, right) || (left < right ? -1 : left > right ? 1 : 0);
 }
 
 function ratio(numerator: number, denominator: number): number {

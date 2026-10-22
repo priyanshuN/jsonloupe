@@ -14,7 +14,8 @@ import type {
   CompareError,
 } from './protocol';
 import { SemanticCompareView, type CompareRow } from './compare-view';
-import { ConvertView } from './convert-view';
+// Type only — the converter is fetched the first time it opens (loadConverter).
+import type { ConvertView } from './convert-view';
 import type { ConvertReport, ConvertSpec, Inspection, PreviewResult, SpecError } from './convert/index';
 import { onlyStoredZipEntry } from './one-file-zip';
 // Type only — the module itself is loaded lazily, and only where the browser
@@ -96,7 +97,7 @@ import type { SavedCheck, SavedScript } from './db';
 import { evaluateCheck, expectationText, type CheckExpectation } from './check';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
-import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
+import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, PLAYBOOK_VERSION } from './playbook';
 import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 import { CommandPalette, type PaletteCommand } from './palette';
@@ -642,7 +643,13 @@ let currentTitle = '';
 let currentHandle: FsFileHandle | null = null;
 let currentProvenance: store.DocProvenance | null = null;
 let openRequestToken = 0;
+// The open request whose `parse` is queued in the worker and not yet answered,
+// or 0. The worker takes messages in order, so while this is set anything
+// posted now runs against the INCOMING document, not the one on screen.
+let workerParseRequest = 0;
 let currentDocumentToken = 0;
+// The document an inline tree editor was opened on (one editor at a time).
+let editDocumentToken = 0;
 let currentDocumentRevision = 0;
 let pendingInitialSave: {
   documentToken: number;
@@ -1583,6 +1590,9 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
   onCopyValue: (id) => void copyValueOf(id),
   onUnpack: async (id, index) => {
     const documentToken = currentDocumentToken;
+    // A committing unpack is an edit addressed by bare node id; with an open's
+    // parse queued ahead it would rewrite the incoming document's node instead.
+    if (workerParseRequest) return;
     const r = await call<{ ok: boolean; totalRows: number; error?: string }>({
       type: 'unpack', id, index, commit: true,
     });
@@ -1604,11 +1614,25 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
     syncCodeToSelectionSoon();
   },
   getEditText: async (id) => {
+    // Opened with a parse queued ahead, the literal itself comes from the
+    // incoming document, so no commit from this editor can be trusted.
+    editDocumentToken = workerParseRequest ? -1 : currentDocumentToken;
     const r = await call<{ text: string }>({ type: 'nodeValue', id });
     return r.text;
   },
   onEditCommit: async (id, index, text) => {
     const documentToken = currentDocumentToken;
+    // The id is a bare number and the worker restarts them at 1 on every parse,
+    // so a commit for a row of the document the editor opened on would land on
+    // whichever node of another document has that number: one that has opened
+    // since (the editor stays up across an open, since render() pauses for it),
+    // or one whose parse is queued ahead of this message. Refuse before posting.
+    if (documentToken !== editDocumentToken || workerParseRequest) {
+      showToast('edit discarded — a different document opened', 'bad');
+      // ok closes the editor: there is nothing to retry against, and a retry
+      // could only land in the wrong document.
+      return { ok: true };
+    }
     const r = await call<{ ok: boolean; error?: string; row?: Row }>({ type: 'setValue', id, index, text });
     if (documentToken !== currentDocumentToken) {
       return { ok: false, error: 'document changed while the edit was applying' };
@@ -1781,7 +1805,14 @@ async function runDocRowAction(target: HTMLElement, id: string): Promise<boolean
   }
   if (target.closest('.del')) {
     await store.removeDoc(id);
-    if (currentDocId === id) currentDocId = null;
+    if (currentDocId === id) {
+      currentDocId = null;
+      // The initial save's meta names the record just deleted, and updateDoc on
+      // a missing row writes nothing and reports nothing. Drop it so the next
+      // edit stores the document again, as it already does for one reopened
+      // from Recents, instead of every later edit vanishing silently.
+      pendingInitialSave = null;
+    }
     return true;
   }
   return false;
@@ -1912,7 +1943,7 @@ compareBtn.addEventListener('click', () => void showBaselinePicker());
 
 // The worker keeps the document; this view keeps the spec. Every call ships the
 // spec down and gets rows back, so the parsed document still never crosses.
-const converter = new ConvertView(
+const converterArgs: ConstructorParameters<typeof ConvertView> = [
   {
     count: $('#convert-count'),
     tables: $('#convert-tables'),
@@ -1963,7 +1994,25 @@ const converter = new ConvertView(
     docStem,
     docRevision: () => currentDocumentRevision,
   },
-);
+];
+
+// convert-view.ts was 32 KB of the 212 KB the landing downloaded before it could
+// paint, and neither the landing nor a freshly opened document needs it, so it
+// is a lazy chunk like ./code: fetched on the first open, constructed once, and
+// kept. `converter` is null until then; the pane's buttons that read it are only
+// on screen after an open has begun the fetch.
+let converter: ConvertView | null = null;
+let converterLoad: Promise<ConvertView> | null = null;
+
+function loadConverter(): Promise<ConvertView> {
+  converterLoad ??= import('./convert-view').then((mod) => {
+    converter = new mod.ConvertView(...converterArgs);
+    return converter;
+  });
+  // A failed fetch is not remembered: the next open asks the network again.
+  converterLoad.catch(() => { converterLoad = null; });
+  return converterLoad;
+}
 
 function openConverter(): void {
   showPane('convert');
@@ -1971,7 +2020,17 @@ function openConverter(): void {
   // before its first await and keeps it live from there, which is more than the
   // shell can do from out here — it knows which table is selected and this does
   // not. The counts stay in the converter's own bar, as the table view's do.
-  void converter.open().catch((err: Error) => showToast(err.message, 'bad'));
+  loadConverter().then(
+    (view) => {
+      // Only the first open waits on the chunk. Someone who moved to another
+      // pane while it arrived keeps that pane's strip.
+      if (activePane !== 'convert') return;
+      void view.open().catch((err: Error) => showToast(err.message, 'bad'));
+    },
+    // Same case ensureEditor meets for the code view: a deploy replaced the
+    // hashed chunk this tab points at.
+    () => showToast('jsonloupe was updated since this tab loaded — reload the page to convert', 'bad'),
+  );
 }
 
 convertBtn.addEventListener('click', openConverter);
@@ -2061,7 +2120,7 @@ window.addEventListener('hashchange', () => {
 });
 
 $('#convert-close').addEventListener('click', () => showTree());
-$('#convert-spec').addEventListener('click', () => converter.downloadSpec());
+$('#convert-spec').addEventListener('click', () => converter?.downloadSpec());
 $('#convert-import').addEventListener('click', () => $<HTMLInputElement>('#convert-import-file').click());
 $<HTMLInputElement>('#convert-import-file').addEventListener('change', async (event) => {
   const input = event.currentTarget as HTMLInputElement;
@@ -2069,7 +2128,7 @@ $<HTMLInputElement>('#convert-import-file').addEventListener('change', async (ev
   input.value = '';
   if (!file) return;
   try {
-    converter.importSpecText(await file.text(), file.name);
+    (await loadConverter()).importSpecText(await file.text(), file.name);
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'bad');
   }
@@ -2081,13 +2140,13 @@ $<HTMLInputElement>('#convert-target-file').addEventListener('change', async (ev
   input.value = '';
   if (!file) return;
   try {
-    converter.importTargetHeadersText(await file.text(), file.name);
+    (await loadConverter()).importTargetHeadersText(await file.text(), file.name);
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'bad');
   }
 });
 $('#convert-dl').addEventListener('click', () => {
-  void converter.downloadResult().catch((err: Error) => showToast(err.message, 'bad'));
+  void converter?.downloadResult().catch((err: Error) => showToast(err.message, 'bad'));
 });
 
 baselineRecents.addEventListener('click', async (event) => {
@@ -2174,6 +2233,41 @@ function showParseError(err: ParseErr): void {
   parseError.hidden = false;
 }
 
+// Re-parse the document on screen after a dropped open left the worker holding
+// the text it was opening. Node ids restart at 1 on every parse, so the rows
+// already drawn are refetched rather than trusted; the expansion state and the
+// worker's undo history went with the dropped parse and are not recoverable.
+//
+// The re-parse hands out new ids in a new expansion order while the rows on
+// screen, and any inline editor held open across it, still carry the old ones.
+// The document token does not change, so it is tracked as a queued parse (which
+// the edit and unpack guards refuse) and an open editor is orphaned: a commit
+// by a stale id would land on a different leaf of the same document and save.
+let restoreParseSeq = 0;
+async function restoreShownDocument(): Promise<void> {
+  if (!currentText) return; // nothing on screen to disagree with
+  const documentToken = currentDocumentToken;
+  // Negative, so it never equals an open's token: an open posted behind this
+  // parse takes the slot over and must not be released by this one's reply.
+  const request = -++restoreParseSeq;
+  workerParseRequest = request;
+  editDocumentToken = -1;
+  let res: ParseOk | ParseErr;
+  try {
+    res = await call<ParseOk | ParseErr>({
+      type: 'parse',
+      text: currentText,
+      expandRows: fitRows(treeViewport),
+    });
+  } finally {
+    if (workerParseRequest === request) workerParseRequest = 0;
+  }
+  if (!res.ok || documentToken !== currentDocumentToken) return;
+  tree.setTotal(res.totalRows);
+  tree.resetSelection();
+  tree.refresh();
+}
+
 // Returns true when the text parsed and the viewer swapped to it. Ordinary open
 // failures move to the landing error; reload can instead keep the valid current
 // document visible and reject the replacement with a toast.
@@ -2241,8 +2335,28 @@ async function openText(
     }
   }
 
-  const res = await call<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(treeViewport) });
-  if (requestToken !== openRequestToken) return false;
+  workerParseRequest = requestToken;
+  let lastPostedParse = false;
+  let res: ParseOk | ParseErr;
+  try {
+    res = await call<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(treeViewport) });
+  } finally {
+    // In a finally: a rejected call must not leave edits and Apply refused for
+    // the rest of the session behind a parse nobody is waiting on.
+    lastPostedParse = workerParseRequest === requestToken;
+    if (lastPostedParse) workerParseRequest = 0;
+  }
+  if (requestToken !== openRequestToken) {
+    // Not every canceller opens something (compress, + new, a drop with no
+    // files, reload giving up), and by now the worker has ALREADY swapped to
+    // this text: a parse commits there before it replies. Left alone, the
+    // screen describes one document while the worker holds another, and the
+    // next edit writes the hidden one into the shown one's stored record. A
+    // newer parse queued behind this one replaces it anyway; otherwise put
+    // the shown document back.
+    if (res.ok && lastPostedParse) await restoreShownDocument();
+    return false;
+  }
   if (!res.ok) {
     if (keepCurrentOnFailure) {
       showToast(`reload rejected: ${res.error}`, 'bad');
@@ -2435,13 +2549,18 @@ async function readPayloadFile(file: File): Promise<PayloadFileText> {
   };
 }
 
-// Import a batch: earlier files are saved to memory, the last one is opened.
+// Import a batch: earlier documents are saved to memory, the last readable one
+// is opened. "Last readable", not "last in the batch": an unreadable file or a
+// playbook at the end used to leave the batch opening nothing at all, with the
+// good documents saved where nobody was told to look for them. So each
+// document is held back until the next one arrives, and whichever is held when
+// the batch runs out is the one opened.
 async function importFiles(
   entries: { file: File; handle: FsFileHandle | null }[],
   requestToken = beginOpenRequest(),
 ): Promise<void> {
-  for (let i = 0; i < entries.length; i++) {
-    const { file, handle } = entries[i];
+  let pending: { payload: PayloadFileText; handle: FsFileHandle | null } | null = null;
+  for (const { file, handle } of entries) {
     let payload: PayloadFileText;
     try {
       payload = await readPayloadFile(file);
@@ -2454,29 +2573,33 @@ async function importFiles(
     // imported function is one `×` away, which is what makes deciding for the
     // user acceptable here — nothing is replaced and nothing is lost.
     if (looksLikePlaybook(payload.text)) {
-      if (await importPlaybookText(payload.text, file.name)) continue;
+      // A playbook refused for room is still a playbook: opening it would
+      // replace the document on screen with the file the user meant to import.
+      if ((await importPlaybookText(payload.text, file.name)) !== 'not-a-playbook') continue;
       // Not actually a playbook after all — fall through and open it, so a
       // document that merely mentions the word still reads as a document.
     }
-    if (i === entries.length - 1) {
-      await openText(
-        payload.text,
-        payload.title,
-        null,
-        handle,
-        payload.provenance,
-        true,
-        false,
-        requestToken,
-      );
-    } else {
+    if (pending) {
       await store.saveDoc(
-        payload.text,
-        payload.title,
-        handle ?? undefined,
-        payload.provenance ?? undefined,
+        pending.payload.text,
+        pending.payload.title,
+        pending.handle ?? undefined,
+        pending.payload.provenance ?? undefined,
       );
     }
+    pending = { payload, handle };
+  }
+  if (pending) {
+    await openText(
+      pending.payload.text,
+      pending.payload.title,
+      null,
+      pending.handle,
+      pending.payload.provenance,
+      true,
+      false,
+      requestToken,
+    );
   }
   await renderRecents();
 }
@@ -3115,7 +3238,13 @@ docTitleEl.addEventListener('click', async () => {
   const name = prompt('Rename document', currentTitle);
   if (!name) return;
   currentTitle = name;
+  // The bump stays: in-flight work that captured the old title (reload's
+  // stillCurrent, a transport label) must still notice. But a rename changes
+  // no content, so a buffer that was in step with the document, unapplied edit
+  // and all, is still about this document and must not be re-serialized over.
+  const codeBufferCurrent = codeLoadedRevision === currentDocumentRevision;
   currentDocumentRevision++;
+  if (codeBufferCurrent) codeLoadedRevision = currentDocumentRevision;
   setDocTitle(name);
   await store.renameDoc(currentDocId, name);
   await renderRecents();
@@ -3611,7 +3740,14 @@ async function applyCode(): Promise<void> {
   if (!codeDirty) return;
   const text = codeEditor.getDoc();
   const documentToken = currentDocumentToken;
-  const requestToken = openRequestToken;
+  // An open's parse queued ahead of this one would make the Apply replace the
+  // incoming document instead of this one, and its result would then be
+  // dropped as stale with the worker holding the applied text under the other
+  // document's name.
+  if (workerParseRequest) {
+    setCodeStatus('error', 'another document is opening — apply once it has loaded');
+    return;
+  }
   // apply:true → the worker records a replaceDoc on the undo stack instead of
   // clearing it (a fresh open clears; an Apply is undoable).
   const res = await call<ParseOk | ParseErr>({
@@ -3623,10 +3759,12 @@ async function applyCode(): Promise<void> {
     // bytes the user did not type.
     repair: false,
   });
-  if (
-    documentToken !== currentDocumentToken ||
-    requestToken !== openRequestToken
-  ) return;
+  // The document token alone decides staleness. An open requested meanwhile
+  // has not replaced anything until its parse lands, and the worker has
+  // already taken this Apply: dropping the result because compress or + new
+  // was clicked left currentText, the stored body and the tree describing
+  // the pre-Apply document while the worker held the applied one.
+  if (documentToken !== currentDocumentToken) return;
   if (!res.ok) {
     const loc = res.line !== null ? ` (line ${res.line}, col ${res.column})` : '';
     setCodeStatus('error', `✗ ${res.error}${loc}`);
@@ -3916,12 +4054,32 @@ async function setFilter(query: string): Promise<void> {
   // Snapshot scroll only on ENTERING filter from the unfiltered tree; don't
   // re-snapshot on repeated filter edits while already filtered.
   if (query && !filterOn) filterScrollSnapshot = treeViewport.scrollTop;
+  // The box's live search is still pending when the funnel is pressed inside
+  // its 160 ms pause, and it would land after this and repaint the panel with
+  // the plain search's "No matches", which says nothing about the filter that
+  // is on. The timer is cleared now; a search already posted is queued in the
+  // worker ahead of or behind this filter, so it is dropped by token after.
+  if (query) clearTimeout(liveSearchTimer);
   const r = await call<{ totalRows: number; matches: number }>({ type: 'filter', query });
+  if (query) searchToken++;
   filterOn = !!query;
   filterBtn.classList.toggle('on', filterOn);
   paintFilterBtn(filterOn ? r.matches : null);
   showPane('tree');
-  searchPanel.hidden = true;
+  // A filter that matched nothing prunes the tree to its bare, collapsed root,
+  // which reads as a broken document rather than an empty answer — the `0` on
+  // the funnel was the only clue. Rule 17: name the emptiness where the hit
+  // list would stand, and say the way back.
+  if (filterOn && r.matches === 0) {
+    searchPanel.replaceChildren(
+      emptyState('Nothing matches the filter', 'Change the search, or turn the filter off.', {
+        className: 'hit none',
+      }),
+    );
+    searchPanel.hidden = false;
+  } else {
+    searchPanel.hidden = true;
+  }
   tree.resetSelection();
   tree.setTotal(r.totalRows);
   if (!query && filterScrollSnapshot !== null) {
@@ -4581,7 +4739,7 @@ $('#table-close').addEventListener('click', () => showTree());
 type QueryResp =
   | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: { i: number; pathText: string; preview: string }[] }
   | { ok: true; kind: 'value'; label: string; value: number | string | null; note?: string }
-  | { ok: true; kind: 'groups'; label: string; groups: { key: string; count: number }[]; truncated: boolean }
+  | { ok: true; kind: 'groups'; label: string; total: number; groups: { key: string; count: number }[]; truncated: boolean }
   | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean }
   | { ok: false; error: string; pos: number };
 
@@ -5199,8 +5357,9 @@ function queryCsvButton(): HTMLButtonElement {
 
 function queryResultCount(res: QueryResp | null): number | null {
   if (!res?.ok) return null;
-  if (res.kind === 'matches' || res.kind === 'rows') return res.total;
-  if (res.kind === 'groups') return res.groups.length;
+  // `groups` is the first page (the engine caps it at 1000); a check counts
+  // every group, exactly as it counts every match or row.
+  if (res.kind === 'matches' || res.kind === 'rows' || res.kind === 'groups') return res.total;
   if (res.kind === 'value' && typeof res.value === 'number' && Number.isSafeInteger(res.value) && res.value >= 0) {
     return res.value;
   }
@@ -5310,10 +5469,10 @@ function renderAskResult(res: QueryResp, preview = false): void {
       row.append(k, c);
       askResult.appendChild(row);
     }
-    if (res.groups.length > 50) {
+    if (res.total > 50) {
       const more = document.createElement('div');
       more.className = 'ask-label';
-      more.textContent = `… +${res.groups.length - 50} more groups`;
+      more.textContent = `… +${fmtNumber(res.total - 50)} more groups`;
       askResult.appendChild(more);
     }
     if (!preview) askResultActions.appendChild(queryCsvButton());
@@ -6358,6 +6517,13 @@ function adoptScript(rec: SavedScript | null): void {
 }
 
 async function loadAndRun(id: string): Promise<void> {
+  // Mid-run, a press would swap the head and editor to a function whose own
+  // run is then dropped (runScript refuses while one is in flight), leaving
+  // the running one's result under the pressed one's name. Refused, and said.
+  if (runInFlight) {
+    setRunStatus('a function is still running — press again when it finishes');
+    return;
+  }
   const rec = (await store.listScripts()).find((s) => s.id === id);
   if (!rec) return;
   // Two presses to discard: the first says what is at stake, the second obeys.
@@ -6499,13 +6665,24 @@ async function exportPlaybook(): Promise<void> {
  * someone wrote is the one outcome here that cannot be undone, so it is the one
  * thing import will not do; a duplicate, by contrast, is one `×` away.
  */
-async function importPlaybookText(text: string, fileName: string): Promise<boolean> {
+async function importPlaybookText(
+  text: string,
+  fileName: string,
+): Promise<'imported' | 'refused' | 'not-a-playbook'> {
   const res = parsePlaybook(text);
   if (!res.ok) {
     showToast(`${fileName}: ${res.error}`, 'bad');
-    return false;
+    return 'not-a-playbook';
   }
-  const taken = (await store.listScripts()).map((s) => s.name);
+  const scripts = await store.listScripts();
+  const checks = await store.listChecks();
+  // Past the library's cap, saving culls the oldest — refused before any write.
+  const full = playbookRoomError(res.playbook, { functions: scripts.length, checks: checks.length }, store.KEEP_SAVED);
+  if (full) {
+    showToast(`${fileName}: ${full}`, 'bad');
+    return 'refused';
+  }
+  const taken = scripts.map((s) => s.name);
   let renamed = 0;
   for (const fn of res.playbook.functions) {
     const name = uniqueScriptName(fn.name, taken);
@@ -6513,7 +6690,7 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
     taken.push(name);
     await store.saveScript(name, fn.script, fn.reads, fn.numberMode);
   }
-  const takenChecks = (await store.listChecks()).map((check) => check.name);
+  const takenChecks = checks.map((check) => check.name);
   for (const check of res.playbook.checks) {
     const name = uniqueScriptName(check.name, takenChecks);
     if (name !== check.name) renamed++;
@@ -6526,7 +6703,7 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
   showToast(
     `imported ${fmtNumber(count)} playbook item${count === 1 ? '' : 's'}${renamed ? ` · ${fmtNumber(renamed)} renamed to keep yours` : ''}`,
   );
-  return true;
+  return 'imported';
 }
 
 runExportBtn.addEventListener('click', () => void exportPlaybook());
@@ -6863,10 +7040,13 @@ async function runScript(): Promise<void> {
   // one mid-flight; the result belongs to the old document, so it is dropped
   // rather than rendered under the new one.
   const documentRevision = currentDocumentRevision;
+  // The id is taken NOW: what the run reads belongs to the function that
+  // started it, not whichever one is loaded by the time the worker answers.
+  const runId = runLoadedId;
   // Tracing costs a Proxy trap on every property read, so it is asked for once:
   // on the first run of a saved function, or the first after its code changed
   // (saving new code clears what the old code was seen to read).
-  const trace = runLoadedId !== null && runLoadedReads === undefined;
+  const trace = runId !== null && runLoadedReads === undefined;
   runInFlight = true;
   paintRunHead();
   runErrorEl.hidden = true;
@@ -6879,7 +7059,7 @@ async function runScript(): Promise<void> {
   runInFlight = false;
   paintRunHead();
   if (documentRevision !== currentDocumentRevision) return;
-  if (res.ok && res.reads && runLoadedId) await learnReads(runLoadedId, res.reads);
+  if (res.ok && res.reads && runId) await learnReads(runId, res.reads);
   await renderRunResult(res);
 }
 

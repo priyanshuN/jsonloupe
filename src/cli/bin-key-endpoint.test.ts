@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { get, type IncomingHttpHeaders } from 'node:http';
 import { createServer, type AddressInfo } from 'node:net';
@@ -327,6 +327,37 @@ describe.skipIf(!built)('bin/jsonloupe.mjs /__api-key (skipped unless dist/ and 
       const page = await request(plain.at('/'));
       expect(page.status).toBe(200);
       expect(page.body).toContain('<html');
+      expectSecurityHeaders(page);
+    });
+
+    it('answers 400 to a malformed %-escape and keeps serving', async () => {
+      // The URL parser leaves a bare or truncated escape in the pathname, and
+      // decoding it throws. Uncaught in the async handler, that rejection ended
+      // the process, so any page in the browser could kill the viewer with an
+      // <img> pointed at one of these paths.
+      for (const path of ['/%', '/%E0%A4%A', '/%ZZ']) {
+        const res = await request(plain.at(path));
+        expect(res.status).toBe(400);
+        expectSecurityHeaders(res);
+      }
+      expect((await request(plain.at('/'))).status).toBe(200);
+      expect(plain.log).not.toMatch(/URIError|\n\s+at /);
+    });
+
+    // A dedicated worker is governed by the CSP on its own response. The page
+    // policy there made every Run throw EvalError; no policy at all would let a
+    // script's import() send the document to any host.
+    it('serves the Run sandbox under its own policy: eval yes, other origins and workers no', async () => {
+      const chunk = (await readdir(join(root, 'dist', 'assets'))).find((f) => /^run-sandbox-.*\.js$/.test(f));
+      expect(chunk, 'the build emits a run-sandbox chunk').toBeDefined();
+      const res = await request(plain.at(`/assets/${chunk}`));
+      expect(res.status).toBe(200);
+      const csp = String(res.headers['content-security-policy']);
+      expect(csp).toBe("default-src 'none'; script-src 'self' 'unsafe-eval'; worker-src 'none'");
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+      // The page itself keeps the strict policy, eval and all.
+      const page = await request(plain.at('/index.html'));
+      expect(String(page.headers['content-security-policy'])).not.toContain('unsafe-eval');
       expectSecurityHeaders(page);
     });
   });

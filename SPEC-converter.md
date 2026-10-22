@@ -161,6 +161,7 @@ clicks — expressiveness buys nothing and costs validation.
 |---|---|
 | `$.` | prefix, marks an absolute path (anchors only) |
 | `.field` | object member |
+| `["user.id"]` | object member whose key the bare form cannot spell (a `.`, `$`, `^`, bracket or brace in it): a JSON string in brackets. Detection quotes exactly these keys. |
 | `[]` | iterate array elements |
 | `{}` | iterate object **values** — a map used as a collection |
 | `{key}` | pseudo-field: the map key of the current `{}` level, as a column value |

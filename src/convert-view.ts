@@ -189,7 +189,16 @@ export function bestSource(target: string, candidates: string[]): string | undef
 
 /** `$.problems[].jobs[]` → `problems › jobs`. Nobody needs to learn a path syntax. */
 export function friendlyPath(anchor: string): string {
-  const parts = anchor.replace(/^\$/, '').replace(/[[\]{}]/g, '').split('.').filter(Boolean);
+  // A key the bare form cannot spell is quoted, `$["api.v1"][]`, and a dot
+  // inside the quotes is part of its name, not a step.
+  const parts = [...anchor.matchAll(/\.([^.[{]+)|\[("(?:[^"\\]|\\.)*")\]/g)].map((m) => {
+    if (m[1] !== undefined) return m[1];
+    try {
+      return JSON.parse(m[2]) as string;
+    } catch {
+      return m[2];
+    }
+  });
   return parts.length ? parts.join(' › ') : 'the whole document';
 }
 
@@ -624,7 +633,13 @@ export class ConvertView {
   /** The spec as currently edited: excluded tables and columns actually removed. */
   effective(): ConvertSpec | null {
     if (!this.full) return null;
-    const kept = this.full.tables.filter((t) => !this.offTables.has(t.name));
+    // Columns first: a table with every column unticked is dropped too, and the
+    // parent links below have to be judged against the tables that survive
+    // that, or a child kept its link to the dropped one and failed validation.
+    const kept = this.full.tables
+      .filter((t) => !this.offTables.has(t.name))
+      .map((t) => ({ ...t, columns: t.columns.filter((c) => !this.offCols.has(`${t.name}\u0000${c.name}`)) }))
+      .filter((t) => t.columns.length > 0);
     const names = new Set(kept.map((t) => t.name));
     return {
       ...this.full,
@@ -633,8 +648,7 @@ export class ConvertView {
         // A parent link to a table the user has just unticked is not an error to
         // show them — it is a link that no longer means anything.
         parent: t.parent && names.has(t.parent.table) ? t.parent : undefined,
-        columns: t.columns.filter((c) => !this.offCols.has(`${t.name}\u0000${c.name}`)),
-      })).filter((t) => t.columns.length > 0),
+      })),
     };
   }
 

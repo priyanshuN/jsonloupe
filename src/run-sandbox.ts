@@ -20,7 +20,13 @@ const post = (d: unknown): void => (self as unknown as Worker).postMessage(d);
 // job is data → data, so every capability beyond compute is removed before
 // any user code can run. defineProperty because some of these are getters;
 // per-name try/catch because a non-configurable one must not stop the rest.
-for (const name of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'indexedDB', 'caches', 'navigator']) {
+// Worker and its kin go too: a nested `new Worker(blob:)` starts on a FRESH
+// global with fetch and indexedDB back, and a script that delays its own
+// postMessage keeps this one alive long enough for that worker to finish.
+for (const name of [
+  'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'indexedDB', 'caches', 'navigator',
+  'Worker', 'SharedWorker', 'WebTransport', 'BroadcastChannel',
+]) {
   try {
     Object.defineProperty(self, name, { value: undefined, configurable: false, writable: false });
   } catch {

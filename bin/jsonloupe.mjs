@@ -14,7 +14,7 @@
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { join, normalize, extname, resolve } from 'node:path';
+import { basename, join, normalize, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
@@ -97,8 +97,25 @@ const SECURITY_HEADERS = {
   'x-frame-options': 'DENY',
 };
 
+// The Run sandbox is a dedicated worker, and a worker takes its CSP from its
+// OWN response, not the page's: under the page policy (no 'unsafe-eval') its
+// `new Function` throws and every Run fails. So it gets a policy of its own —
+// the eval Run exists for, script from this origin only (a pasted script's
+// dynamic import() cannot carry the document anywhere else; import() is syntax,
+// so the sandbox cannot strip it the way it strips fetch), and no workers.
+const SANDBOX_CSP = "default-src 'none'; script-src 'self' 'unsafe-eval'; worker-src 'none'";
+
 const server = createServer(async (req, res) => {
-  const path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  let path;
+  try {
+    path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  } catch {
+    // A bare or truncated %-escape survives URL parsing and makes the decode
+    // throw. Uncaught in this async handler, that rejection would end the
+    // process: one stray request (an <img> on any page) would kill the viewer.
+    res.writeHead(400, { ...SECURITY_HEADERS, 'content-type': 'text/plain' }).end('bad request');
+    return;
+  }
   if (keyEndpoint && path === '/__api-key') {
     // Loopback proof on both sides (Host it was addressed to, Origin it came
     // from) before the file is opened — a hostile domain rebound to 127.0.0.1
@@ -131,8 +148,10 @@ const server = createServer(async (req, res) => {
   }
   try {
     const body = await readFile(file);
+    const sandbox = extname(file) === '.js' && basename(file).startsWith('run-sandbox-');
     res.writeHead(200, {
       ...SECURITY_HEADERS,
+      ...(sandbox ? { 'content-security-policy': SANDBOX_CSP } : {}),
       'content-type': MIME[extname(file)] ?? 'application/octet-stream',
     });
     res.end(body);

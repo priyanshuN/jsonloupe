@@ -133,8 +133,10 @@ and model responses render as inert text and never enter a code constructor.
 The Run panel is the deliberate exception for code a user explicitly chooses to
 execute. Its two `new Function` calls live in `src/run-exec.ts` and run in a new
 ephemeral worker, not the document worker. Before execution, `src/run-sandbox.ts`
-removes network, IndexedDB, Cache, navigator, and import-script capabilities;
-the page terminates the worker on its first result or timeout. Run parses a plain
+removes network, IndexedDB, Cache, navigator, import-script, and nested-worker
+capabilities; the worker's own response CSP (see
+[SECURITY-HEADERS.md](SECURITY-HEADERS.md)) blocks dynamic `import()` of any
+other origin, and the page terminates the worker on its first result or timeout. Run parses a plain
 JSON copy, so it is a lossy convenience for deliberate local scripts—not a
 lossless query path and never a destination for Ask/model output.
 

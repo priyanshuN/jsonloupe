@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
+import { evaluateCheck } from './check';
 import { fmtBytes, hasRawZstdMagic, payloadSniffNeedsDecode } from './intake';
+import { runQuery } from './query';
 import appHtml from '../index.html?raw';
 import converterHtml from '../json-to-excel.html?raw';
 import readme from '../README.md?raw';
@@ -428,6 +430,20 @@ describe('interactive UI regression contracts', () => {
     );
   });
 
+  it('keeps a pending live search from repainting over the filter\'s empty state', () => {
+    // Pressing the funnel inside the box's 160 ms pause let the live search
+    // land after the filter and swap its message for the plain "No matches".
+    const filter = mainSource.match(/async function setFilter\([\s\S]*?^\}/m)?.[0] ?? '';
+    const post = filter.indexOf("type: 'filter'");
+    const cleared = filter.indexOf('if (query) clearTimeout(liveSearchTimer);');
+    const dropped = filter.indexOf('if (query) searchToken++;');
+    expect(cleared).toBeGreaterThan(-1);
+    expect(cleared).toBeLessThan(post);
+    // After the filter's reply: a search posted before it answers after it.
+    expect(dropped).toBeGreaterThan(post);
+    expect(dropped).toBeLessThan(filter.indexOf("emptyState('Nothing matches the filter'"));
+  });
+
   it('scopes structural tree keys to the tree instead of focused controls', () => {
     expect(mainSource).toContain("closest('button, a, select, summary, [role=\"button\"], [role=\"menuitem\"]')");
     expect(mainSource).toContain('const treeHasFocus = ae instanceof Node && treeViewport.contains(ae)');
@@ -487,6 +503,21 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).not.toContain('translating… (only the question and field names are sent)');
   });
 
+  it('counts a saved check on a group query by every group, not the first page', () => {
+    // The query bar asks for no window, so the engine returns the first 1000
+    // groups and the real number in `total`. A check that counted the page
+    // would pre-fill "exactly 1000" and keep passing on 2000 groups.
+    const items = Array.from({ length: 1500 }, (_, id) => ({ id }));
+    const grouped = runQuery({ items }, '$.items[*] | group(@.id)');
+    if (!grouped.ok || grouped.kind !== 'groups') throw new Error('expected groups');
+    expect(grouped.groups).toHaveLength(1000);
+    expect(evaluateCheck({ type: 'exact-count', count: 1500 }, grouped.total).pass).toBe(true);
+    const count = mainSource.match(/function queryResultCount\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(count).toMatch(/res\.kind === 'groups'\) return res\.total;/);
+    expect(count).not.toContain('groups.length');
+    expect(mainSource).toContain('more.textContent = `… +${fmtNumber(res.total - 50)} more groups`');
+  });
+
   it('gives the unknown-field warning a home inside the pipeline card', () => {
     // This is a safety feature, not decoration: a generated query that names a
     // field the document lacks runs, matches nothing, and reports a plausible
@@ -538,5 +569,125 @@ describe('interactive UI regression contracts', () => {
     expect(head).toContain('id="ask-checks"');
     expect(head).toContain('id="ask-saved"');
     expect(mainSource).toContain('askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0');
+  });
+
+  it('learns a run\'s reads onto the function that ran it, and refuses a library press mid-run', () => {
+    const run = mainSource.match(/async function runScript\(\): Promise<void> \{[\s\S]*?^\}/m)?.[0] ?? '';
+    // Read before the await: by the time the worker answers, another function
+    // may be loaded, and its record must not be given this one's reads.
+    expect(run.indexOf('const runId = runLoadedId;')).toBeGreaterThan(-1);
+    expect(run.indexOf('const runId = runLoadedId;')).toBeLessThan(run.indexOf('await executeInSandbox('));
+    expect(run).toContain('learnReads(runId, res.reads)');
+    expect(run).not.toContain('learnReads(runLoadedId');
+    const load = mainSource.match(/async function loadAndRun\(id: string\): Promise<void> \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(load.indexOf('if (runInFlight) {')).toBeGreaterThan(-1);
+    expect(load.indexOf('if (runInFlight) {')).toBeLessThan(load.indexOf('adoptScript(rec)'));
+  });
+
+  it('checks a playbook fits the library before importing any of it', () => {
+    const imp = mainSource.match(/async function importPlaybookText\([\s\S]*?^\}/m)?.[0] ?? '';
+    const check = imp.indexOf('playbookRoomError(res.playbook');
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(imp.indexOf('await store.saveScript('));
+    expect(check).toBeLessThan(imp.indexOf('await store.saveCheck('));
+    expect(imp).toContain('store.KEEP_SAVED');
+  });
+
+  it('never opens a playbook that was refused for room as the document', () => {
+    // A boolean read "refused" as "not a playbook", so a drop into a full
+    // library fell through to openText and replaced the document on screen.
+    const imp = mainSource.match(/async function importPlaybookText\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(imp).toMatch(/if \(full\) \{[\s\S]*?return 'refused';/);
+    expect(imp).toMatch(/if \(!res\.ok\) \{[\s\S]*?return 'not-a-playbook';/);
+    const importer = mainSource.match(/async function importFiles\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(importer).toContain("(await importPlaybookText(payload.text, file.name)) !== 'not-a-playbook') continue;");
+  });
+});
+
+describe('document identity regression contracts', () => {
+  // The worker owns the document and node ids restart at 1 on every parse, so
+  // the main thread's idea of "the document on screen" and the worker's have
+  // to be kept in step by hand. Each of these let them drift, and the drift
+  // ended in one document's content written into another's stored record, or
+  // in work that was reported done and never kept.
+
+  it('restores the shown document when an open is dropped after the worker took it', () => {
+    const opened = mainSource.match(/async function openText\([\s\S]*?^\}/m)?.[0] ?? '';
+    const restore = mainSource.match(/async function restoreShownDocument\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    // The parse is tracked from the moment it is posted, and a stale reply that
+    // was the last parse posted puts the shown text back.
+    const tracked = opened.indexOf('workerParseRequest = requestToken;');
+    expect(tracked).toBeGreaterThan(-1);
+    expect(tracked).toBeLessThan(opened.indexOf("type: 'parse'"));
+    expect(opened).toMatch(
+      /if \(requestToken !== openRequestToken\) \{[\s\S]*?if \(res\.ok && lastPostedParse\) await restoreShownDocument\(\);\s*return false;/,
+    );
+    expect(opened).toMatch(/finally \{[\s\S]*?if \(lastPostedParse\) workerParseRequest = 0;/);
+    expect(restore).toContain("type: 'parse',\n      text: currentText,");
+    expect(restore).toContain('tree.setTotal(res.totalRows)');
+    expect(restore).toContain('tree.refresh()');
+  });
+
+  it('refuses tree edits by stale ids while the shown document is re-parsed', () => {
+    // The restore re-parse renumbers the same document's nodes, and its token
+    // does not change, so without this an editor open across it committed to
+    // whichever leaf now has the old number and saved that.
+    const restore = mainSource.match(/async function restoreShownDocument\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const tracked = restore.indexOf('workerParseRequest = request;');
+    expect(tracked).toBeGreaterThan(-1);
+    expect(tracked).toBeLessThan(restore.indexOf("type: 'parse'"));
+    expect(restore.indexOf('editDocumentToken = -1;')).toBeLessThan(restore.indexOf("type: 'parse'"));
+    // Released only by its own reply, so an open queued behind it stays tracked.
+    expect(restore).toMatch(/finally \{\s*if \(workerParseRequest === request\) workerParseRequest = 0;/);
+    expect(restore).toContain('const request = -++restoreParseSeq;');
+  });
+
+  it('keeps an Apply the worker already took when a non-open action follows it', () => {
+    const apply = mainSource.match(/async function applyCode\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(apply).not.toContain('requestToken !== openRequestToken');
+    expect(apply).toContain('if (documentToken !== currentDocumentToken) return;');
+    // …and never lets an Apply run against an incoming document's parse.
+    const refused = apply.indexOf('if (workerParseRequest) {');
+    expect(refused).toBeGreaterThan(-1);
+    expect(refused).toBeLessThan(apply.indexOf("type: 'parse'"));
+  });
+
+  it('refuses a tree edit for another document before it reaches the worker', () => {
+    const editText = mainSource.match(/getEditText: async \(id\) => \{[\s\S]*?\n {2}\},/)?.[0] ?? '';
+    const commit = mainSource.match(/onEditCommit: async \(id, index, text\) => \{[\s\S]*?\n {2}\},/)?.[0] ?? '';
+    const unpack = mainSource.match(/onUnpack: async \(id, index\) => \{[\s\S]*?\n {2}\},/)?.[0] ?? '';
+    expect(editText).toContain('editDocumentToken = workerParseRequest ? -1 : currentDocumentToken;');
+    const guard = commit.indexOf('if (documentToken !== editDocumentToken || workerParseRequest) {');
+    const post = commit.indexOf("type: 'setValue'");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(post);
+    // The refusal closes the editor rather than offering a retry that could
+    // only land in the wrong document.
+    expect(commit.slice(guard, post)).toContain('return { ok: true };');
+    const unpackGuard = unpack.indexOf('if (workerParseRequest) return;');
+    expect(unpackGuard).toBeGreaterThan(-1);
+    expect(unpackGuard).toBeLessThan(unpack.indexOf("type: 'unpack'"));
+  });
+
+  it('keeps an unapplied code buffer across a rename, which changes no content', () => {
+    const rename = mainSource.match(/docTitleEl\.addEventListener\('click', async \(\) => \{[\s\S]*?^\}\);/m)?.[0] ?? '';
+    expect(rename).toMatch(
+      /const codeBufferCurrent = codeLoadedRevision === currentDocumentRevision;\s*currentDocumentRevision\+\+;\s*if \(codeBufferCurrent\) codeLoadedRevision = currentDocumentRevision;/,
+    );
+  });
+
+  it('stores edits again after the open, freshly imported document is deleted', () => {
+    const action = mainSource.match(/async function runDocRowAction\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(action).toMatch(/if \(currentDocId === id\) \{\s*currentDocId = null;[\s\S]*?pendingInitialSave = null;\s*\}/);
+  });
+
+  it('opens the last readable document of an import batch, not only the last file', () => {
+    const importer = mainSource.match(/async function importFiles\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(importer).not.toContain('i === entries.length - 1');
+    // The open happens after the loop, on whatever document is still held.
+    const held = importer.indexOf('pending = { payload, handle };');
+    expect(held).toBeGreaterThan(-1);
+    expect(importer.indexOf('await openText(')).toBeGreaterThan(held);
+    expect(importer).toMatch(/if \(pending\) \{\s*await openText\(\s*pending\.payload\.text,/);
   });
 });

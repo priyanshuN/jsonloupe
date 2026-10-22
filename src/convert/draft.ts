@@ -6,7 +6,7 @@
 // is a `hints` input the caller may fill from a model, and the tool works
 // without it.
 
-import { anchorDepth, parseAnchor, type ColumnSpec, type ConvertSpec, type TableSpec } from './spec';
+import { anchorDepth, parseAnchor, pathLabel, type ColumnSpec, type ConvertSpec, type TableSpec } from './spec';
 import { parseBaseDate, parseNaive, renderNaive } from './coerce';
 import { singular, type DetectedField, type DetectedTable, type Inspection } from './inspect';
 
@@ -79,16 +79,29 @@ export function draftSpec(ins: Inspection, hints: DraftHints = {}): ConvertSpec 
     ? ins.tables.filter((t) => hints.tables!.includes(t.name) || hints.tables!.includes(t.anchor))
     : ins.tables;
   const byAnchor = new Map(ins.tables.map((t) => [t.anchor, t]));
-  const kept = new Set(wanted.map((t) => t.anchor));
-
-  const tables: TableSpec[] = wanted.map((t) => {
+  const drafted = wanted.map((t) => {
     const base = hints.baseDate ?? findBaseDate(t, ins) ?? 'today';
-    const spec: TableSpec = { name: t.name, anchor: t.anchor, columns: columnsFor(t, hints.columns?.[t.name], base) };
-    // A parent link only means something when the parent is also in the output.
-    const parent = t.parentAnchor && kept.has(t.parentAnchor) ? byAnchor.get(t.parentAnchor) : undefined;
-    if (parent) spec.parent = parentLink(parent);
-    return spec;
+    return { t, columns: columnsFor(t, hints.columns?.[t.name], base) };
   });
+  // A list whose records hold only further lists (`lines: [{ parts: […] }]`)
+  // drafts no columns, and validation refuses a table without one — so the
+  // draft left in it was a mapping this tool would itself reject. It is left
+  // out, and its children link past it to the nearest table that is written.
+  const empty = new Set(drafted.filter((d) => !d.columns.length).map((d) => d.t.anchor));
+  const kept = new Set(drafted.filter((d) => d.columns.length).map((d) => d.t.anchor));
+
+  const tables: TableSpec[] = drafted
+    .filter((d) => kept.has(d.t.anchor))
+    .map(({ t, columns }) => {
+      const spec: TableSpec = { name: t.name, anchor: t.anchor, columns };
+      // A parent link only means something when the parent is also in the
+      // output. Only an empty table is stepped over: one the caller left out is
+      // a decision about the output, and the link stops there as it always has.
+      let up = t.parentAnchor ? byAnchor.get(t.parentAnchor) : undefined;
+      while (up && empty.has(up.anchor)) up = up.parentAnchor ? byAnchor.get(up.parentAnchor) : undefined;
+      if (up && kept.has(up.anchor)) spec.parent = parentLink(up);
+      return spec;
+    });
 
   return {
     specVersion: 1,
@@ -174,9 +187,21 @@ function columnsFor(t: DetectedTable, targets: string[] | undefined, baseDate: s
     cols.push({ name: `${singular(t.name)}_key`, from: '{key}' });
   }
 
+  // A header reads `user.id`, never the quoted `["user.id"]` the path needs —
+  // unless a nested `user` → `id` reads the same, when the quoted path is the
+  // only name that tells the two columns apart. A bare path is its own label.
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const f of t.fields.filter(isScalarField)) {
+    const label = pathLabel(f.path);
+    if (seen.has(label)) shared.add(label);
+    seen.add(label);
+  }
+
   for (const f of t.fields) {
     if (!isScalarField(f)) continue;
-    const name = matchTarget(f.path, targets) ?? f.path;
+    const label = shared.has(pathLabel(f.path)) ? f.path : pathLabel(f.path);
+    const name = matchTarget(label, targets) ?? label;
     if (f.suggest && !('ambiguous' in f.suggest) && f.suggest.type === 'geo') {
       // One packed coordinate is two output values. The engine deliberately
       // keeps one-column-one-output, so drafting must expand the source here;
