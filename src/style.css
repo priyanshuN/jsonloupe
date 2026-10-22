@@ -6075,11 +6075,16 @@ mark.hl {
    began the next. 6ch, the basis it already had, holds a separator or a short
    default, and the shell's grow above gives it the rest. */
 .convert-inline-field > input { flex: 1 0 6ch; width: 6ch; }
-/* At a 1280px window the top row has ~24px to spare, shared evenly, so the
-   split of the 12ch follows what each field holds: a separator is a character
-   or two, a missing-value default is a word like `not provided`. */
+/* At a 1280px window the top row has ~24px to spare, so the split of the 12ch
+   follows what each field holds: a separator is a character or two, a
+   missing-value default is a word like `not provided`. */
 .convert-inline-field > #convert-missing { flex-basis: 8ch; width: 8ch; }
 .convert-inline-field > #convert-array-join { flex-basis: 4ch; width: 4ch; }
+/* …and the spare goes to the word alone. A separator's basis already holds it,
+   yet with both shells growing the join field took half the row's slack — ~45px
+   it had no use for — and on a wider system font than macOS's (Linux, Windows)
+   `not provided` no longer fit in what was left. */
+.convert-inline-field:has(> #convert-array-join) { flex-grow: 0; }
 .convert-link-name { width: 130px; padding: 0 var(--gap-2); }
 /* A label wrapping a field, not a caption, so it takes --text-dim's floor —
    the same call .convert-col-options gets above. */
