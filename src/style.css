@@ -2046,8 +2046,12 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   white-space: nowrap;
 }
 .lp-lens-mag b { font-weight: 400; color: var(--c-number); }
+/* The copy column's measure is the lede's (52ch of the prose face, ~600px);
+   unbounded, this mono line ran 120px past it on a 1440 screen and was the
+   one ragged edge in the column. */
 .lp-lens-note {
   margin: var(--gap-3) 0 0;
+  max-width: 600px;
   color: var(--text-dim);
   font: var(--fs-body) var(--mono);
   text-wrap: pretty;
@@ -2146,6 +2150,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   font: var(--fs-body) var(--mono);
 }
 .lp-sheet-tab:hover { background: var(--bg-hover); color: var(--text); }
+/* Press stays in the quiet family, as .btn-quiet's does: otherwise the base
+   button:active fill (the bordered tier's) flashes on a borderless tab. */
+.lp-sheet-tab:active { background: var(--bg-hover); }
 .lp-sheet-tab.on {
   background: var(--bg-canvas);
   color: var(--accent);
@@ -2243,7 +2250,11 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    reads as broken, a second row of whole buttons reads as a row. */
 .lp-paste-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-2); margin-top: var(--gap-3); }
 .lp-paste-actions button { padding: 0 var(--gap-4); border-radius: var(--r-sm); white-space: nowrap; }
+/* margin-left: auto as well as the spacer before it: with four buttons the
+   row wraps, the zero-width spacer stays behind on line one, and the shortcut
+   started line two at the LEFT edge, under `parse`, like a fifth button. */
 .lp-note {
+  margin-left: auto;
   font: var(--fs-chip) var(--mono);
   color: var(--text-dim);
   max-width: 230px;
@@ -2295,7 +2306,15 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-tag-boolean { color: var(--c-boolean); }
 .lp-tag-key { color: var(--c-key); }
 .lp-tag-warn { color: var(--warn); }
-.lp-cell h3 { margin: 10px 0 var(--gap-2); font: 600 18px var(--display); }
+/* Balanced, because a three-wide grid at laptop widths breaks a long title
+   one word from the end ("matched by / id", "before it / downloads") and the
+   stranded word reads as a second, broken heading. The leading is set, not
+   left to the face's `normal`, which packs a two-line title tighter than the
+   body under it. */
+.lp-cell h3 { margin: 10px 0 var(--gap-2); font: 600 18px/1.3 var(--display); text-wrap: balance; }
+/* Balancing reaches for any break it can find, and a hyphen is one: it split
+   "side-by-side" into "side- / by-side". A compound is one word. */
+.lp-nobr { white-space: nowrap; }
 /* A key named in a heading is drawn as the key, like the shortcut sheet's. */
 .lp-cell h3 kbd {
   padding: 0 6px;
@@ -2306,10 +2325,16 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   border-radius: var(--r-xs);
 }
 .lp-cell p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.6; text-wrap: pretty; }
-.lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
+/* A token is one word: `[0 … 9999]` split at its space read as two fragments
+   of code with prose between them. */
+.lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); white-space: nowrap; }
 /* Evidence on the flagship card: the same int64 twice, exact then as a float
-   parser returns it — stacked so the last digit's drift is the whole story. */
-.lp-proof { display: grid; gap: 3px; margin: var(--gap-3) 0 0; font: var(--fs-lede) var(--mono); }
+   parser returns it — stacked so the last digit's drift is the whole story.
+   Scoped under .lp-cell because it IS a cell paragraph: `.lp-cell p` outranked
+   a bare .lp-proof, zeroed its margin and shrank it to body size, and the
+   proof sat glued to the sentence above it as if it were that sentence's
+   last line. */
+.lp-cell .lp-proof { display: grid; gap: 3px; margin: var(--gap-3) 0 0; font: var(--fs-lede) var(--mono); }
 .lp-proof-exact { color: var(--c-number); }
 .lp-proof-lost { color: var(--text-faint); text-decoration: line-through; text-decoration-thickness: 1px; }
 .lp-proof-lost b { font-weight: 400; color: var(--danger); }
@@ -2360,7 +2385,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   gap: 48px;
   align-items: center;
 }
-.lp-agents .lp-code { margin-top: 18px; }
+/* Space on both sides: the paragraph after the install line has no top margin
+   of its own (.lp-body only spaces downward), so the box sat flush on it. */
+.lp-agents .lp-code { margin: 18px 0; }
 .lp-facts { display: flex; flex-direction: column; gap: var(--gap-2); }
 /* Wrap the ROW, not the value. Without this the tools list broke mid-sequence
    inside its own span — `… diff ·` stranded a separator at the line end and
@@ -2410,6 +2437,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   box-shadow: none;
   cursor: pointer;
 }
+/* ...and a link does not light up when pressed. The base button:active fill
+   drew a button-shaped box behind `compress & decode` for the length of the
+   click, the one footer entry that is secretly a button. */
+.lp-foot-link:active { background: none; }
 
 /* Desktop-first: below ~1100px the hero stacks so a phone visitor can still
    read the copy and paste. Everything below the hero now has to hold up on a
@@ -2496,7 +2527,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   align-items: baseline;
 }
 .sp-num { font: 400 var(--fs-chip) var(--mono); color: var(--text-faint); }
-.sp-row h2 { margin: 0; font: 600 17px var(--display); letter-spacing: -0.3px; }
+/* The 240px title column breaks four of the eight titles; balanced with set
+   leading for the same reasons as the landing's card titles (.lp-cell h3). */
+.sp-row h2 { margin: 0; font: 600 17px/1.3 var(--display); letter-spacing: -0.3px; text-wrap: balance; }
 .sp-row p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.65; text-wrap: pretty; }
 
 @media (max-width: 760px) {
