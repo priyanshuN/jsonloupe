@@ -643,7 +643,13 @@ let currentTitle = '';
 let currentHandle: FsFileHandle | null = null;
 let currentProvenance: store.DocProvenance | null = null;
 let openRequestToken = 0;
+// The open request whose `parse` is queued in the worker and not yet answered,
+// or 0. The worker takes messages in order, so while this is set anything
+// posted now runs against the INCOMING document, not the one on screen.
+let workerParseRequest = 0;
 let currentDocumentToken = 0;
+// The document an inline tree editor was opened on (one editor at a time).
+let editDocumentToken = 0;
 let currentDocumentRevision = 0;
 let pendingInitialSave: {
   documentToken: number;
@@ -1584,6 +1590,9 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
   onCopyValue: (id) => void copyValueOf(id),
   onUnpack: async (id, index) => {
     const documentToken = currentDocumentToken;
+    // A committing unpack is an edit addressed by bare node id; with an open's
+    // parse queued ahead it would rewrite the incoming document's node instead.
+    if (workerParseRequest) return;
     const r = await call<{ ok: boolean; totalRows: number; error?: string }>({
       type: 'unpack', id, index, commit: true,
     });
@@ -1605,11 +1614,25 @@ const tree = new VirtualTree($('#tree-spacer').parentElement as HTMLElement, $('
     syncCodeToSelectionSoon();
   },
   getEditText: async (id) => {
+    // Opened with a parse queued ahead, the literal itself comes from the
+    // incoming document, so no commit from this editor can be trusted.
+    editDocumentToken = workerParseRequest ? -1 : currentDocumentToken;
     const r = await call<{ text: string }>({ type: 'nodeValue', id });
     return r.text;
   },
   onEditCommit: async (id, index, text) => {
     const documentToken = currentDocumentToken;
+    // The id is a bare number and the worker restarts them at 1 on every parse,
+    // so a commit for a row of the document the editor opened on would land on
+    // whichever node of another document has that number: one that has opened
+    // since (the editor stays up across an open, since render() pauses for it),
+    // or one whose parse is queued ahead of this message. Refuse before posting.
+    if (documentToken !== editDocumentToken || workerParseRequest) {
+      showToast('edit discarded — a different document opened', 'bad');
+      // ok closes the editor: there is nothing to retry against, and a retry
+      // could only land in the wrong document.
+      return { ok: true };
+    }
     const r = await call<{ ok: boolean; error?: string; row?: Row }>({ type: 'setValue', id, index, text });
     if (documentToken !== currentDocumentToken) {
       return { ok: false, error: 'document changed while the edit was applying' };
@@ -1782,7 +1805,14 @@ async function runDocRowAction(target: HTMLElement, id: string): Promise<boolean
   }
   if (target.closest('.del')) {
     await store.removeDoc(id);
-    if (currentDocId === id) currentDocId = null;
+    if (currentDocId === id) {
+      currentDocId = null;
+      // The initial save's meta names the record just deleted, and updateDoc on
+      // a missing row writes nothing and reports nothing. Drop it so the next
+      // edit stores the document again, as it already does for one reopened
+      // from Recents, instead of every later edit vanishing silently.
+      pendingInitialSave = null;
+    }
     return true;
   }
   return false;
@@ -2203,6 +2233,24 @@ function showParseError(err: ParseErr): void {
   parseError.hidden = false;
 }
 
+// Re-parse the document on screen after a dropped open left the worker holding
+// the text it was opening. Node ids restart at 1 on every parse, so the rows
+// already drawn are refetched rather than trusted; the expansion state and the
+// worker's undo history went with the dropped parse and are not recoverable.
+async function restoreShownDocument(): Promise<void> {
+  if (!currentText) return; // nothing on screen to disagree with
+  const documentToken = currentDocumentToken;
+  const res = await call<ParseOk | ParseErr>({
+    type: 'parse',
+    text: currentText,
+    expandRows: fitRows(treeViewport),
+  });
+  if (!res.ok || documentToken !== currentDocumentToken) return;
+  tree.setTotal(res.totalRows);
+  tree.resetSelection();
+  tree.refresh();
+}
+
 // Returns true when the text parsed and the viewer swapped to it. Ordinary open
 // failures move to the landing error; reload can instead keep the valid current
 // document visible and reject the replacement with a toast.
@@ -2270,8 +2318,28 @@ async function openText(
     }
   }
 
-  const res = await call<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(treeViewport) });
-  if (requestToken !== openRequestToken) return false;
+  workerParseRequest = requestToken;
+  let lastPostedParse = false;
+  let res: ParseOk | ParseErr;
+  try {
+    res = await call<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(treeViewport) });
+  } finally {
+    // In a finally: a rejected call must not leave edits and Apply refused for
+    // the rest of the session behind a parse nobody is waiting on.
+    lastPostedParse = workerParseRequest === requestToken;
+    if (lastPostedParse) workerParseRequest = 0;
+  }
+  if (requestToken !== openRequestToken) {
+    // Not every canceller opens something (compress, + new, a drop with no
+    // files, reload giving up), and by now the worker has ALREADY swapped to
+    // this text: a parse commits there before it replies. Left alone, the
+    // screen describes one document while the worker holds another, and the
+    // next edit writes the hidden one into the shown one's stored record. A
+    // newer parse queued behind this one replaces it anyway; otherwise put
+    // the shown document back.
+    if (res.ok && lastPostedParse) await restoreShownDocument();
+    return false;
+  }
   if (!res.ok) {
     if (keepCurrentOnFailure) {
       showToast(`reload rejected: ${res.error}`, 'bad');
@@ -2464,13 +2532,18 @@ async function readPayloadFile(file: File): Promise<PayloadFileText> {
   };
 }
 
-// Import a batch: earlier files are saved to memory, the last one is opened.
+// Import a batch: earlier documents are saved to memory, the last readable one
+// is opened. "Last readable", not "last in the batch": an unreadable file or a
+// playbook at the end used to leave the batch opening nothing at all, with the
+// good documents saved where nobody was told to look for them. So each
+// document is held back until the next one arrives, and whichever is held when
+// the batch runs out is the one opened.
 async function importFiles(
   entries: { file: File; handle: FsFileHandle | null }[],
   requestToken = beginOpenRequest(),
 ): Promise<void> {
-  for (let i = 0; i < entries.length; i++) {
-    const { file, handle } = entries[i];
+  let pending: { payload: PayloadFileText; handle: FsFileHandle | null } | null = null;
+  for (const { file, handle } of entries) {
     let payload: PayloadFileText;
     try {
       payload = await readPayloadFile(file);
@@ -2487,25 +2560,27 @@ async function importFiles(
       // Not actually a playbook after all — fall through and open it, so a
       // document that merely mentions the word still reads as a document.
     }
-    if (i === entries.length - 1) {
-      await openText(
-        payload.text,
-        payload.title,
-        null,
-        handle,
-        payload.provenance,
-        true,
-        false,
-        requestToken,
-      );
-    } else {
+    if (pending) {
       await store.saveDoc(
-        payload.text,
-        payload.title,
-        handle ?? undefined,
-        payload.provenance ?? undefined,
+        pending.payload.text,
+        pending.payload.title,
+        pending.handle ?? undefined,
+        pending.payload.provenance ?? undefined,
       );
     }
+    pending = { payload, handle };
+  }
+  if (pending) {
+    await openText(
+      pending.payload.text,
+      pending.payload.title,
+      null,
+      pending.handle,
+      pending.payload.provenance,
+      true,
+      false,
+      requestToken,
+    );
   }
   await renderRecents();
 }
@@ -3144,7 +3219,13 @@ docTitleEl.addEventListener('click', async () => {
   const name = prompt('Rename document', currentTitle);
   if (!name) return;
   currentTitle = name;
+  // The bump stays: in-flight work that captured the old title (reload's
+  // stillCurrent, a transport label) must still notice. But a rename changes
+  // no content, so a buffer that was in step with the document, unapplied edit
+  // and all, is still about this document and must not be re-serialized over.
+  const codeBufferCurrent = codeLoadedRevision === currentDocumentRevision;
   currentDocumentRevision++;
+  if (codeBufferCurrent) codeLoadedRevision = currentDocumentRevision;
   setDocTitle(name);
   await store.renameDoc(currentDocId, name);
   await renderRecents();
@@ -3640,7 +3721,14 @@ async function applyCode(): Promise<void> {
   if (!codeDirty) return;
   const text = codeEditor.getDoc();
   const documentToken = currentDocumentToken;
-  const requestToken = openRequestToken;
+  // An open's parse queued ahead of this one would make the Apply replace the
+  // incoming document instead of this one, and its result would then be
+  // dropped as stale with the worker holding the applied text under the other
+  // document's name.
+  if (workerParseRequest) {
+    setCodeStatus('error', 'another document is opening — apply once it has loaded');
+    return;
+  }
   // apply:true → the worker records a replaceDoc on the undo stack instead of
   // clearing it (a fresh open clears; an Apply is undoable).
   const res = await call<ParseOk | ParseErr>({
@@ -3652,10 +3740,12 @@ async function applyCode(): Promise<void> {
     // bytes the user did not type.
     repair: false,
   });
-  if (
-    documentToken !== currentDocumentToken ||
-    requestToken !== openRequestToken
-  ) return;
+  // The document token alone decides staleness. An open requested meanwhile
+  // has not replaced anything until its parse lands, and the worker has
+  // already taken this Apply: dropping the result because compress or + new
+  // was clicked left currentText, the stored body and the tree describing
+  // the pre-Apply document while the worker held the applied one.
+  if (documentToken !== currentDocumentToken) return;
   if (!res.ok) {
     const loc = res.line !== null ? ` (line ${res.line}, col ${res.column})` : '';
     setCodeStatus('error', `✗ ${res.error}${loc}`);

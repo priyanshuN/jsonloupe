@@ -557,3 +557,77 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toContain('askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0');
   });
 });
+
+describe('document identity regression contracts', () => {
+  // The worker owns the document and node ids restart at 1 on every parse, so
+  // the main thread's idea of "the document on screen" and the worker's have
+  // to be kept in step by hand. Each of these let them drift, and the drift
+  // ended in one document's content written into another's stored record, or
+  // in work that was reported done and never kept.
+
+  it('restores the shown document when an open is dropped after the worker took it', () => {
+    const opened = mainSource.match(/async function openText\([\s\S]*?^\}/m)?.[0] ?? '';
+    const restore = mainSource.match(/async function restoreShownDocument\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    // The parse is tracked from the moment it is posted, and a stale reply that
+    // was the last parse posted puts the shown text back.
+    const tracked = opened.indexOf('workerParseRequest = requestToken;');
+    expect(tracked).toBeGreaterThan(-1);
+    expect(tracked).toBeLessThan(opened.indexOf("type: 'parse'"));
+    expect(opened).toMatch(
+      /if \(requestToken !== openRequestToken\) \{[\s\S]*?if \(res\.ok && lastPostedParse\) await restoreShownDocument\(\);\s*return false;/,
+    );
+    expect(opened).toMatch(/finally \{[\s\S]*?if \(lastPostedParse\) workerParseRequest = 0;/);
+    expect(restore).toContain("type: 'parse',\n    text: currentText,");
+    expect(restore).toContain('tree.setTotal(res.totalRows)');
+    expect(restore).toContain('tree.refresh()');
+  });
+
+  it('keeps an Apply the worker already took when a non-open action follows it', () => {
+    const apply = mainSource.match(/async function applyCode\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(apply).not.toContain('requestToken !== openRequestToken');
+    expect(apply).toContain('if (documentToken !== currentDocumentToken) return;');
+    // …and never lets an Apply run against an incoming document's parse.
+    const refused = apply.indexOf('if (workerParseRequest) {');
+    expect(refused).toBeGreaterThan(-1);
+    expect(refused).toBeLessThan(apply.indexOf("type: 'parse'"));
+  });
+
+  it('refuses a tree edit for another document before it reaches the worker', () => {
+    const editText = mainSource.match(/getEditText: async \(id\) => \{[\s\S]*?\n {2}\},/)?.[0] ?? '';
+    const commit = mainSource.match(/onEditCommit: async \(id, index, text\) => \{[\s\S]*?\n {2}\},/)?.[0] ?? '';
+    const unpack = mainSource.match(/onUnpack: async \(id, index\) => \{[\s\S]*?\n {2}\},/)?.[0] ?? '';
+    expect(editText).toContain('editDocumentToken = workerParseRequest ? -1 : currentDocumentToken;');
+    const guard = commit.indexOf('if (documentToken !== editDocumentToken || workerParseRequest) {');
+    const post = commit.indexOf("type: 'setValue'");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(post);
+    // The refusal closes the editor rather than offering a retry that could
+    // only land in the wrong document.
+    expect(commit.slice(guard, post)).toContain('return { ok: true };');
+    const unpackGuard = unpack.indexOf('if (workerParseRequest) return;');
+    expect(unpackGuard).toBeGreaterThan(-1);
+    expect(unpackGuard).toBeLessThan(unpack.indexOf("type: 'unpack'"));
+  });
+
+  it('keeps an unapplied code buffer across a rename, which changes no content', () => {
+    const rename = mainSource.match(/docTitleEl\.addEventListener\('click', async \(\) => \{[\s\S]*?^\}\);/m)?.[0] ?? '';
+    expect(rename).toMatch(
+      /const codeBufferCurrent = codeLoadedRevision === currentDocumentRevision;\s*currentDocumentRevision\+\+;\s*if \(codeBufferCurrent\) codeLoadedRevision = currentDocumentRevision;/,
+    );
+  });
+
+  it('stores edits again after the open, freshly imported document is deleted', () => {
+    const action = mainSource.match(/async function runDocRowAction\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(action).toMatch(/if \(currentDocId === id\) \{\s*currentDocId = null;[\s\S]*?pendingInitialSave = null;\s*\}/);
+  });
+
+  it('opens the last readable document of an import batch, not only the last file', () => {
+    const importer = mainSource.match(/async function importFiles\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(importer).not.toContain('i === entries.length - 1');
+    // The open happens after the loop, on whatever document is still held.
+    const held = importer.indexOf('pending = { payload, handle };');
+    expect(held).toBeGreaterThan(-1);
+    expect(importer.indexOf('await openText(')).toBeGreaterThan(held);
+    expect(importer).toMatch(/if \(pending\) \{\s*await openText\(\s*pending\.payload\.text,/);
+  });
+});
