@@ -33,6 +33,21 @@ describe('exact numeric operations', () => {
     expect(stats.summary()).toMatchObject({ min: 0, max: 0.5 });
   });
 
+  it('ranks zero below positive fractions and above negative ones', () => {
+    // lossless-json alone puts zero's exponent (0) above 0.5's (-1).
+    expect(compareExactNumeric(0, 0.5)).toBe(-1);
+    expect(compareExactNumeric(0.5, 0)).toBe(1);
+    expect(compareExactNumeric(new LosslessNumber('0.0'), new LosslessNumber('0.000000000000000000001'))).toBe(-1);
+    expect(compareExactNumeric(new LosslessNumber('-0'), 0)).toBe(0);
+    expect(compareExactNumeric(new LosslessNumber('0e5'), -0.1)).toBe(1);
+    expect(compareExactNumeric(-0.5, -0.25)).toBe(-1);
+    expect(compareExactNumeric(new LosslessNumber('0.1e1'), 0.9)).toBe(1);
+
+    const stats = new ExactNumericStats();
+    for (const v of [0.3, 0, 0.7]) stats.add(v);
+    expect(stats.summary()).toMatchObject({ min: 0, max: 0.7 });
+  });
+
   it('sums unsafe integers and precise decimals without rounding', () => {
     const stats = new ExactNumericStats();
     stats.add(new LosslessNumber('9007199254740992'));

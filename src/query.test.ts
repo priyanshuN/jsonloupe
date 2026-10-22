@@ -210,6 +210,18 @@ describe('predicates', () => {
     if (!top.ok || top.kind !== 'rows') throw new Error('bad');
     expect(top.rows).toEqual([[2], [0.5], [0.25], [0]]);
   });
+  it('orders zero below a positive fraction', () => {
+    const rates = { items: [{ d: 0 }, { d: 0.3 }, { d: 0.7 }] };
+    expect(value(runQuery(rates, '$.items[?(@.d < 0.5)] | count'))).toBe(2);
+    expect(value(runQuery(rates, '$.items[?(@.d > 0.5)] | count'))).toBe(1);
+    expect(value(runQuery(rates, '$.items[*].d | min'))).toBe(0);
+    expect(value(runQuery(rates, '$.items[*].d | max'))).toBe(0.7);
+    const bottom = runQuery(rates, '$.items[*] | bottom(@.d)');
+    const top = runQuery(rates, '$.items[*] | top(@.d)');
+    if (!bottom.ok || bottom.kind !== 'rows' || !top.ok || top.kind !== 'rows') throw new Error('bad');
+    expect(bottom.rows).toEqual([[0], [0.3], [0.7]]);
+    expect(top.rows).toEqual([[0.7], [0.3], [0]]);
+  });
 });
 
 describe('pipes', () => {
