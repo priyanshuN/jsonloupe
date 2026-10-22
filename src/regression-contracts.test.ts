@@ -430,6 +430,20 @@ describe('interactive UI regression contracts', () => {
     );
   });
 
+  it('keeps a pending live search from repainting over the filter\'s empty state', () => {
+    // Pressing the funnel inside the box's 160 ms pause let the live search
+    // land after the filter and swap its message for the plain "No matches".
+    const filter = mainSource.match(/async function setFilter\([\s\S]*?^\}/m)?.[0] ?? '';
+    const post = filter.indexOf("type: 'filter'");
+    const cleared = filter.indexOf('if (query) clearTimeout(liveSearchTimer);');
+    const dropped = filter.indexOf('if (query) searchToken++;');
+    expect(cleared).toBeGreaterThan(-1);
+    expect(cleared).toBeLessThan(post);
+    // After the filter's reply: a search posted before it answers after it.
+    expect(dropped).toBeGreaterThan(post);
+    expect(dropped).toBeLessThan(filter.indexOf("emptyState('Nothing matches the filter'"));
+  });
+
   it('scopes structural tree keys to the tree instead of focused controls', () => {
     expect(mainSource).toContain("closest('button, a, select, summary, [role=\"button\"], [role=\"menuitem\"]')");
     expect(mainSource).toContain('const treeHasFocus = ae instanceof Node && treeViewport.contains(ae)');

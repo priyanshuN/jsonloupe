@@ -55,6 +55,11 @@ test('a filter that matches nothing says so instead of showing a bare root', asy
   const panel = page.locator('#search-panel');
   await expect(panel).toBeVisible();
   await expect(panel).toContainText('Nothing matches the filter');
+  // The box's live search fires 160 ms after typing; it used to land after the
+  // filter and swap this for the plain search's "No matches". Wait it out.
+  await expect(page.getByRole('button', { name: 'Filter the tree to matches' })).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForTimeout(400);
+  await expect(panel).toContainText('Nothing matches the filter');
   await expectNoWcagViolations(page);
 
   // Turning the filter off is the way back the hint names.

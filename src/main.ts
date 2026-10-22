@@ -4037,7 +4037,14 @@ async function setFilter(query: string): Promise<void> {
   // Snapshot scroll only on ENTERING filter from the unfiltered tree; don't
   // re-snapshot on repeated filter edits while already filtered.
   if (query && !filterOn) filterScrollSnapshot = treeViewport.scrollTop;
+  // The box's live search is still pending when the funnel is pressed inside
+  // its 160 ms pause, and it would land after this and repaint the panel with
+  // the plain search's "No matches", which says nothing about the filter that
+  // is on. The timer is cleared now; a search already posted is queued in the
+  // worker ahead of or behind this filter, so it is dropped by token after.
+  if (query) clearTimeout(liveSearchTimer);
   const r = await call<{ totalRows: number; matches: number }>({ type: 'filter', query });
+  if (query) searchToken++;
   filterOn = !!query;
   filterBtn.classList.toggle('on', filterOn);
   paintFilterBtn(filterOn ? r.matches : null);
