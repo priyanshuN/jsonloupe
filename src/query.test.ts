@@ -188,6 +188,17 @@ describe('predicates', () => {
     expect(stateful).toMatchObject({ ok: false, error: expect.stringContaining('flags') });
     expect(nested).toMatchObject({ ok: false, error: expect.stringContaining('nested unbounded') });
   });
+  it('sees nested unbounded quantifiers through inner groups', () => {
+    for (const re of ['^((a+))+$', '^((\\w+)\\s?)+$', '((ab)+)+', '(?:(x*)y)*', '(a+){2,}']) {
+      expect(runQuery(doc, `$.tasks[?(@.status =~ /${re}/)]`), re).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('nested unbounded'),
+      });
+    }
+    for (const re of ['(ab)+', '([+*])+', '(\\+)+', '(a|b)+', '((ab))+', '(a+)b(c+)']) {
+      expect(runQuery(doc, `$.tasks[?(@.status =~ /${re}/)]`).ok, re).toBe(true);
+    }
+  });
   it('field vs field — overbooked slots', () => {
     expect(matches(runQuery(doc, '$.slots[?(@.capacity.used > @.capacity.max)]')).map((m) => (m.value as { id: string }).id)).toEqual(['S2']);
   });
