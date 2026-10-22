@@ -110,6 +110,7 @@ export function validateSpec(spec: unknown, inspection?: Inspection): Validation
     if (!OUTPUT_FORMATS.includes(String(spec.output.format))) {
       err('E_MISSING_KEY', 'output.format', `the kind of file to make must be ${orList(OUTPUT_FORMATS)}`);
     }
+    checkMissingDefault(spec.output.onMissing, 'output.onMissing', err);
   }
 
   if (!Array.isArray(spec.tables) || !spec.tables.length) {
@@ -250,6 +251,24 @@ function unknownKeys(
   }
 }
 
+/**
+ * A missing-value default goes into the cell as it stands, so it has to be
+ * text. A bare `0` or `true` in a hand-written mapping used to pass here and
+ * then fail the export at the first empty cell. Null reads as unset, the way
+ * the engine already treats it.
+ */
+function checkMissingDefault(
+  v: unknown,
+  at: string,
+  err: (c: SpecError['code'], at: string, m: string, h?: string) => void,
+): void {
+  if (v === undefined || v === null || typeof v === 'string') return;
+  const typed = JSON.stringify(v);
+  err('E_TYPE_PARAM', at, typeof v === 'number' || typeof v === 'boolean'
+    ? `what to write where a value is missing has to be text — put the \`${typed}\` in quotes, as "${typed}"`
+    : 'what to write where a value is missing has to be text');
+}
+
 function validateColumn(
   c: unknown,
   at: string,
@@ -306,6 +325,7 @@ function validateColumn(
   if (c.skipRowIfMissing !== undefined && typeof c.skipRowIfMissing !== 'boolean') {
     err('E_TYPE_PARAM', `${at}.skipRowIfMissing`, 'whether to drop rows with nothing in this column must be true or false');
   }
+  checkMissingDefault(c.onMissing, `${at}.onMissing`, err);
 
   if (c.type === undefined) {
     for (const k of ['parse', 'baseDate', 'out']) {

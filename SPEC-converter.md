@@ -200,7 +200,8 @@ excluded: they would break that guarantee.
 - `from` paths are **relative to the table's anchor**. This keeps a column list portable when a table
   is re-anchored and keeps the paths short enough to read in the UI.
 - `onMissing` — spec-level default (`output.onMissing`, default `""`) with per-column override.
-  It handles **missing data only**. It never covers a malformed spec.
+  It handles **missing data only**. It never covers a malformed spec. It is text (`"0"`, not `0`):
+  validation rejects any other type with `E_TYPE_PARAM`, and `null` reads as unset.
 - `skipRowIfMissing: true` — drop the whole row when this column's source is absent. This is the only
   row filter, and it covers the only filtering pattern that appears in the corpus (`if orderId is
   None: continue`) without opening the door to a predicate language.

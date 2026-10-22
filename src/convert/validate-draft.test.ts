@@ -380,6 +380,24 @@ describe('validation rejects what the engine would otherwise have to guess at', 
     expect(one([{ name: 'c', from: 'c', skipRowIfMissing: true }])).toEqual({ ok: true });
   });
 
+  it('wants a missing-value default as text, for the whole mapping and per column', () => {
+    // A bare 0 or true passed here and then failed the export at its first
+    // empty cell, because the cell is written with the default as it stands.
+    const columns = [{ name: 'c', from: 'c' }];
+    const whole = validateSpec(table({ output: { format: 'xlsx', onMissing: 0 as never }, tables: [{ name: 't', anchor: '$.a[]', columns }] }));
+    expect(codes(whole)).toEqual([['E_TYPE_PARAM', 'output.onMissing']]);
+    expect(!whole.ok && whole.errors[0].message).toContain('"0"');
+    expect(codes(one([{ name: 'c', from: 'c', onMissing: true }]))).toEqual([
+      ['E_TYPE_PARAM', 'tables[0].columns[0].onMissing'],
+    ]);
+    expect(codes(one([{ name: 'c', from: 'c', onMissing: { text: 'n/a' } }]))).toEqual([
+      ['E_TYPE_PARAM', 'tables[0].columns[0].onMissing'],
+    ]);
+    // Text is the point, and null reads as unset, as the engine already treats it.
+    expect(one([{ name: 'c', from: 'c', onMissing: '0' }])).toEqual({ ok: true });
+    expect(one([{ name: 'c', from: 'c', onMissing: null }])).toEqual({ ok: true });
+  });
+
   it('refuses date settings on a plain text column rather than silently ignoring them', () => {
     expect(codes(one([{ name: 'c', from: 'c', parse: 'yyyy', out: 'yyyy', baseDate: 'today' }]))).toEqual([
       ['E_TYPE_PARAM', 'tables[0].columns[0].parse'],
