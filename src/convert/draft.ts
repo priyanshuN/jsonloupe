@@ -6,7 +6,7 @@
 // is a `hints` input the caller may fill from a model, and the tool works
 // without it.
 
-import { anchorDepth, parseAnchor, type ColumnSpec, type ConvertSpec, type TableSpec } from './spec';
+import { anchorDepth, parseAnchor, pathLabel, type ColumnSpec, type ConvertSpec, type TableSpec } from './spec';
 import { parseBaseDate, parseNaive, renderNaive } from './coerce';
 import { singular, type DetectedField, type DetectedTable, type Inspection } from './inspect';
 
@@ -174,9 +174,21 @@ function columnsFor(t: DetectedTable, targets: string[] | undefined, baseDate: s
     cols.push({ name: `${singular(t.name)}_key`, from: '{key}' });
   }
 
+  // A header reads `user.id`, never the quoted `["user.id"]` the path needs —
+  // unless a nested `user` → `id` reads the same, when the quoted path is the
+  // only name that tells the two columns apart. A bare path is its own label.
+  const seen = new Set<string>();
+  const shared = new Set<string>();
+  for (const f of t.fields.filter(isScalarField)) {
+    const label = pathLabel(f.path);
+    if (seen.has(label)) shared.add(label);
+    seen.add(label);
+  }
+
   for (const f of t.fields) {
     if (!isScalarField(f)) continue;
-    const name = matchTarget(f.path, targets) ?? f.path;
+    const label = shared.has(pathLabel(f.path)) ? f.path : pathLabel(f.path);
+    const name = matchTarget(label, targets) ?? label;
     if (f.suggest && !('ambiguous' in f.suggest) && f.suggest.type === 'geo') {
       // One packed coordinate is two output values. The engine deliberately
       // keeps one-column-one-output, so drafting must expand the source here;

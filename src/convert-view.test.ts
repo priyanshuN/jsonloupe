@@ -39,6 +39,7 @@ describe('converter mapping helpers', () => {
 
   it('keeps path grammar out of the visible table location', () => {
     expect(friendlyPath('$.orders[].items[]')).toBe('orders › items');
+    expect(friendlyPath('$["api.v1"][].items[]')).toBe('api.v1 › items');
   });
 
   it('formats the local calendar date for time-only mappings', () => {

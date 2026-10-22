@@ -189,7 +189,16 @@ export function bestSource(target: string, candidates: string[]): string | undef
 
 /** `$.problems[].jobs[]` → `problems › jobs`. Nobody needs to learn a path syntax. */
 export function friendlyPath(anchor: string): string {
-  const parts = anchor.replace(/^\$/, '').replace(/[[\]{}]/g, '').split('.').filter(Boolean);
+  // A key the bare form cannot spell is quoted, `$["api.v1"][]`, and a dot
+  // inside the quotes is part of its name, not a step.
+  const parts = [...anchor.matchAll(/\.([^.[{]+)|\[("(?:[^"\\]|\\.)*")\]/g)].map((m) => {
+    if (m[1] !== undefined) return m[1];
+    try {
+      return JSON.parse(m[2]) as string;
+    } catch {
+      return m[2];
+    }
+  });
   return parts.length ? parts.join(' › ') : 'the whole document';
 }
 

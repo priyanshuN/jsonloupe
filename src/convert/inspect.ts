@@ -6,7 +6,7 @@
 // worse than one that asks.
 
 import { isLosslessNumber } from 'lossless-json';
-import { formatAnchor, type AnchorSeg, type GeoForm, type SourceFormat } from './spec';
+import { formatAnchor, joinPath, parseAnchor, parseFrom, type AnchorSeg, type GeoForm, type SourceFormat } from './spec';
 import { loadSource, type SourceInput } from './engine';
 import { compileFormat, needsBaseDate, parseGeo, parseNaive, toNum } from './coerce';
 
@@ -227,7 +227,9 @@ function fieldsOf(rows: Record<string, unknown>[]): DetectedField[] {
 
   const walk = (o: Record<string, unknown>, prefix: string, d: number): void => {
     for (const [k, v] of Object.entries(o)) {
-      const path = prefix ? `${prefix}.${k}` : k;
+      // Through joinPath, not a bare `.`: a flattened `"user.id"` joined bare
+      // reads back as `user` → `id`, and the column came out empty.
+      const path = joinPath(prefix, k);
       note(path, v);
       // Descend into plain records only — collections are their own tables.
       if (isRecord(v) && d < 3) walk(v, path, d + 1);
@@ -371,7 +373,8 @@ function agreement(samples: string[], p: (s: string) => boolean): number {
 }
 
 function allValues(rows: Record<string, unknown>[], path: string): string[] {
-  const segs = path.split('.');
+  const f = parseFrom(path);
+  const segs = f.ok ? f.value.segs.flatMap((s) => (s.kind === 'key' ? [s.name] : [])) : [];
   const out: string[] = [];
   for (const r of rows) {
     let cur: unknown = r;
@@ -415,7 +418,8 @@ function nameTables(tables: DetectedTable[]): void {
 function leafName(anchor: string): string {
   // The root `$` is not a segment. Left in, it became the leaf of a top-level
   // array, and the sheet came out named `$` instead of `rows`.
-  const parts = anchor.replace(/^\$/, '').replace(/[[\]{}]/g, '').split('.').filter(Boolean);
+  const a = parseAnchor(anchor);
+  const parts = a.ok ? a.value.flatMap((s) => (s.kind === 'key' ? [s.name] : [])) : [];
   return parts.length ? parts[parts.length - 1] : 'rows';
 }
 

@@ -10,9 +10,14 @@
 // Path grammar (deliberately NOT JSONPath — the UI generates every path from
 // tree clicks, so expressiveness buys nothing and costs validation):
 //
-//   anchor := '$' aseg*                 aseg := '.'ident | '[]' | '{}'
-//   from   := up? fseg ('.' fseg)*      fseg := ident | '{key}'
+//   anchor := '$' aseg*                 aseg := '.'ident | quoted | '[]' | '{}'
+//   from   := up? fseg (('.' fseg) | quoted)*
+//   fseg   := ident | '{key}' | quoted  quoted := '[' json-string ']'
 //   up     := '^' | '^^'
+//
+// `quoted` is how a key the bare form cannot spell is reached: `"user.id"` in a
+// flattened export, `"$ref"`, `"api.v1"`. Read bare, a dot in a key is a step
+// into a nested record, so the column silently came out empty.
 //
 // `[]` / `{}` are anchor-only: iterating inside a column would produce more than
 // one value for one cell. `^` / `{key}` are from-only: an anchor that could look
@@ -107,6 +112,36 @@ const IDENT = /^[^.^${}[\]]+$/;
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
+const QUOTED_HINT = 'a quoted field name is a JSON string in brackets, like `["user.id"]`';
+
+/** Whether a key can be written bare, or has to be quoted to mean itself. */
+function isBare(name: string): boolean {
+  return IDENT.test(name) && name !== '*';
+}
+
+/** `["user.id"]` at the start of `s` → the key it names, and how much of `s` it took. */
+function readQuoted(s: string): { name: string; len: number } | null {
+  if (!s.startsWith('["')) return null;
+  let i = 2;
+  while (i < s.length && s[i] !== '"') i += s[i] === '\\' ? 2 : 1;
+  if (s[i + 1] !== ']') return null;
+  try {
+    return { name: JSON.parse(s.slice(1, i + 1)) as string, len: i + 2 };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A field path one key deeper: `joinPath('meta', 'source')` → `meta.source`,
+ * `joinPath('', 'user.id')` → `["user.id"]`. Detection builds every path with
+ * it, so a key is quoted exactly when the bare form would misread it.
+ */
+export function joinPath(prefix: string, name: string): string {
+  if (!isBare(name)) return `${prefix}[${JSON.stringify(name)}]`;
+  return prefix ? `${prefix}.${name}` : name;
+}
+
 /**
  * `$.orders[].items[]` → key(orders), array, key(items), array.
  * The `$.` prefix is required: it is what marks an anchor absolute.
@@ -130,6 +165,11 @@ export function parseAnchor(s: string): Parsed<AnchorSeg[]> {
       if (!IDENT.test(m[1])) return { ok: false, error: `invalid field name \`${m[1]}\`` };
       segs.push({ kind: 'key', name: m[1] });
       rest = rest.slice(m[0].length);
+    } else if (rest.startsWith('["')) {
+      const q = readQuoted(rest);
+      if (!q) return { ok: false, error: QUOTED_HINT };
+      segs.push({ kind: 'key', name: q.name });
+      rest = rest.slice(q.len);
     } else if (/^\[\d/.test(rest)) {
       // Explicitly rejected rather than unsupported-by-omission: a spec pinned to
       // index 0 silently produces wrong output on the next file.
@@ -161,8 +201,16 @@ export function parseFrom(s: string): Parsed<FromPath> {
     rest = rest.slice(m[0].length);
   }
   const segs: FromSeg[] = [];
-  if (rest.length) {
-    for (const raw of rest.split('.')) {
+  while (rest.length) {
+    const q = readQuoted(rest);
+    if (q) {
+      segs.push({ kind: 'key', name: q.name });
+      rest = rest.slice(q.len);
+    } else {
+      // A bare segment runs to the next `.` or quoted segment.
+      const end = rest.search(/\.|\["/);
+      const raw = end === -1 ? rest : rest.slice(0, end);
+      if (!raw && rest.startsWith('["')) return { ok: false, error: QUOTED_HINT };
       if (raw === '{key}') {
         segs.push({ kind: 'mapKey' });
       } else if (raw.includes('[]') || raw.includes('{}')) {
@@ -174,6 +222,14 @@ export function parseFrom(s: string): Parsed<FromPath> {
       } else {
         segs.push({ kind: 'key', name: raw });
       }
+      rest = rest.slice(raw.length);
+    }
+    if (!rest.length) break;
+    if (rest.startsWith('.')) {
+      rest = rest.slice(1);
+      if (!rest.length) return { ok: false, error: 'invalid field name ``' };
+    } else if (!rest.startsWith('["')) {
+      return { ok: false, error: `unexpected \`${rest[0]}\`` };
     }
   }
   const keyAt = segs.findIndex((x) => x.kind === 'mapKey');
@@ -191,5 +247,13 @@ export function isAnchorPrefix(outer: AnchorSeg[], inner: AnchorSeg[]): boolean 
 }
 
 export function formatAnchor(segs: AnchorSeg[]): string {
-  return '$' + segs.map((s) => (s.kind === 'key' ? '.' + s.name : s.kind === 'array' ? '[]' : '{}')).join('');
+  const key = (name: string) => (isBare(name) ? '.' + name : `[${JSON.stringify(name)}]`);
+  return '$' + segs.map((s) => (s.kind === 'key' ? key(s.name) : s.kind === 'array' ? '[]' : '{}')).join('');
+}
+
+/** The keys a field path names, joined for reading: `["user.id"]` → `user.id`. */
+export function pathLabel(path: string): string {
+  const f = parseFrom(path);
+  if (!f.ok || f.value.up) return path;
+  return f.value.segs.map((s) => (s.kind === 'key' ? s.name : '{key}')).join('.');
 }
