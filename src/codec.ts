@@ -477,6 +477,10 @@ function prepareText(input: string): PreparedText {
     }
   }
 
+  // psql -At output ends in a newline, and a cell copied from a terminal often
+  // brings psql's leading space. JSON never starts with a backslash, so trimming
+  // a bytea value cannot change a plain JSON document.
+  if (startsBytea(trimmed)) return { text: trimmed, wrapper: 'none' };
   return { text: input, wrapper: 'none' };
 }
 
@@ -722,31 +726,102 @@ function readZstdFrameContentSize(bytes: Uint8Array): bigint | null {
   return size;
 }
 
+/**
+ * Splits a run of concatenated Zstd frames (pzstd output, `cat a.zst b.zst`)
+ * into its Zstd frames, dropping skippable frames, by walking frame and block
+ * headers without decompressing. `null` means the bytes are not a well-formed
+ * run of frames; the caller then hands them to WASM whole, which reports why.
+ */
+function splitZstdFrames(bytes: Uint8Array): Uint8Array[] | null {
+  const frames: Uint8Array[] = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    const frame = bytes.subarray(offset);
+    if (frame.length >= 8 && (frame[0] & 0xf0) === 0x50 && frame[1] === 0x2a && frame[2] === 0x4d && frame[3] === 0x18) {
+      offset += 8 + ((frame[4] | (frame[5] << 8) | (frame[6] << 16) | (frame[7] << 24)) >>> 0);
+      continue;
+    }
+    if (!hasZstdMagic(frame) || frame.length < 5) return null;
+    const descriptor = frame[4];
+    const singleSegment = (descriptor & 0x20) !== 0;
+    const contentSizeFlag = descriptor >>> 6;
+    const dictionaryFlag = descriptor & 0x03;
+    let cursor =
+      5 +
+      (singleSegment ? 0 : 1) +
+      (dictionaryFlag === 3 ? 4 : dictionaryFlag) +
+      (contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : 1 << contentSizeFlag);
+    for (;;) {
+      if (cursor + 3 > frame.length) return null;
+      const header = frame[cursor] | (frame[cursor + 1] << 8) | (frame[cursor + 2] << 16);
+      const blockType = (header >>> 1) & 0x03;
+      if (blockType === 3) return null; // reserved
+      // An RLE block stores its one repeated byte; raw and compressed blocks store Block_Size bytes.
+      cursor += 3 + (blockType === 1 ? 1 : header >>> 3);
+      if ((header & 0x01) !== 0) break; // last block
+    }
+    if ((descriptor & 0x04) !== 0) cursor += 4; // content checksum
+    if (cursor > frame.length) return null;
+    frames.push(frame.subarray(0, cursor));
+    offset += cursor;
+  }
+  return offset === bytes.length && frames.length > 0 ? frames : null;
+}
+
 async function decompressJson(
   compressed: Uint8Array,
   metadata: PayloadDecodeMetadata,
 ): Promise<PayloadDecodeResult> {
-  const declaredSize = readZstdFrameContentSize(compressed);
-  if (declaredSize !== null) {
-    metadata.declaredDecodedByteLength = declaredSize.toString();
-    if (declaredSize > BigInt(metadata.maxDecodedBytes)) {
-      return failure(
-        metadata,
-        'too-large',
-        `Zstd frame declares ${declaredSize} decoded bytes; limit is ${metadata.maxDecodedBytes} bytes`,
-        'zstd',
-      );
+  // The WASM binding sizes its destination from the FIRST frame's declared
+  // size, then decodes every frame into it, so a multi-frame stream fails with
+  // dstSize_tooSmall (-70). Decode such a stream one frame at a time.
+  const frames = splitZstdFrames(compressed) ?? [compressed];
+  let declaredSize: bigint | null = 0n;
+  let declaredSeen = 0n;
+  for (const frame of frames) {
+    const size = readZstdFrameContentSize(frame);
+    if (size === null) declaredSize = null;
+    else {
+      declaredSeen += size;
+      if (declaredSize !== null) declaredSize += size;
     }
+  }
+  if (declaredSize !== null) metadata.declaredDecodedByteLength = declaredSize.toString();
+  // Frames that omit their size only add to the declared ones, so the declared
+  // sum alone already proves a stream too large.
+  if (declaredSeen > BigInt(metadata.maxDecodedBytes)) {
+    return failure(
+      metadata,
+      'too-large',
+      `Zstd ${frames.length === 1 ? 'frame declares' : `${frames.length} frames declare`} ${declaredSeen} decoded bytes; limit is ${metadata.maxDecodedBytes} bytes`,
+      'zstd',
+    );
   }
 
   let bytes: Uint8Array;
   try {
     const zstd = await loadZstd();
-    // For frames without a declared size this becomes the destination capacity,
-    // preventing an unbounded allocation. The package cannot distinguish
-    // "capacity exceeded" from corruption, so either failure is reported as a
-    // decompression error. Known-size frames are rejected above before WASM.
-    bytes = zstd.decompress(compressed, { defaultHeapSize: metadata.maxDecodedBytes }).slice();
+    // For frames without a declared size the remaining budget becomes the
+    // destination capacity, preventing an unbounded allocation. The package
+    // cannot distinguish "capacity exceeded" from corruption, so either failure
+    // is reported as a decompression error. Declared sizes are rejected above
+    // before WASM.
+    const pieces: Uint8Array[] = [];
+    let decodedLength = 0;
+    for (const frame of frames) {
+      const piece = zstd.decompress(frame, { defaultHeapSize: metadata.maxDecodedBytes - decodedLength }).slice();
+      pieces.push(piece);
+      decodedLength += piece.byteLength;
+      if (decodedLength > metadata.maxDecodedBytes) break;
+    }
+    bytes = pieces.length === 1 ? pieces[0] : new Uint8Array(decodedLength);
+    if (pieces.length > 1) {
+      let at = 0;
+      for (const piece of pieces) {
+        bytes.set(piece, at);
+        at += piece.byteLength;
+      }
+    }
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     return failure(metadata, 'decompression-failed', `Zstd decompression failed: ${detail}`, 'zstd');
