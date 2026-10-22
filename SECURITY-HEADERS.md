@@ -57,11 +57,19 @@ claim to have deployed.
 4. Create a second response-header transform rule for the HTML paths `/`,
    `/index.html`, `/json-to-excel.html`, `/json-editor.html`, `/json-diff.html`,
    `/large-json-viewer.html`, `/spec.html`, and `/styleguide.html`,
-   setting `Content-Security-Policy` to the policy above. Limiting CSP to HTML
-   leaves the capability-stripped Run worker free to compile only the script a
-   user explicitly enters, while the document still restricts worker creation
-   to same-origin or `blob:` URLs.
-5. Do not enable HSTS `includeSubDomains` or preload without separately checking
+   setting `Content-Security-Policy` to the policy above. The page policy is
+   not applied to the Run worker, which must compile the script a user
+   explicitly enters, while the document still restricts worker creation to
+   same-origin or `blob:` URLs.
+5. Create a third response-header transform rule for paths matching
+   `/assets/run-sandbox-*.js`, setting `Content-Security-Policy` to
+   `default-src 'none'; script-src 'self' 'unsafe-eval'; worker-src 'none'`.
+   A dedicated worker takes its policy from its own response, not the page's.
+   With no policy, a pasted script's dynamic `import()` could carry the
+   document to any host; `import()` is syntax, so the sandbox cannot strip it
+   the way it strips `fetch`. This policy allows the eval Run exists for and
+   nothing off-origin. The packaged loopback server sends the same header.
+6. Do not enable HSTS `includeSubDomains` or preload without separately checking
    every subdomain; neither is required for this project criterion.
 
 Cloudflare applies response transforms only to proxied traffic. If the records
