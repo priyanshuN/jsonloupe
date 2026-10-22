@@ -189,8 +189,16 @@ describe('predicates', () => {
     expect(nested).toMatchObject({ ok: false, error: expect.stringContaining('nested unbounded') });
   });
   it('sees nested unbounded quantifiers through inner groups', () => {
-    for (const re of ['^((a+))+$', '^((\\w+)\\s?)+$', '((ab)+)+', '(?:(x*)y)*', '(a+){2,}']) {
-      expect(runQuery(doc, `$.tasks[?(@.status =~ /${re}/)]`), re).toMatchObject({
+    // Whole queries, as a user types them, like the test above: the patterns
+    // only ever reach the engine inside a query, never as a RegExp of their own.
+    for (const query of [
+      '$.tasks[?(@.status =~ /^((a+))+$/)]',
+      '$.tasks[?(@.status =~ /^((\\w+)\\s?)+$/)]',
+      '$.tasks[?(@.status =~ /((ab)+)+/)]',
+      '$.tasks[?(@.status =~ /(?:(x*)y)*/)]',
+      '$.tasks[?(@.status =~ /(a+){2,}/)]',
+    ]) {
+      expect(runQuery(doc, query), query).toMatchObject({
         ok: false,
         error: expect.stringContaining('nested unbounded'),
       });

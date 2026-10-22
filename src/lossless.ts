@@ -49,8 +49,8 @@ function mayNameProto(text: string): boolean {
 
 /**
  * Walk the lossless tree beside JSON.parse's tree of the same text, which has
- * the same shape apart from "__proto__" members, and rebuild every object that
- * should own one, in JSON.parse's key order.
+ * the same shape apart from "__proto__" members, and rebuild every object in
+ * JSON.parse's key order, so the ones that should own such a member do.
  */
 function restoreProtoMembers(value: unknown, plain: unknown): unknown {
   if (plain === null || typeof plain !== 'object') return value;
@@ -61,23 +61,19 @@ function restoreProtoMembers(value: unknown, plain: unknown): unknown {
   }
   const object = value as Record<string, unknown>;
   const source = plain as Record<string, unknown>;
-  if (!Object.hasOwn(source, '__proto__')) {
-    for (const key of Object.keys(source)) object[key] = restoreProtoMembers(object[key], source[key]);
-    return object;
-  }
   // The setter kept an object, array, null or boxed number as the prototype,
   // and dropped a string, boolean or native number, which JSON.parse already
   // holds exactly (a native number is one whose float form IS its spelling).
   const prototype: unknown = Object.getPrototypeOf(object);
-  const rebuilt: Record<string, unknown> = {};
-  for (const key of Object.keys(source)) {
-    const member = key !== '__proto__' ? object[key] : prototype === Object.prototype ? source[key] : prototype;
-    Object.defineProperty(rebuilt, key, {
-      value: restoreProtoMembers(member, source[key]),
-      writable: true,
-      enumerable: true,
-      configurable: true,
-    });
-  }
-  return rebuilt;
+  // Object.fromEntries defines each member as an own data property, as
+  // JSON.parse does, so a "__proto__" entry never reaches the setter. Every
+  // object is rebuilt rather than written into, even one with no such member:
+  // its keys come from the document, and a write by a document-chosen key is
+  // the very setter this undoes. Only text mayNameProto lets through pays.
+  return Object.fromEntries(
+    Object.keys(source).map((key) => {
+      const member = key !== '__proto__' ? object[key] : prototype === Object.prototype ? source[key] : prototype;
+      return [key, restoreProtoMembers(member, source[key])];
+    }),
+  );
 }
