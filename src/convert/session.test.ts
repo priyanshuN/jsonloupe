@@ -109,4 +109,15 @@ describe('convertRun', () => {
     expect(r).not.toHaveProperty('bytes');
     expect((r as { errors: SpecError[] }).errors.map((e) => e.code)).toEqual(['E_PARENT_UNKNOWN']);
   });
+
+  it('answers a non-text missing-value default with an error instead of failing the export', async () => {
+    // The second row has no `b`, so writing it means writing the default.
+    const sparse = { rows: [{ a: 1, b: 'x' }, { a: 2 }] };
+    const spec = convertInspect(sparse).spec;
+    for (const format of ['xlsx', 'csv'] as const) {
+      const r = await convertRun(sparse, { ...spec, output: { format, onMissing: 0 as never } });
+      expect(r, format).not.toHaveProperty('bytes');
+      expect((r as { errors: SpecError[] }).errors.map((e) => [e.code, e.at])).toEqual([['E_TYPE_PARAM', 'output.onMissing']]);
+    }
+  });
 });
