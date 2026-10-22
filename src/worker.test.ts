@@ -981,6 +981,20 @@ describe('unpack', () => {
     expect(h<UndoRes>({ type: 'redo' }).did).toBe('replaceValue');
     expect(stringify(0)).toBe('{"payload":{"inner":7}}');
   });
+
+  // A committed unpack edits the document in place, so the root keeps its
+  // identity — which is what the converter's inspection cache was keyed on.
+  it('lets the converter see a table that a committed unpack created', async () => {
+    parse('{"id":1,"payload":"[{\\"sku\\":\\"A\\"},{\\"sku\\":\\"B\\"}]"}');
+    const anchors = async (): Promise<string[]> => {
+      const res = (await handleAsync({ type: 'convertInspect' })) as { inspection: { tables: { anchor: string }[] } };
+      return res.inspection.tables.map((t) => t.anchor);
+    };
+    expect(await anchors()).toEqual([]);
+    const p = rows().find((r) => r.key === 'payload')!;
+    expect(h<{ ok: boolean }>({ type: 'unpack', id: p.id, index: p.index, commit: true }).ok).toBe(true);
+    expect(await anchors()).toEqual(['$.payload[]']);
+  });
 });
 
 // ---------- W1: undo-by-path (cross-boundary edge) ----------

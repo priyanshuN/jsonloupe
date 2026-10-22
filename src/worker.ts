@@ -1333,6 +1333,9 @@ function ancestorUnpacked(id: number): boolean {
 // container — so the true slot is written, not a synthetic one.
 function writeLeaf(n: NodeRec, parsed: unknown): void {
   clearCompareState();
+  // The converter's inspection is cached by root identity, which an in-place
+  // edit keeps, so detection would go on serving the tables from before it.
+  resetConvertCache();
   if (n.parent === -1) {
     n.value = parsed; // primitive root document
   } else {
