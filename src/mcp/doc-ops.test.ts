@@ -255,6 +255,20 @@ describe('sample', () => {
     expect(ok(sample(engine, '$.tasks', 2)).values).toHaveLength(2);
   });
 
+  it('returns n values whatever earlier samples left expanded', async () => {
+    // A thread keeps one engine for the life of a document, so one call's tree
+    // state is the next call's starting point. A row walk read the container's
+    // first n visible rows, and the grandchildren of elements an earlier
+    // nested sample had revealed took up part of that window.
+    await load(JSON.stringify({ a: [{ b: [1, 2] }, { b: [3] }, { b: [4] }, { b: [5] }, { b: [6] }, { b: [7] }] }));
+    const paths = ['$.a[0]', '$.a[1]', '$.a[2]', '$.a[3]', '$.a[4]'];
+    expect(ok(sample(engine, '$.a', 5)).values.map((v) => v.path)).toEqual(paths);
+    ok(sample(engine, '$.a[*].b', 5));
+    const again = ok(sample(engine, '$.a', 5));
+    expect(again.total).toBe(6);
+    expect(again.values.map((v) => v.path)).toEqual(paths);
+  });
+
   it('says so when nothing matches', async () => {
     await load(DOC);
     expect(sample(engine, '$.nope', 5)).toMatchObject({ ok: false, error: 'no match for $.nope' });
@@ -405,30 +419,21 @@ describe('operation adapters and defensive result shapes', () => {
     expect(profile(responder({ ok: false, error: 'plain failure' }), '$', [], 3)).toEqual({ ok: false, error: 'plain failure' });
   });
 
-  it('rejects aggregate samples and unresolved match rows', () => {
+  it('rejects aggregate samples and a match list the engine will not sample', () => {
     expect(sample(responder({ ok: true, kind: 'value', value: 1 }), '$ | count', 1)).toMatchObject({
       ok: false,
       error: 'sample takes a path, not an aggregate pipe',
     });
 
-    const missingSingle: Engine = ((message: { type: string }) => {
+    const replaced: Engine = ((message: { type: string }) => {
       if (message.type === 'query') return { ok: true, kind: 'matches', total: 1, matches: [{ pathText: '$.x' }] };
-      if (message.type === 'queryReveal') return { rowIndex: -1 };
+      if (message.type === 'querySample') return { ok: false, error: 'another query replaced this one; run it again' };
       return { rows: [] };
     }) as Engine;
-    expect(sample(missingSingle, '$.x', 1)).toMatchObject({ ok: false, error: 'could not resolve $.x in the document tree' });
-
-    const missingMultiple: Engine = ((message: { type: string }) => {
-      if (message.type === 'query') return {
-        ok: true,
-        kind: 'matches',
-        total: 2,
-        matches: [{ pathText: '$.x[0]' }, { pathText: '$.x[1]' }],
-      };
-      if (message.type === 'queryReveal') return { rowIndex: -1 };
-      return { rows: [] };
-    }) as Engine;
-    expect(sample(missingMultiple, '$.x[*]', 2)).toMatchObject({ ok: true, total: 2, values: [] });
+    expect(sample(replaced, '$.x', 1)).toMatchObject({
+      ok: false,
+      error: 'could not sample $.x: another query replaced this one; run it again',
+    });
   });
 
   it('normalizes sparse diff replies and diff failures', () => {

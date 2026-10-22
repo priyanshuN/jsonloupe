@@ -7,7 +7,7 @@
 // with the engine's own serializer before any result crosses a boundary.
 //
 // No MCP concepts appear in this file, and no engine logic either. It is the
-// glue that turns "sample 5 values at $.tasks" into reveal → rows → nodeValue.
+// glue that turns "sample 5 values at $.tasks" into query → querySample.
 
 import { link, lstat, open, rename, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -347,7 +347,14 @@ export function profile(
 /**
  * n real values at a path. The path is a query, so `$.tasks` samples the array's
  * elements while `$.tasks[*].id` samples the ids themselves; either way the
- * values come back through `nodeValue`, digit-for-digit as they were parsed.
+ * values come back from the query's own match list (`querySample`), stringified
+ * by the engine digit-for-digit as they were parsed.
+ *
+ * They deliberately do not come back through the visible tree. This thread
+ * keeps one engine for the life of the document, and a row walk depended on
+ * what earlier calls had left expanded: the grandchildren of revealed matches
+ * filled part of a container's n-row window, so fewer than n values came back.
+ * The WebMCP bridge reads the match list for the same reason.
  */
 export function sample(engine: Engine, path: string, n: number): SampleResult | OpError {
   const r = engine({ type: 'query', q: path }) as RawQueryResult;
@@ -358,67 +365,19 @@ export function sample(engine: Engine, path: string, n: number): SampleResult | 
   const total = r.total ?? 0;
   if (total === 0) return fail(`no match for ${path}`, 'get_schema shows which paths exist.');
 
-  if (total > 1) {
-    const reachable = r.matches ?? [];
-    const values: SampleValue[] = [];
-    let type: NodeType = 'null';
-    for (let i = 0; i < Math.min(n, reachable.length); i++) {
-      const row = rowAtMatch(engine, i);
-      if (!row) continue;
-      type = row.type;
-      values.push({ path: reachable[i].pathText, json: valueOf(engine, row.id) });
-    }
-    return { ok: true, path, type, total, values };
-  }
-
-  const row = rowAtMatch(engine, 0);
-  if (!row) return fail(`could not resolve ${path} in the document tree`);
-  if (!row.hasChildren) {
-    return { ok: true, path, type: row.type, total: 1, values: [{ path, json: valueOf(engine, row.id) }] };
-  }
-  return { ok: true, path, type: row.type, total: row.childCount, values: childValues(engine, row, n) };
-}
-
-/** Reveal the i-th match of the last query and read the row it landed on. */
-function rowAtMatch(engine: Engine, i: number): Row | null {
-  const { rowIndex } = engine({ type: 'queryReveal', i }) as { rowIndex: number };
-  if (rowIndex < 0) return null;
-  return (engine({ type: 'rows', start: rowIndex, count: 1 }) as { rows: Row[] }).rows[0] ?? null;
-}
-
-/**
- * Expand a container, read its first n children, then put the tree back exactly
- * as it was — only what this call opened is closed again. Huge arrays expand
- * into synthetic `[0 … 9999]` chunk rows, so descend through the first chunk to
- * reach real elements.
- */
-function childValues(engine: Engine, container: Row, n: number): SampleValue[] {
-  const opened: Row[] = [];
-  let parent = container;
-  let children: Row[] = [];
-  for (let depth = 0; depth < 2; depth++) {
-    if (!parent.expanded) {
-      engine({ type: 'toggle', id: parent.id, index: parent.index });
-      opened.push(parent);
-    }
-    children = (engine({ type: 'rows', start: parent.index + 1, count: n }) as { rows: Row[] }).rows;
-    if (children[0]?.type !== 'chunk') break;
-    parent = children[0];
-  }
-  const values = children
-    .filter((c) => c.depth === parent.depth + 1)
-    .map((c) => ({ path: pathOf(engine, c.id), json: valueOf(engine, c.id) }));
-  for (const row of opened.reverse()) engine({ type: 'toggle', id: row.id, index: row.index });
-  return values;
-}
-
-function valueOf(engine: Engine, id: number): string {
-  const { text } = engine({ type: 'nodeValue', id }) as { text: string };
-  return clip(text, SAMPLE_VALUE_CHARS);
-}
-
-function pathOf(engine: Engine, id: number): string {
-  return (engine({ type: 'nodePath', id }) as { text: string }).text;
+  // chars: 0 leaves the values whole, so clip() marks a cut value with its full
+  // length, exactly as a sampled value always has been.
+  const s = engine({ type: 'querySample', n, chars: 0, q: path }) as
+    | { ok: true; type: NodeType; total: number; values: SampleValue[] }
+    | { ok: false; error: string };
+  if (!s.ok) return fail(`could not sample ${path}: ${s.error}`);
+  return {
+    ok: true,
+    path,
+    type: s.type,
+    total: s.total,
+    values: s.values.map((v) => ({ path: v.path, json: clip(v.json, SAMPLE_VALUE_CHARS) })),
+  };
 }
 
 // ---------- diff ----------
