@@ -306,6 +306,54 @@ describe('VirtualTree value chips and pinned parents', () => {
     expect(tree.selectedIndex()).toBe(7);
   });
 
+  it('keeps a row selected from the keyboard clear of the ancestors pinned over it', async () => {
+    // `levels` nested objects open at rows 1..levels, the rest are their deepest
+    // children. Pinning follows the worker: slot k shows the depth-(k+1)
+    // ancestor of row top+k, and the stack stops at a row of that depth.
+    const run = async (levels: number, from: number) => {
+      const depthOf = (index: number) => (index <= levels ? index : levels + 1);
+      const rowAt = (index: number): Row => ({ ...leafRow, id: index + 1, index, depth: depthOf(index), key: `k${index}` });
+      const fetchSticky = vi.fn(async (top: number, max: number) => {
+        const out: Row[] = [];
+        for (let slot = 0; slot < max; slot++) {
+          let j = top + slot;
+          while (j > 0 && depthOf(j) > slot + 1) j--;
+          if (j === top + slot || depthOf(j) !== slot + 1) break;
+          out.push(rowAt(j));
+        }
+        return out;
+      });
+      const { viewport, inner, tree } = harness({
+        fetchRows: vi.fn(async (start: number, count: number) =>
+          Array.from({ length: Math.min(count, 100 - start) }, (_, i) => rowAt(start + i)),
+        ),
+        fetchSticky,
+      });
+      Object.defineProperty(viewport, 'clientHeight', { value: 22 * 30 });
+      inner.total = 100;
+      viewport.scrollTop = 22 * 40;
+      await inner.render();
+      tree.select(from, { scroll: false });
+      // k, twice
+      tree.select(tree.selectedIndex() - 1);
+      tree.select(tree.selectedIndex() - 1);
+      await inner.render();
+      await Promise.resolve();
+      const slot = tree.selectedIndex() - viewport.scrollTop / 22;
+      const pinned = viewport.querySelectorAll('.tree-sticky .sticky-row').length;
+      return { slot, pinned };
+    };
+
+    // Up past the top of the pane: the row used to land in slot 0, under `k1`.
+    const reachedTop = await run(1, 41);
+    expect(reachedTop.pinned).toBe(1);
+    expect(reachedTop.slot).toBeGreaterThanOrEqual(reachedTop.pinned);
+    // Under a two-row stack the row was hidden before it reached the top.
+    const underStack = await run(2, 43);
+    expect(underStack.pinned).toBe(2);
+    expect(underStack.slot).toBeGreaterThanOrEqual(underStack.pinned);
+  });
+
   it('asks for nothing at the very top', async () => {
     const fetchSticky = vi.fn(async () => []);
     const { inner } = harness({ fetchRows: vi.fn(async () => [leafRow]), fetchSticky });
