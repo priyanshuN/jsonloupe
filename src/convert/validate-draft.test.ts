@@ -164,6 +164,22 @@ describe('drafting carries its unanswered question rather than dropping it', () 
     expect(validateSpec(draftSpec(ins), ins)).toEqual({ ok: true });
   });
 
+  it('leaves out a table with no columns of its own, so the draft still validates', () => {
+    // `lines` holds only `parts`, so it drafted `columns: []` — and validation
+    // refused the tool's own draft, the one an MCP client passes straight on.
+    for (const doc of [
+      { orders: [{ id: 1, lines: [{ parts: [{ sku: 'x' }] }] }] },
+      { days: [{ date: '2026-08-01', a: [{ b: [{ time: '09:30' }] }] }] },
+    ]) {
+      const ins = inspect({ doc });
+      expect(validateSpec(draftSpec(ins), ins)).toEqual({ ok: true });
+    }
+    const spec = draftSpec(inspect({ doc: { orders: [{ id: 1, lines: [{ parts: [{ sku: 'x' }] }] }] } }));
+    expect(spec.tables.map((t) => t.name)).toEqual(['orders', 'parts']);
+    // The parts still say which order they came from, through the table above.
+    expect(spec.tables[1].parent).toEqual({ table: 'orders', key: 'id', as: 'order_id' });
+  });
+
   it('asks about a value it can read both ways, passing over one it cannot read at all', () => {
     // `01-02-2026` has the slashed-date shape, but neither reading parses it, so
     // the question has to be about the next value instead.

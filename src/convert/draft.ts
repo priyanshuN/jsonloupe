@@ -79,16 +79,29 @@ export function draftSpec(ins: Inspection, hints: DraftHints = {}): ConvertSpec 
     ? ins.tables.filter((t) => hints.tables!.includes(t.name) || hints.tables!.includes(t.anchor))
     : ins.tables;
   const byAnchor = new Map(ins.tables.map((t) => [t.anchor, t]));
-  const kept = new Set(wanted.map((t) => t.anchor));
-
-  const tables: TableSpec[] = wanted.map((t) => {
+  const drafted = wanted.map((t) => {
     const base = hints.baseDate ?? findBaseDate(t, ins) ?? 'today';
-    const spec: TableSpec = { name: t.name, anchor: t.anchor, columns: columnsFor(t, hints.columns?.[t.name], base) };
-    // A parent link only means something when the parent is also in the output.
-    const parent = t.parentAnchor && kept.has(t.parentAnchor) ? byAnchor.get(t.parentAnchor) : undefined;
-    if (parent) spec.parent = parentLink(parent);
-    return spec;
+    return { t, columns: columnsFor(t, hints.columns?.[t.name], base) };
   });
+  // A list whose records hold only further lists (`lines: [{ parts: […] }]`)
+  // drafts no columns, and validation refuses a table without one — so the
+  // draft left in it was a mapping this tool would itself reject. It is left
+  // out, and its children link past it to the nearest table that is written.
+  const empty = new Set(drafted.filter((d) => !d.columns.length).map((d) => d.t.anchor));
+  const kept = new Set(drafted.filter((d) => d.columns.length).map((d) => d.t.anchor));
+
+  const tables: TableSpec[] = drafted
+    .filter((d) => kept.has(d.t.anchor))
+    .map(({ t, columns }) => {
+      const spec: TableSpec = { name: t.name, anchor: t.anchor, columns };
+      // A parent link only means something when the parent is also in the
+      // output. Only an empty table is stepped over: one the caller left out is
+      // a decision about the output, and the link stops there as it always has.
+      let up = t.parentAnchor ? byAnchor.get(t.parentAnchor) : undefined;
+      while (up && empty.has(up.anchor)) up = up.parentAnchor ? byAnchor.get(up.parentAnchor) : undefined;
+      if (up && kept.has(up.anchor)) spec.parent = parentLink(up);
+      return spec;
+    });
 
   return {
     specVersion: 1,
