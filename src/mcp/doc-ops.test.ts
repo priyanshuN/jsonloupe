@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { writeFileSync } from 'node:fs';
 import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +25,8 @@ import {
   type QueryResultView,
 } from './doc-ops';
 import { MAX_DOC_BYTES } from '../intake';
-import { compressToB64 } from '../codec';
+import { MAX_EXPORT_BYTES } from '../export-policy';
+import { compressToB64, compressToBytes } from '../codec';
 import type { DocRequest } from './pool';
 
 // These drive the document operations over a real engine, the same way
@@ -507,5 +509,147 @@ describe('operation adapters and defensive result shapes', () => {
     expect(queryError('$.rows[?(@.name contains "x")]', 'bad string', 2).hint).toContain('single quotes');
     const plain = queryError('$.rows[*]', 'unrelated failure', -5);
     expect(plain.hint).not.toContain('suggestion:');
+  });
+});
+
+describe('compressed files on disk', () => {
+  it('reads a raw Zstd file and says what it unpacked', async () => {
+    const path = join(dir, 'doc.json.zst');
+    await writeFile(path, await compressToBytes(DOC));
+    const r = ok(await loadDoc(engine, { path }));
+    expect(r.keys).toEqual(['tasks']);
+    expect(r.bytes).toBe(DOC.length);
+    expect(r.decoded).toMatch(/zstd/);
+  });
+
+  it('reports a truncated Zstd file as an error instead of parsing garbage', async () => {
+    const whole = await compressToBytes(DOC);
+    const path = join(dir, 'cut.json.zst');
+    await writeFile(path, whole.slice(0, 12));
+    const r = await loadDoc(engine, { path });
+    expect(r).toMatchObject({ ok: false });
+    expect((r as OpError).error.length).toBeGreaterThan(0);
+  });
+});
+
+describe('sparse engine replies still produce honest errors', () => {
+  const responder = (reply: unknown): Engine => (() => reply) as Engine;
+
+  it('does not invent a position for a parse failure that has none', async () => {
+    expect(await loadDoc(responder({ ok: false, error: 'unexpected end' }), { text: '{' })).toEqual({
+      ok: false,
+      error: 'unexpected end',
+      hint: undefined,
+    });
+  });
+
+  it('falls back to a generic failure when the engine gives no reason', () => {
+    expect(getSchema(responder({ ok: false }))).toMatchObject({ ok: false, error: 'schema failed' });
+    expect(runQuery(responder({ ok: false }), '$.x')).toMatchObject({ ok: false, error: 'query failed (at 0)' });
+    expect(sample(responder({ ok: false }), '$.x', 1)).toMatchObject({ ok: false, error: 'query failed (at 0)' });
+  });
+
+  it('teaches the grammar for a sample path that does not parse', async () => {
+    await load(DOC);
+    const r = sample(engine, 'tasks', 1) as OpError;
+    expect(r.ok).toBe(false);
+    expect(r.hint).toContain('every query starts at the root');
+  });
+
+  it('names the converter inspection as what failed when the engine says nothing', async () => {
+    expect(await inspectConversion(async () => ({}))).toEqual({
+      ok: false,
+      error: 'converter inspection failed',
+      hint: undefined,
+    });
+  });
+
+  it('puts the only mapping problem in the error and leaves the hint empty', async () => {
+    const r = await convertToFile(async () => ({
+      errors: [{ code: 'E_MISSING_KEY', at: 'tables', message: 'no tables' }],
+    }), {} as never, join(dir, 'never-3.xlsx'));
+    expect(r).toEqual({ ok: false, error: 'mapping has 1 problem(s): tables — no tables', hint: undefined });
+  });
+
+  it('refuses to overwrite a converted file unless asked, and replaces it when asked', async () => {
+    const report = { tables: [{ name: 'a', rows: 1, skipped: 0 }], warnings: [] };
+    const fresh: AsyncEngine = async () => ({ format: 'xlsx', bytes: new Uint8Array([7]), rows: 1, report });
+    const outPath = join(dir, 'kept.xlsx');
+    await writeFile(outPath, 'keep me');
+    expect(await convertToFile(fresh, {} as never, outPath)).toMatchObject({
+      ok: false,
+      error: `output already exists: ${outPath}`,
+      hint: expect.stringContaining('overwrite=true'),
+    });
+    expect(await readFile(outPath, 'utf8')).toBe('keep me');
+    expect(await convertToFile(fresh, {} as never, outPath, true)).toMatchObject({ ok: true, rows: 1, bytes: 1 });
+    expect([...(await readFile(outPath))]).toEqual([7]);
+  });
+
+  it('profiles with no fields when the request names none, letting the engine choose', async () => {
+    const seen: Record<string, unknown>[] = [];
+    const recorder: Engine = ((msg: Record<string, unknown>) => {
+      seen.push(msg);
+      return { ok: true, matched: 0, complete: true, autoFields: true, fieldDiscoveryComplete: true, fields: [] };
+    }) as Engine;
+    await runDocOp(recorder, { op: 'profile', query: '$.rows[*]', top: 3 } as DocRequest);
+    expect(seen).toEqual([{ type: 'profile', query: '$.rows[*]', fields: [], top: 3 }]);
+  });
+});
+
+describe('export streaming edge cases', () => {
+  /** An engine that streams the given chunks, then reports done on the last one. */
+  const streaming = (chunks: { text?: string; rows?: number }[], onNext?: (i: number) => void): Engine => {
+    let i = 0;
+    return ((msg: { type: string }) => {
+      if (msg.type === 'exportStart') return { ok: true, exportId: 'e1' };
+      if (msg.type === 'exportNext') {
+        onNext?.(i);
+        const chunk = chunks[i];
+        i++;
+        return { ok: true, ...chunk, done: i === chunks.length };
+      }
+      return { ok: true };
+    }) as Engine;
+  };
+  const leftovers = async (name: string) => (await readdir(dir)).filter((f) => f.startsWith(`.${name}.`));
+
+  it('skips an empty chunk and keeps the last row count it was told', async () => {
+    const outPath = join(dir, 'chunks.csv');
+    const r = ok(await exportCsv(streaming([{ text: 'id\r\n', rows: 0 }, { text: '' }, { text: '1\r\n', rows: 1 }, { text: '' }]), '$', outPath));
+    expect(r).toMatchObject({ rows: 1, bytes: 7 });
+    expect(await readFile(outPath, 'utf8')).toBe('id\r\n1\r\n');
+  });
+
+  it('refuses an export past the byte limit, counting bytes rather than characters', async () => {
+    // Two-byte characters: under the limit by length, over it in UTF-8.
+    const wide = 'é'.repeat(MAX_EXPORT_BYTES / 2 + 1);
+    expect(wide.length).toBeLessThan(MAX_EXPORT_BYTES);
+    const outPath = join(dir, 'wide.csv');
+    const r = await exportCsv(streaming([{ text: wide, rows: 1 }]), '$', outPath);
+    expect(r).toEqual({ ok: false, error: `too large for export (${MAX_EXPORT_BYTES} byte limit)`, hint: undefined });
+    await expect(readFile(outPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await leftovers('wide.csv')).toEqual([]);
+  });
+
+  it('never clobbers a file that appears at the target while the export is streaming', async () => {
+    const outPath = join(dir, 'raced.csv');
+    // Another writer claims the path after the up-front existence check passed.
+    const racing = streaming([{ text: 'id\r\n1\r\n', rows: 1 }], () => writeFileSync(outPath, 'theirs'));
+    const r = await exportCsv(racing, '$', outPath);
+    expect(r).toMatchObject({
+      ok: false,
+      error: `refusing to overwrite existing path '${outPath}'`,
+      hint: expect.stringContaining('overwrite=true'),
+    });
+    expect(await readFile(outPath, 'utf8')).toBe('theirs');
+    expect(await leftovers('raced.csv')).toEqual([]);
+  });
+
+  it('reports an output path that cannot exist, rather than throwing', async () => {
+    const file = join(dir, 'plain-file');
+    await writeFile(file, 'x');
+    const r = await exportCsv(streaming([{ text: 'id\r\n' }]), '$', join(file, 'out.csv'));
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/ENOTDIR/) });
   });
 });
