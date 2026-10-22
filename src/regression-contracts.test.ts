@@ -623,9 +623,23 @@ describe('document identity regression contracts', () => {
       /if \(requestToken !== openRequestToken\) \{[\s\S]*?if \(res\.ok && lastPostedParse\) await restoreShownDocument\(\);\s*return false;/,
     );
     expect(opened).toMatch(/finally \{[\s\S]*?if \(lastPostedParse\) workerParseRequest = 0;/);
-    expect(restore).toContain("type: 'parse',\n    text: currentText,");
+    expect(restore).toContain("type: 'parse',\n      text: currentText,");
     expect(restore).toContain('tree.setTotal(res.totalRows)');
     expect(restore).toContain('tree.refresh()');
+  });
+
+  it('refuses tree edits by stale ids while the shown document is re-parsed', () => {
+    // The restore re-parse renumbers the same document's nodes, and its token
+    // does not change, so without this an editor open across it committed to
+    // whichever leaf now has the old number and saved that.
+    const restore = mainSource.match(/async function restoreShownDocument\(\)[\s\S]*?^\}/m)?.[0] ?? '';
+    const tracked = restore.indexOf('workerParseRequest = request;');
+    expect(tracked).toBeGreaterThan(-1);
+    expect(tracked).toBeLessThan(restore.indexOf("type: 'parse'"));
+    expect(restore.indexOf('editDocumentToken = -1;')).toBeLessThan(restore.indexOf("type: 'parse'"));
+    // Released only by its own reply, so an open queued behind it stays tracked.
+    expect(restore).toMatch(/finally \{\s*if \(workerParseRequest === request\) workerParseRequest = 0;/);
+    expect(restore).toContain('const request = -++restoreParseSeq;');
   });
 
   it('keeps an Apply the worker already took when a non-open action follows it', () => {

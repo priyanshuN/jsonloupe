@@ -2237,14 +2237,31 @@ function showParseError(err: ParseErr): void {
 // the text it was opening. Node ids restart at 1 on every parse, so the rows
 // already drawn are refetched rather than trusted; the expansion state and the
 // worker's undo history went with the dropped parse and are not recoverable.
+//
+// The re-parse hands out new ids in a new expansion order while the rows on
+// screen, and any inline editor held open across it, still carry the old ones.
+// The document token does not change, so it is tracked as a queued parse (which
+// the edit and unpack guards refuse) and an open editor is orphaned: a commit
+// by a stale id would land on a different leaf of the same document and save.
+let restoreParseSeq = 0;
 async function restoreShownDocument(): Promise<void> {
   if (!currentText) return; // nothing on screen to disagree with
   const documentToken = currentDocumentToken;
-  const res = await call<ParseOk | ParseErr>({
-    type: 'parse',
-    text: currentText,
-    expandRows: fitRows(treeViewport),
-  });
+  // Negative, so it never equals an open's token: an open posted behind this
+  // parse takes the slot over and must not be released by this one's reply.
+  const request = -++restoreParseSeq;
+  workerParseRequest = request;
+  editDocumentToken = -1;
+  let res: ParseOk | ParseErr;
+  try {
+    res = await call<ParseOk | ParseErr>({
+      type: 'parse',
+      text: currentText,
+      expandRows: fitRows(treeViewport),
+    });
+  } finally {
+    if (workerParseRequest === request) workerParseRequest = 0;
+  }
   if (!res.ok || documentToken !== currentDocumentToken) return;
   tree.setTotal(res.totalRows);
   tree.resetSelection();
