@@ -45,6 +45,8 @@
 //  12. rule 26 — the hidden sidebar is a 0 track (no icon rail) and
 //      visibility: hidden, both desktop-only, and both toggles carry
 //      aria-controls="sidebar" and aria-expanded.
+//  14. dead landing classes — every .lp-*/.sp-* class the public pages name
+//      has a rule in style.css (check 8's mirror: used but never defined).
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -595,6 +597,24 @@ for (const name of definedTokens) {
   if (!used) errors.push(`token --${name} is defined but never used — delete it or use it`);
 }
 
+// ---------- dead landing classes ----------
+
+// The mirror of the check above, for the public pages: a class the markup
+// names and the stylesheet does not. The search pages reuse index.html's
+// landing markup whole, so a class retired from style.css lives on in their
+// copies as unstyled text — the eyebrow pill did, on all three, as bare body
+// copy pressed against the h1, for as long as nobody happened to look.
+for (const page of ['index.html', 'json-to-excel.html', 'json-editor.html', 'json-diff.html', 'large-json-viewer.html', 'spec.html']) {
+  const markup = readFileSync(join(root, page), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const names = new Set([...markup.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(/\s+/)));
+  for (const name of names) {
+    if (!/^(?:lp|sp)-/.test(name)) continue;
+    if (!new RegExp(`\\.${name}(?![\\w-])`).test(css)) {
+      errors.push(`${page}: class "${name}" has no rule in style.css — style it or drop it from the markup`);
+    }
+  }
+}
+
 // ---------- verdict ----------
 
 if (errors.length) {
@@ -602,4 +622,4 @@ if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);
   process.exit(1);
 }
-console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, glass, schemes, type ramp, restatements, hidden sidebar, dead tokens, status layout)');
+console.log('contract lint: clean (weights, tokens, stroke, motion, contrast, glass, schemes, type ramp, restatements, hidden sidebar, dead tokens, dead landing classes, status layout)');
