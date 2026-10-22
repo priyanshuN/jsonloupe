@@ -46,6 +46,23 @@ test('tree and code workflows are named and keyboard operable', async ({ page })
   await expectNoWcagViolations(page, '#code-view');
 });
 
+test('a filter that matches nothing says so instead of showing a bare root', async ({ page }) => {
+  await openSample(page);
+  await page.locator('#search-box').fill('no-such-text-anywhere');
+  await page.getByRole('button', { name: 'Filter the tree to matches' }).click();
+  // The funnel's count was the only signal; the pruned tree is one collapsed
+  // root row, which reads as a broken document rather than an empty answer.
+  const panel = page.locator('#search-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('Nothing matches the filter');
+  await expectNoWcagViolations(page);
+
+  // Turning the filter off is the way back the hint names.
+  await page.getByRole('button', { name: 'Filter the tree to matches' }).click();
+  await expect(panel).toBeHidden();
+  await expect(page.getByRole('treeitem').nth(1)).toBeVisible();
+});
+
 test('query results can become an accessible reusable check', async ({ page }) => {
   await openSample(page);
   await page.getByRole('button', { name: 'query', exact: true }).click();

@@ -4040,7 +4040,20 @@ async function setFilter(query: string): Promise<void> {
   filterBtn.classList.toggle('on', filterOn);
   paintFilterBtn(filterOn ? r.matches : null);
   showPane('tree');
-  searchPanel.hidden = true;
+  // A filter that matched nothing prunes the tree to its bare, collapsed root,
+  // which reads as a broken document rather than an empty answer — the `0` on
+  // the funnel was the only clue. Rule 17: name the emptiness where the hit
+  // list would stand, and say the way back.
+  if (filterOn && r.matches === 0) {
+    searchPanel.replaceChildren(
+      emptyState('Nothing matches the filter', 'Change the search, or turn the filter off.', {
+        className: 'hit none',
+      }),
+    );
+    searchPanel.hidden = false;
+  } else {
+    searchPanel.hidden = true;
+  }
   tree.resetSelection();
   tree.setTotal(r.totalRows);
   if (!query && filterScrollSnapshot !== null) {
