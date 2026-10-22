@@ -1499,6 +1499,15 @@ describe('CSV export (U2)', () => {
     expect(csv('table').text).toBe('a\r\n1\r\n2\r\n3\r\n');
   });
 
+  it('table sort: records without the field stay last in both directions', () => {
+    parse('[{"v":2},{},{"v":1}]');
+    tableInit(rows()[0].id);
+    h({ type: 'tableSort', col: 'v', dir: 1 });
+    expect(csv('table').text).toBe('v\r\n1\r\n2\r\n\r\n');
+    h({ type: 'tableSort', col: 'v', dir: -1 });
+    expect(csv('table').text).toBe('v\r\n2\r\n1\r\n\r\n');
+  });
+
   it('table init: caps the column union at 40 across records, not per record', () => {
     const wide = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`k${i}`, i]));
     parse(JSON.stringify([wide, { x: 1 }, { y: 1 }]));

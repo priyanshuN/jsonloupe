@@ -2377,7 +2377,15 @@ function tableSort(col: string | null, dir: number): { count: number } {
   if (col === null) {
     tableIdx = tableArr.map((_, i) => i);
   } else {
-    tableIdx.sort((a, b) => dir * cmpCell(tableCell(a, col), tableCell(b, col)) || a - b);
+    // A missing cell sorts last in BOTH directions, as a spreadsheet's blank
+    // does: cmpCell puts it last, and multiplying that by -1 put every record
+    // without the field at the top of a descending sort.
+    tableIdx.sort((a, b) => {
+      const va = tableCell(a, col);
+      const vb = tableCell(b, col);
+      if ((va === undefined) !== (vb === undefined)) return va === undefined ? 1 : -1;
+      return dir * cmpCell(va, vb) || a - b;
+    });
   }
   return { count: tableIdx.length };
 }
