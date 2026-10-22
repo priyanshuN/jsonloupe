@@ -6478,6 +6478,13 @@ function adoptScript(rec: SavedScript | null): void {
 }
 
 async function loadAndRun(id: string): Promise<void> {
+  // Mid-run, a press would swap the head and editor to a function whose own
+  // run is then dropped (runScript refuses while one is in flight), leaving
+  // the running one's result under the pressed one's name. Refused, and said.
+  if (runInFlight) {
+    setRunStatus('a function is still running — press again when it finishes');
+    return;
+  }
   const rec = (await store.listScripts()).find((s) => s.id === id);
   if (!rec) return;
   // Two presses to discard: the first says what is at stake, the second obeys.
@@ -6983,10 +6990,13 @@ async function runScript(): Promise<void> {
   // one mid-flight; the result belongs to the old document, so it is dropped
   // rather than rendered under the new one.
   const documentRevision = currentDocumentRevision;
+  // The id is taken NOW: what the run reads belongs to the function that
+  // started it, not whichever one is loaded by the time the worker answers.
+  const runId = runLoadedId;
   // Tracing costs a Proxy trap on every property read, so it is asked for once:
   // on the first run of a saved function, or the first after its code changed
   // (saving new code clears what the old code was seen to read).
-  const trace = runLoadedId !== null && runLoadedReads === undefined;
+  const trace = runId !== null && runLoadedReads === undefined;
   runInFlight = true;
   paintRunHead();
   runErrorEl.hidden = true;
@@ -6999,7 +7009,7 @@ async function runScript(): Promise<void> {
   runInFlight = false;
   paintRunHead();
   if (documentRevision !== currentDocumentRevision) return;
-  if (res.ok && res.reads && runLoadedId) await learnReads(runLoadedId, res.reads);
+  if (res.ok && res.reads && runId) await learnReads(runId, res.reads);
   await renderRunResult(res);
 }
 

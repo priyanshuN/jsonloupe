@@ -556,6 +556,19 @@ describe('interactive UI regression contracts', () => {
     expect(head).toContain('id="ask-saved"');
     expect(mainSource).toContain('askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0');
   });
+
+  it('learns a run\'s reads onto the function that ran it, and refuses a library press mid-run', () => {
+    const run = mainSource.match(/async function runScript\(\): Promise<void> \{[\s\S]*?^\}/m)?.[0] ?? '';
+    // Read before the await: by the time the worker answers, another function
+    // may be loaded, and its record must not be given this one's reads.
+    expect(run.indexOf('const runId = runLoadedId;')).toBeGreaterThan(-1);
+    expect(run.indexOf('const runId = runLoadedId;')).toBeLessThan(run.indexOf('await executeInSandbox('));
+    expect(run).toContain('learnReads(runId, res.reads)');
+    expect(run).not.toContain('learnReads(runLoadedId');
+    const load = mainSource.match(/async function loadAndRun\(id: string\): Promise<void> \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(load.indexOf('if (runInFlight) {')).toBeGreaterThan(-1);
+    expect(load.indexOf('if (runInFlight) {')).toBeLessThan(load.indexOf('adoptScript(rec)'));
+  });
 });
 
 describe('document identity regression contracts', () => {
