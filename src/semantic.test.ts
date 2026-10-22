@@ -549,6 +549,24 @@ describe('schema-free semantic comparison', () => {
     expect(planAt(mixed.plans, '$.values').warnings.join(' ')).toContain('Heterogeneous');
   });
 
+  it('asks no review of an array that is empty on one side', () => {
+    // Every element is added or removed whatever the alignment, so neither the
+    // heterogeneous nor the primitive-order warning has anything to decide.
+    const cases: [unknown[], unknown[]][] = [
+      [[], [{ id: 1 }, { id: 2 }]],
+      [[{ id: 1 }], []],
+      [[], [1, 2]],
+      [[], [[1], [2]]],
+    ];
+    for (const [left, right] of cases) {
+      const result = compareSemantic({ items: left }, { items: right });
+      const plan = planAt(result.plans, '$.items');
+      expect(plan, JSON.stringify([left, right])).toMatchObject({ mode: 'position', inferredKind: 'empty-unknown' });
+      expect(plan.warnings, JSON.stringify([left, right])).toEqual([]);
+      expect(result.summary.added + result.summary.removed).toBe(Math.max(left.length, right.length));
+    }
+  });
+
   it('explains low-confidence and unavailable identity discovery', () => {
     const low = compareSemantic(
       { rows: [{ id: 'same', payload: { n: 1 } }, { id: 'same', payload: { n: 2 } }] },

@@ -674,6 +674,7 @@ function buildArrayChildren(
   const requestedMode = rule?.mode ?? ctx.defaultMode;
   const explicitKeys = rule?.keys ?? [];
   const objectArrays = allObjects(left) && allObjects(right) && left.length > 0 && right.length > 0;
+  const oneSidedEmpty = (left.length === 0) !== (right.length === 0);
   const primitiveArrays = allScalars(left) && allScalars(right);
   const tupleArrays = allArrays(left) && allArrays(right);
   const candidates = objectArrays ? discoverIdentityCandidates(left, right) : [];
@@ -690,6 +691,13 @@ function buildArrayChildren(
       inferredKind = 'entity';
       keys = bestCandidate.keys;
       confidence = bestCandidate.confidence;
+    } else if (oneSidedEmpty) {
+      // Every element is added or removed whatever the alignment, so there is
+      // no inference left to review. Falling through would call a list that
+      // became populated "heterogeneous" and flag it on the plan button.
+      mode = 'position';
+      inferredKind = 'empty-unknown';
+      confidence = 0;
     } else if (objectArrays) {
       mode = 'position';
       inferredKind = left.length === 0 && right.length === 0 ? 'empty-unknown' : 'mixed-unknown';
