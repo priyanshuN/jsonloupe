@@ -219,6 +219,39 @@ describe('schema-free semantic comparison', () => {
     expect(result.root.children[0].children.filter((node) => node.moved)).toHaveLength(2);
   });
 
+  it('pairs moved keyless objects in a sequence by value, not by position', () => {
+    const sequence = { rules: { '$.v': 'sequence' as const } };
+    const swapped = compareSemantic(
+      { v: [{ nested: { id: 1 } }, { nested: { id: 2 } }] },
+      { v: [{ nested: { id: 2 } }, { nested: { id: 1 } }] },
+      sequence,
+    );
+    const rows = swapped.root.children[0].children;
+    expect(swapped.verdict).toBe('reordered');
+    expect(swapped.summary).toMatchObject({ changed: 0, moved: 2 });
+    expect(rows.map((row) => [row.status, row.leftIndex, row.rightIndex])).toEqual([
+      ['moved', 0, 1],
+      ['moved', 1, 0],
+    ]);
+
+    const prepended = compareSemantic(
+      { v: [{ a: 1 }, { b: 2 }, { c: 3 }] },
+      { v: [{ z: 0 }, { a: 1 }, { b: 2 }, { c: 3 }] },
+      sequence,
+    );
+    expect(prepended.summary).toMatchObject({ changed: 0, added: 1, removed: 0, moved: 3 });
+    expect(planAt(prepended.plans, '$.v').counts).toMatchObject({ matched: 3, added: 1, removed: 0, moved: 3 });
+
+    // An element edited where it stands still shows its field change.
+    const edited = compareSemantic(
+      { v: [{ a: 1 }, { b: 2 }] },
+      { v: [{ a: 1 }, { b: 3 }] },
+      sequence,
+    );
+    expect(edited.summary).toMatchObject({ changed: 1, added: 0, removed: 0, moved: 0 });
+    expect(allNodes(edited.root).some((node) => node.matchLabel === 'b' && node.status === 'changed')).toBe(true);
+  });
+
   it('uses a reliable identity to align moved objects in an ordered sequence', () => {
     const result = compareSemantic(
       {
