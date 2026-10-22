@@ -2081,6 +2081,86 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 }
 .lp-trust { margin: 26px 0 0; color: var(--text-faint); font: var(--fs-body) var(--mono); }
 
+/* The example spreadsheet on json-to-excel.html: the converter's own output
+   for the sample, drawn as a spreadsheet — gridlines, a numbered row gutter,
+   and sheet tabs along the bottom edge — because a visitor who searched for
+   Excel decides in seconds whether this is the thing they wanted, and a
+   picture of the result answers that faster than any sentence about it. */
+.lp-sheet {
+  margin: 30px 0 0;
+  max-width: 600px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.lp-sheet-grid { overflow-x: auto; }
+.lp-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--fs-body) var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lp-sheet th,
+.lp-sheet td {
+  height: 30px;
+  padding: 0 10px;
+  text-align: left;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.lp-sheet th:last-child,
+.lp-sheet td:last-child { border-right: 0; }
+.lp-sheet th {
+  background: var(--bg-chrome);
+  color: var(--text);
+  font-weight: 700;
+}
+.lp-sheet td { color: var(--text-dim); }
+.lp-sheet .lp-sheet-n {
+  width: 1%;
+  padding: 0 var(--gap-2);
+  text-align: right;
+  background: var(--bg-chrome);
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.lp-sheet .lp-sheet-id { color: var(--c-number); }
+.lp-sheet .lp-sheet-num { text-align: right; color: var(--text); }
+.lp-sheet th.lp-sheet-join { color: var(--accent); }
+.lp-sheet-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 var(--gap-2);
+  background: var(--bg-chrome);
+}
+.lp-sheet-tab {
+  min-height: var(--ctl-h);
+  padding: 0 14px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text-dim);
+  font: var(--fs-body) var(--mono);
+}
+.lp-sheet-tab:hover { background: var(--bg-hover); color: var(--text); }
+.lp-sheet-tab.on {
+  background: var(--bg-canvas);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.lp-sheet-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+  text-wrap: pretty;
+}
+.lp-cell-chips { margin-top: var(--gap-4); }
+
 /* hero paste panel — wraps the existing #paste-box / #parse-btn / #sample-btn /
    #open-btn controls; the markup around them changed, the wiring did not. */
 .lp-paste {
@@ -5672,19 +5752,36 @@ mark.hl {
 }
 .convert-where { margin: var(--gap-1) 0 0 calc(var(--icon) + var(--gap-2)); color: var(--text-faint); font-size: var(--fs-chip); }
 
-/* Names are edited in place, but rule 14 is explicit that a field's ground must
-   always read as "type here" — invisible-until-hovered was the taste the rule
-   exists to end, and its `outline: none` left the only two fields in the app a
-   keyboard user could land on with no visible focus. Ground, border, radius,
-   type and rule 5's ring come from the recipe; only the mini height and the
-   tighter inline inset are structural. */
-.convert-name,
+/* Column headings are edited in place, and rule 14 is explicit that a field's
+   ground must always read as "type here" — invisible-until-hovered was the
+   taste the rule exists to end, and its `outline: none` left the only two
+   fields in the app a keyboard user could land on with no visible focus.
+   Ground, border, radius, type and rule 5's ring come from the recipe; only the
+   mini height and the tighter inline inset are structural. */
 .convert-colname {
   flex: 1;
   min-width: 0;
   min-height: var(--ctl-h-mini);
   padding: 0 var(--gap-2);
 }
+/* A sheet name in the rail is TEXT, like a workbook's tab — the rule-14 answer
+   to "these look like text boxes" is not a field that hides its box but no
+   field here at all. The open sheet is renamed in .convert-sheet-field on the
+   customize head, where the full recipe applies. Same height as the field it
+   replaced, so the rail's rows did not move. */
+.convert-name {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--ctl-h-mini);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  color: var(--text);
+  font: var(--fs-body) var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.convert-sheet-field { flex: 0 1 240px; min-width: 160px; }
 
 /* Rule 11: the column editor and the preview under it are the document being
    shaped, so this whole column is CANVAS — the bars inside it are the chrome. */
@@ -5723,7 +5820,7 @@ mark.hl {
    inside a list, and a second filled pill per row would drown the list it is
    trying to annotate. */
 .convert-col-error {
-  flex-basis: 100%;
+  grid-column: 3 / -1;
   color: var(--danger);
   font-size: var(--fs-chip);
 }
@@ -5756,32 +5853,32 @@ mark.hl {
   padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome-2);
+  /* The single-strip layout starts at a 1541px WINDOW, but the documents
+     column takes 250px of that, so the strip itself can be ~1,290px — too
+     narrow for every control plus the explanation. Without wrapping, the
+     explanation squeezed `open a file…` and `save to a file` onto two lines
+     each. Now the controls keep their size and the explanation, which comes
+     last, drops to a row of its own. */
+  flex-wrap: wrap;
 }
+#convert-mappings > button { flex-shrink: 0; white-space: nowrap; }
 
 /* A 13–15 inch laptop leaves roughly 1,100–1,250px beside the Documents rail.
    The mapping lifecycle is wider than that when forced onto one line, so its
    final controls and explanation used to run under the viewport edge. At this
-   middle band, make the existing document order an explicit two-row grid:
+   middle band the strip breaks into two rows at the spacer: defaults and
    saved/name work above, file portability and its explanation below. Wide
-   screens keep the single strip; drawer widths use the compact flex layout. */
+   screens keep the single strip; drawer widths use the compact flex layout.
+   This was a six-column grid until 2026-10-22, written before the two default
+   fields joined the strip — every control after them landed one cell late,
+   so `name` sat at the far right of the top row and `save` stretched across
+   a column. A wrapping row in document order cannot fall out of step. */
 @media (min-width: 901px) and (max-width: 1540px) {
-  #convert-mappings:not([hidden]) {
-    display: grid;
-    grid-template-columns: auto minmax(140px, 200px) auto auto minmax(220px, 1fr) auto;
-  }
-  #convert-mappings > .spacer { display: none; }
-  #convert-saved {
-    width: 100%;
-    max-width: none;
-  }
-  .convert-map-name {
-    width: 100%;
-    min-width: 0;
-  }
-  .convert-mappings-note { min-width: 0; }
+  #convert-mappings > .spacer { flex-basis: 100%; }
 }
 
 .convert-mappings-note {
+  flex: 1 1 260px;
   color: var(--text-dim);
   font-size: var(--fs-chip);
 }
@@ -5812,7 +5909,7 @@ mark.hl {
 }
 /* Rule 18: a sheet name is user-authored output, not a JSON key. #doc-title's
    rank — the strongest identity in a bar. */
-#convert-detail-name { font: 700 var(--fs-code) var(--mono); color: var(--text); }
+#convert-detail-name { font-weight: 700; }
 #convert-detail-src { color: var(--text-dim); font: var(--fs-body) var(--mono); }
 /* Rule 13: these digits change on every keystroke in the editor above. */
 /* flex-shrink: 0 because this span stops being a row count the moment the
@@ -5837,7 +5934,9 @@ mark.hl {
   color: var(--danger);
 }
 
-#convert-cols { overflow-y: auto; padding: var(--gap-2) var(--gap-3); max-height: 48%; }
+/* 40%, from 48%: with one line per column the editor rarely needs its cap,
+   and when a wide table does, the preview keeps the larger share. */
+#convert-cols { overflow-y: auto; padding: var(--gap-2) var(--gap-3); max-height: 40%; }
 /* The common path is inspect, choose a format and download. Column plumbing is
    useful, but it no longer occupies half the view until Customize is opened. */
 #convert-view:not(.customizing) #convert-cols-head,
@@ -5850,7 +5949,7 @@ mark.hl {
    which is what the 3px padding was standing in for. */
 .convert-col {
   display: grid;
-  grid-template-columns: auto minmax(104px, 0.8fr) 116px minmax(130px, 1fr) repeat(3, var(--ctl-h-mini));
+  grid-template-columns: var(--ctl-h-mini) auto minmax(104px, 0.8fr) 116px minmax(130px, 1fr) repeat(3, var(--ctl-h-mini));
   align-items: center;
   gap: var(--gap-2);
   /* A form row, not a list row: its mini controls need 3px either side, which
@@ -5871,7 +5970,7 @@ mark.hl {
    deviation from rule 11's no-wrap default: an error folded into a 75px column
    is not a message, and this row is content rather than a control strip. */
 .convert-col-options {
-  grid-column: 2 / -1;
+  grid-column: 3 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -5888,7 +5987,11 @@ mark.hl {
 .convert-col-options select { max-width: 180px; min-width: 0; }
 /* Rule 14's standing-label pattern (.field > .field-prefix) supplies the shell,
    the label and the focus ring; only the width is local to the bar. */
-.convert-inline-field { flex: 0 0 auto; width: 150px; min-width: 0; }
+/* The field is as wide as its label plus room for the value. A fixed 150px
+   held the label alone — `missing values` took all of it and the value got
+   0-2px, so the field read as an empty caps box with nothing to type into. */
+.convert-inline-field { flex: 0 0 auto; width: auto; min-width: 0; }
+.convert-inline-field > input { flex: 1 0 6ch; }
 .convert-link-name { width: 130px; padding: 0 var(--gap-2); }
 /* A label wrapping a field, not a caption, so it takes --text-dim's floor —
    the same call .convert-col-options gets above. */
@@ -5982,9 +6085,24 @@ mark.hl {
   z-index: 1;
 }
 .convert-grid td.empty { color: var(--text-faint); }
-/* Rule 8b's banding, from .trow — what lets the per-cell bottom rule go. */
-.convert-grid tbody tr:nth-child(even) td { background: var(--bg-inset); }
+/* The preview is a picture of the file it will download, so it draws the
+   spreadsheet's own furniture: a gridline under every cell and a numbered row
+   gutter. The table view's zebra banding went with it — a spreadsheet has
+   gridlines, not bands, and someone who came here for Excel looks for them. */
+.convert-grid td { border-bottom: 1px solid var(--border-soft); }
 .convert-grid tbody tr:hover td { background: var(--bg-hover); }
+.convert-grid .rownum {
+  position: sticky;
+  left: 0;
+  min-width: 40px;
+  padding: 0 var(--gap-2);
+  text-align: right;
+  color: var(--text-faint);
+  font-weight: 400;
+  background: var(--bg-canvas);
+  border-right: 1px solid var(--border-strong);
+}
+.convert-grid th.rownum { z-index: 2; }
 
 /* Dark surfaces already establish their edges through luminance. In light,
    white fields used to dissolve into both the mapping rows and the preview, so
@@ -6010,7 +6128,7 @@ mark.hl {
 
 @media (max-width: 900px) {
   #convert-body { grid-template-columns: 180px 1fr; }
-  .convert-col { grid-template-columns: auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, var(--ctl-h-mini)); }
+  .convert-col { grid-template-columns: var(--ctl-h-mini) auto minmax(90px, 1fr) 82px minmax(110px, 1fr) repeat(3, var(--ctl-h-mini)); }
 }
 
 /* ---------- responsive workbench shell ---------- */
@@ -6280,10 +6398,12 @@ mark.hl {
   .convert-bar > .sem-heading,
   .convert-bar > .convert-outcome { flex: 1 1 100%; }
   .convert-bar > .spacer { display: none; }
+  /* Natural width, growing to share the row: a half-row cap was narrower than
+     `join arrays with` plus its value, so the value spilled out of the shell. */
   .convert-inline-field {
-    flex: 1 1 140px;
+    flex: 1 1 auto;
     width: auto;
-    max-width: calc(50% - var(--gap-1));
+    max-width: none;
   }
   #convert-body {
     grid-template-columns: minmax(0, 1fr);
@@ -6325,29 +6445,34 @@ mark.hl {
     overflow-y: visible;
   }
   .convert-col {
-    grid-template-columns: auto minmax(0, 1fr) repeat(3, var(--ctl-h-mini));
-    grid-template-rows: auto auto auto auto;
+    grid-template-columns: var(--ctl-h-mini) auto minmax(0, 1fr) repeat(3, var(--ctl-h-mini));
+    grid-template-rows: auto auto auto auto auto;
     padding-block: var(--gap-2);
     border-bottom: 1px solid var(--border-soft);
   }
-  .convert-col > .chk {
+  /* Placed by name, not by nth-of-type: the settings toggle is a button too. */
+  .convert-col-more {
     grid-column: 1;
     grid-row: 1;
   }
-  .convert-colname {
+  .convert-col > .chk {
     grid-column: 2;
     grid-row: 1;
   }
-  .convert-col > button:nth-of-type(1) {
+  .convert-colname {
     grid-column: 3;
     grid-row: 1;
   }
-  .convert-col > button:nth-of-type(2) {
+  .convert-col-up {
     grid-column: 4;
     grid-row: 1;
   }
-  .convert-col > button:nth-of-type(3) {
+  .convert-col-down {
     grid-column: 5;
+    grid-row: 1;
+  }
+  .convert-col-remove {
+    grid-column: 6;
     grid-row: 1;
   }
   .convert-mode {
@@ -6362,6 +6487,10 @@ mark.hl {
   .convert-col-options {
     grid-column: 1 / -1;
     grid-row: 4;
+  }
+  .convert-col-error {
+    grid-column: 1 / -1;
+    grid-row: 5;
   }
   .convert-col-options label { flex-wrap: wrap; }
   .convert-col-options input:where(:not([type='checkbox'])) {

@@ -365,6 +365,12 @@ describe('detection', () => {
     expect(ins.tables.map((t) => t.anchor)).toEqual(['$.orders[]', '$.orders[].items[]']);
   });
 
+  it('names a top-level list `rows`, never `$`', () => {
+    // A spreadsheet user reads the sheet tab, not the path; `$` names nothing.
+    const ins = inspect({ doc: [{ id: 1, items: [{ sku: 'A' }] }] });
+    expect(ins.tables.map((t) => t.name)).toEqual(['rows', 'items']);
+  });
+
   it('treats an id-keyed single entry as a map, not a record', () => {
     // Otherwise the anchor bakes in the literal hub id and the spec only ever
     // works on the file it was drafted from.

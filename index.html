@@ -1050,7 +1050,10 @@ SPDX-License-Identifier: MIT -->
             <div id="convert-tables" role="list" aria-label="Detected tables"></div>
             <div id="convert-detail">
               <div id="convert-cols-head">
-                <span id="convert-detail-name"></span>
+                <!-- The one place a sheet is renamed. The rail lists names as
+                     text, like a workbook's tabs; renaming is customizing, so
+                     the field lives on the customize head, in rule 14's recipe. -->
+                <label class="field convert-sheet-field"><span class="field-prefix">sheet</span><input id="convert-detail-name" spellcheck="false" aria-label="Sheet name"></label>
                 <span id="convert-detail-src"></span>
                 <span class="spacer"></span>
                 <!-- Rule 10: target CSV rewrites the SELECTED table's columns,

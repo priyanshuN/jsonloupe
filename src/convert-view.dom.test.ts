@@ -64,7 +64,7 @@ function makeHarness(saved: SavedMapping[] = []): Harness {
   const starter = draftSpec(inspection);
   const count = node('div');
   const tables = node('div');
-  const detailName = node('div');
+  const detailName = node('input');
   const detailSrc = node('div');
   const cols = node('div');
   const previewNote = node('div');
@@ -252,7 +252,7 @@ describe('converter view workflow', () => {
       expect(rows[1 - index].getAttribute('aria-selected')).toBe('false');
       expect(rows[1 - index].tabIndex).toBe(-1);
       expect(document.activeElement).toBe(rows[index]);
-      expect(h.els.detailName.textContent).toBe(name);
+      expect(h.els.detailName.value).toBe(name);
     };
 
     rows[0].focus();
@@ -281,28 +281,27 @@ describe('converter view workflow', () => {
     let rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
     rows[1].click();
     expect(rows[1].getAttribute('aria-selected')).toBe('true');
-    expect(h.els.detailName.textContent).toBe('items');
+    expect(h.els.detailName.value).toBe('items');
 
     const include = rows[0].querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     include.click();
     expect(include.checked).toBe(false);
     expect(rows[1].getAttribute('aria-selected')).toBe('true');
-    expect(h.els.detailName.textContent).toBe('items');
+    expect(h.els.detailName.value).toBe('items');
 
-    const name = rows[0].querySelector<HTMLInputElement>('.convert-name')!;
-    name.click();
-    keydown(name, 'ArrowDown');
-    expect(rows[1].getAttribute('aria-selected')).toBe('true');
-    expect(h.els.detailName.textContent).toBe('items');
-    name.value = 'shipments';
-    change(name);
+    // The rail lists names as text, like sheet tabs; the open sheet is renamed
+    // in the sheet field, and the rail follows without moving the selection.
+    expect(rows[0].querySelector('.convert-name')?.tagName).toBe('SPAN');
+    h.els.detailName.value = 'shipments';
+    change(h.els.detailName);
 
     rows = [...h.els.tables.querySelectorAll<HTMLElement>('.convert-table')];
     expect(rows[1].getAttribute('aria-selected')).toBe('true');
-    expect(h.els.detailName.textContent).toBe('items');
+    expect(rows[1].querySelector('.convert-name')?.textContent).toBe('shipments');
+    expect(h.els.detailName.value).toBe('shipments');
     rows[0].querySelector<HTMLElement>('.convert-where')!.click();
     expect(rows[0].getAttribute('aria-selected')).toBe('true');
-    expect(h.els.detailName.textContent).toBe('shipments');
+    expect(h.els.detailName.value).not.toBe('shipments');
   });
 
   it('opens a real mapping and keeps table, column, format, and preview edits connected', async () => {
@@ -340,11 +339,9 @@ describe('converter view workflow', () => {
 
     h.els.tables.querySelectorAll<HTMLElement>('.convert-table')[1].click();
     await settlePreview();
-    expect(h.els.detailName.textContent).toBe('items');
-    const tableName = h.els.tables.querySelectorAll<HTMLElement>('.convert-table')[1]
-      .querySelector<HTMLInputElement>('.convert-name')!;
-    tableName.value = 'line_items';
-    change(tableName);
+    expect(h.els.detailName.value).toBe('items');
+    h.els.detailName.value = 'line_items';
+    change(h.els.detailName);
     await settlePreview();
     expect(h.view.effective()?.tables[1].name).toBe('line_items');
 
@@ -374,6 +371,33 @@ describe('converter view workflow', () => {
     await settlePreview();
     expect(h.view.effective()?.tables[1].columns.map((column) => column.name))
       .toEqual(['sku_code', 'quantity', 'warehouse']);
+  });
+
+  it('keeps a column to one line, with its settings one click away and its problems always shown', async () => {
+    const h = makeHarness();
+    await h.view.open();
+    await settlePreview();
+
+    const row = h.els.cols.querySelector<HTMLElement>('.convert-col')!;
+    const more = row.querySelector<HTMLButtonElement>('.convert-col-more')!;
+    const settings = row.querySelector<HTMLElement>('.convert-col-options')!;
+    // A plain column with default settings starts closed.
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(settings.hidden).toBe(true);
+    expect(more.getAttribute('aria-controls')).toBe(settings.id);
+    more.click();
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    expect(settings.hidden).toBe(false);
+
+    // A problem sits outside the settings, so a closed row still says it.
+    more.click();
+    h.setPreview('errors');
+    h.els.arrayJoin.value = ',';
+    input(h.els.arrayJoin);
+    await settlePreview();
+    const problem = h.els.cols.querySelector<HTMLElement>('.convert-col-error')!;
+    expect(problem.hidden).toBe(false);
+    expect(problem.closest('.convert-col-options')).toBeNull();
   });
 
   it('surfaces preview and conversion failures, then downloads both supported formats', async () => {
