@@ -267,7 +267,7 @@ library keeps 100 functions and 100 checks; a playbook that would not fit is
 refused whole, rather than pushing your oldest ones out.
 
 Scripts run in an ephemeral worker with `fetch`, `XMLHttpRequest`, WebSockets,
-IndexedDB and `importScripts` removed before any user code, terminated on its
+IndexedDB, `importScripts` and nested workers removed before any user code, terminated on its
 result or after ten seconds — a pasted script cannot reach the network or the
 documents you have opened. `JavaScript` number mode preserves the behavior of
 existing functions and says when a document contains values it will round.
