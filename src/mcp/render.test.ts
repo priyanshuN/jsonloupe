@@ -35,6 +35,16 @@ describe('cap', () => {
     expect(out.slice(0, at)).toBe(text.slice(0, at));
     expect(out.slice(at)).toMatch(new RegExp(`^\\n…truncated \\(showing \\d+ of ${text.length} chars\\)\\. Narrow the query\\.$`));
   });
+
+  it('states the number of characters it actually kept', () => {
+    // The count is settled against the notice's own length; built from the
+    // pass before, it said 9939 and kept 9940.
+    for (const size of [RESPONSE_CAP + 1, RESPONSE_CAP * 3, 123_456_789]) {
+      const out = cap('z'.repeat(size));
+      expect(out).toHaveLength(RESPONSE_CAP);
+      expect(Number(/showing (\d+) of/.exec(out)?.[1])).toBe(out.indexOf('\n…truncated'));
+    }
+  });
 });
 
 describe('renderError', () => {

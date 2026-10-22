@@ -24,14 +24,18 @@ export function cap(text: string): string {
   if (text.length <= RESPONSE_CAP) return text;
   const total = text.length;
   // The notice states how much was shown, and its own length changes that
-  // number, so settle it: two passes are always enough at these magnitudes.
+  // number, so settle it: recompute until the count it states is the count it
+  // leaves room for. Only the count's digit width can move it, so this stops
+  // within a pass or two. Stopping after a fixed two, the notice was built from
+  // the previous pass's count and said 9939 with 9940 shown.
+  const noticeFor = (n: number) => `\n…truncated (showing ${n} of ${total} chars). Narrow the query.`;
   let shown = RESPONSE_CAP;
-  let notice = '';
-  for (let pass = 0; pass < 2; pass++) {
-    notice = `\n…truncated (showing ${shown} of ${total} chars). Narrow the query.`;
-    shown = RESPONSE_CAP - notice.length;
+  for (let pass = 0; pass < 4; pass++) {
+    const fits = RESPONSE_CAP - noticeFor(shown).length;
+    if (fits === shown) break;
+    shown = fits;
   }
-  return text.slice(0, shown) + notice;
+  return text.slice(0, shown) + noticeFor(shown);
 }
 
 function lines(...parts: (string | false | undefined)[]): string {
