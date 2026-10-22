@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
-import { defineConfig, type Plugin } from 'vite';
+import type { Plugin } from 'vite';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -71,6 +72,12 @@ export default defineConfig({
   // Pages deploys, local dev, and the npx static server all use '/'.
   base: '/',
   plugins: [keyServer()],
+  test: {
+    // Claude Code keeps agent worktrees under .claude/worktrees, each a full
+    // checkout with its own test files. Without this, `npm test` in the main
+    // checkout runs every copy, and coverage fails on another branch's tests.
+    exclude: [...configDefaults.exclude, '.claude/**'],
+  },
   build: {
     // Static entries: the app/landing, the standalone spec page, the styleguide
     // (the contract's stare page — rule 23), and the converter landing. The
