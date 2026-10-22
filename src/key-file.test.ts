@@ -36,6 +36,19 @@ describe('parseKeyFile', () => {
     expect(parseKeyFile('ANTHROPIC_API_KEY=\n')).toBeNull();
   });
 
+  it('never reads the line after an empty known variable as its key', () => {
+    // The next line is somebody else's secret, and a key that is not sk-ant-
+    // is sent to OpenRouter as a bearer token.
+    expect(parseKeyFile('OPENROUTER_API_KEY=\nDATABASE_URL=postgres://u:p@h/db\n')).toBeNull();
+    expect(parseKeyFile('ANTHROPIC_API_KEY=\n\nSECRET=xyz\n')).toBeNull();
+    expect(parseKeyFile('OPENROUTER_API_KEY=\nANTHROPIC_API_KEY=sk-ant-123\n')).toBe('sk-ant-123');
+  });
+
+  it('ends an unquoted value at an inline comment', () => {
+    expect(parseKeyFile('OPENROUTER_API_KEY=sk-or-v1-abc # mine\n')).toBe('sk-or-v1-abc');
+    expect(parseKeyFile('OPENROUTER_API_KEY= # fill me in\nANTHROPIC_API_KEY=sk-ant-xyz\n')).toBe('sk-ant-xyz');
+  });
+
   it('returns null for multi-word text that is not a key file', () => {
     expect(parseKeyFile('this is a shopping list\nnot a key\n')).toBeNull();
   });

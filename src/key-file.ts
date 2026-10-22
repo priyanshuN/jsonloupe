@@ -11,8 +11,12 @@ const ENV_NAMES = ['OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY'];
 /** Extract an API key from key-file text. Returns null when none is found. */
 export function parseKeyFile(text: string): string | null {
   for (const name of ENV_NAMES) {
-    const m = text.match(new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*["']?([^"'\\r\\n]+)`, 'm'));
-    const value = m?.[1].trim();
+    // `[ \t]`, never `\s`: `\s` also matches a newline, so an EMPTY known
+    // variable would read the whole next line — another variable's secret — as
+    // its key, and nl.ts sends anything not `sk-ant-` to OpenRouter. An
+    // unquoted value ends at an inline ` # comment`, as it does in dotenv.
+    const m = text.match(new RegExp(`^[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=[ \\t]*["']?([^"'\\r\\n]+)`, 'm'));
+    const value = m?.[1].replace(/(?:^|[ \t])#.*$/, '').trim();
     if (value) return value;
   }
   const raw = text.trim();
