@@ -2334,11 +2334,13 @@ function tableInit(id: number): { ok: boolean; cols?: string[]; count?: number; 
   let hasPrimitive = false;
   for (const item of v.slice(0, 500)) {
     if (isPlainObject(item)) {
+      // The cap is on the table, not on each record: checked per key, a break
+      // here only left this record and every later one added another column.
       for (const k of Object.keys(item)) {
+        if (cols.length >= 40) break;
         if (!seen.has(k)) {
           seen.add(k);
           cols.push(k);
-          if (cols.length >= 40) break;
         }
       }
     } else {

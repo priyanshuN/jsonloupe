@@ -1499,6 +1499,14 @@ describe('CSV export (U2)', () => {
     expect(csv('table').text).toBe('a\r\n1\r\n2\r\n3\r\n');
   });
 
+  it('table init: caps the column union at 40 across records, not per record', () => {
+    const wide = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`k${i}`, i]));
+    parse(JSON.stringify([wide, { x: 1 }, { y: 1 }]));
+    const init = tableInit(rows()[0].id);
+    expect(init.cols).toHaveLength(40);
+    expect(init.cols).not.toContain('x');
+  });
+
   it('query export: pluck rows carry the query column order + lossless cells', () => {
     parse('{"tasks":[{"id":1234567890123456789,"eta":50},{"id":7,"eta":60}]}');
     expect(query('$.tasks[*] | pluck(@.id, @.eta)').kind).toBe('rows');
