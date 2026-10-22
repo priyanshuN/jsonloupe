@@ -2838,6 +2838,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--text-dim);
   font-size: var(--fs-body);
   line-height: 1.45;
+  text-wrap: pretty;
 }
 #model-dialog-close {
   border: 0;
@@ -2960,7 +2961,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-.model-choice-row input { margin: 0; }
+/* Rule 7 has no styled radio, so the native one takes the accent the way the
+   transport baseline checkbox does — stock blue was the one off-palette mark
+   in the dialog. */
+.model-choice-row input { margin: 0; accent-color: var(--accent); }
 .model-choice-copy {
   display: flex;
   flex-direction: column;
@@ -3241,6 +3245,9 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   color: var(--text-dim);
   font-size: var(--fs-body);
   line-height: 1.45;
+  /* Two-sentence ledes in a 560px dialog: without it the second sentence's
+     last word ("left.") wrapped onto a line of its own. */
+  text-wrap: pretty;
 }
 .baseline-x, .transport-x {
   border: 0;
@@ -5386,10 +5393,16 @@ mark.hl {
 .compare-right { border-left: 1px solid var(--border); }
 .compare-left { border-right: 1px solid var(--border); }
 .compare-indent { flex: 0 0 auto; }
+/* The tree's .caret recipe at the compare row's narrower width: micro size,
+   centred in its box. A left-aligned row-size glyph rotates about the BOX's
+   centre, not its own, so every open caret rode up and right of the closed
+   ones beside it — the ▾ sat a superscript above its own key. */
 .compare-caret {
   width: 14px;
   flex: 0 0 14px;
   color: var(--text-faint);
+  font-size: var(--fs-micro);
+  text-align: center;
   transition: transform var(--dur) var(--ease);
 }
 .compare-caret.open { transform: rotate(90deg); }
@@ -5560,9 +5573,12 @@ mark.hl {
 
 /* ---------- toast & drop ---------- */
 
+/* Clear of rule 19's 32px status line, plus a gap: at 26px the toast sat
+   across the strip's top hairline, so a floating card read as torn into the
+   app's bottom edge. */
 #toast {
   position: fixed;
-  bottom: 26px;
+  bottom: calc(32px + var(--gap-2));
   left: 50%;
   transform: translateX(-50%);
   background: var(--bg-elevated);
@@ -5723,7 +5739,7 @@ mark.hl {
 .convert-col-options select,
 .convert-link-name { min-height: var(--ctl-h-mini); }
 /* Rule 14 owns the inset; the bar owns the width. */
-.convert-map-name { width: 150px; }
+.convert-map-name { width: 180px; }
 #convert-saved { max-width: 170px; }
 
 #convert-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
@@ -5950,9 +5966,13 @@ mark.hl {
   color: var(--danger);
 }
 
-/* 40%, from 48%: with one line per column the editor rarely needs its cap,
-   and when a wide table does, the preview keeps the larger share. */
-#convert-cols { overflow-y: auto; padding: var(--gap-2) var(--gap-3); max-height: 40%; }
+/* Content-sized up to half the column. The cap was 40% so a wide table's
+   preview kept the larger share, but the cap bit on SHORT tables too: at a
+   1280x800 laptop the sample's seven columns were cut off after four while the
+   two-row preview under them sat over 250px of empty canvas. Half is the split
+   where neither side starves once both overflow; below it the list takes only
+   what it needs and #convert-preview's flex: 1 hands the rest to the rows. */
+#convert-cols { overflow-y: auto; padding: var(--gap-2) var(--gap-3); max-height: 50%; }
 /* The common path is inspect, choose a format and download. Column plumbing is
    useful, but it no longer occupies half the view until Customize is opened. */
 #convert-view:not(.customizing) #convert-cols-head,
@@ -6000,14 +6020,20 @@ mark.hl {
 .convert-col-options input:where(:not([type='checkbox'])) { width: 150px; padding: 0 var(--gap-2); }
 /* Without min-width the datetime format list ('yyyy-MM-dd HH:mm:ss') sets the
    flex line's floor and pushes the row past its own max-width. */
-.convert-col-options select { max-width: 180px; min-width: 0; }
+.convert-col-options select { max-width: 200px; min-width: 0; }
 /* Rule 14's standing-label pattern (.field > .field-prefix) supplies the shell,
    the label and the focus ring; only the width is local to the bar. */
 /* The field is as wide as its label plus room for the value. A fixed 150px
    held the label alone — `missing values` took all of it and the value got
    0-2px, so the field read as an empty caps box with nothing to type into. */
 .convert-inline-field { flex: 0 0 auto; width: auto; min-width: 0; }
-.convert-inline-field > input { flex: 1 0 6ch; }
+/* The width is the field's intrinsic size, not just its basis: a bare input
+   reports its 20-character default as max-content, so each of these two shells
+   came out ~300px wide and pushed `name` and its field onto separate rows of
+   the strip at a 1280px window — the label ended one row, the box it names
+   began the next. 6ch, the basis it already had, holds a separator or a short
+   default and still grows with the row once the strip has width to give. */
+.convert-inline-field > input { flex: 1 0 6ch; width: 6ch; }
 .convert-link-name { width: 130px; padding: 0 var(--gap-2); }
 /* A label wrapping a field, not a caption, so it takes --text-dim's floor —
    the same call .convert-col-options gets above. */
