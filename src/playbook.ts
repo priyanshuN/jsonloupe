@@ -153,6 +153,34 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   };
 }
 
+/**
+ * Why `playbook` will not fit beside a library already holding `have`, or null
+ * when it fits.
+ *
+ * The library keeps only the newest `limit` of each kind and culls the rest on
+ * every write (db.ts), and imported entries are stamped newest — so a playbook
+ * that overflows would quietly delete the OLDEST functions someone wrote, the
+ * exact loss merge-never-replace exists to rule out. All or nothing: this is
+ * asked before the first write. Every import is a new record (collisions are
+ * renamed, never overwritten), so comparing counts is exact.
+ */
+export function playbookRoomError(
+  playbook: Playbook,
+  have: { functions: number; checks: number },
+  limit: number,
+): string | null {
+  for (const [kind, incoming, held] of [
+    ['function', playbook.functions.length, have.functions],
+    ['check', playbook.checks.length, have.checks],
+  ] as const) {
+    const room = Math.max(0, limit - held);
+    if (incoming > room) {
+      return `${incoming} ${kind}${incoming === 1 ? '' : 's'}, and your library has room for ${room} more — remove some of yours first`;
+    }
+  }
+  return null;
+}
+
 /** The file, pretty-printed — a playbook is meant to be read and diffed. */
 export function serializePlaybook(playbook: Playbook): string {
   return `${JSON.stringify(playbook, null, 2)}\n`;

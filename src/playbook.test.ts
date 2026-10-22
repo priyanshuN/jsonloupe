@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
-import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
+import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, PLAYBOOK_VERSION, type Playbook } from './playbook';
 
 const FILE = serializePlaybook({
   playbookVersion: PLAYBOOK_VERSION,
@@ -121,5 +121,36 @@ describe('looksLikePlaybook', () => {
   it('only looks at the head of a large file', () => {
     const document = `{"rows":[${'{"a":1},'.repeat(5000)}{"a":2}],"playbookVersion":1}`;
     expect(looksLikePlaybook(document)).toBe(false);
+  });
+});
+
+describe('playbookRoomError', () => {
+  const book = (functions: number, checks = 0): Playbook => ({
+    playbookVersion: PLAYBOOK_VERSION,
+    functions: Array.from({ length: functions }, (_, i) => ({ name: `shared ${i}`, script: `data.s${i}`, numberMode: 'js' })),
+    checks: Array.from({ length: checks }, (_, i) => ({
+      name: `check ${i}`,
+      query: '$.orders',
+      expectation: { type: 'no-matches' },
+    })),
+  });
+
+  it('lets a playbook fill the library exactly to its cap', () => {
+    expect(playbookRoomError(book(10, 2), { functions: 90, checks: 98 }, 100)).toBeNull();
+    expect(playbookRoomError(book(0), { functions: 100, checks: 100 }, 100)).toBeNull();
+  });
+
+  // Saving past the cap culls the oldest entries, so a playbook that does not
+  // fit would delete functions its new owner wrote while reporting a full import.
+  it('refuses a playbook that would push the oldest functions out', () => {
+    expect(playbookRoomError(book(10), { functions: 95, checks: 0 }, 100))
+      .toBe('10 functions, and your library has room for 5 more — remove some of yours first');
+    expect(playbookRoomError(book(120), { functions: 0, checks: 0 }, 100)).toContain('room for 100 more');
+  });
+
+  it('refuses one that would push the oldest checks out, and never reports negative room', () => {
+    expect(playbookRoomError(book(1, 1), { functions: 0, checks: 100 }, 100))
+      .toBe('1 check, and your library has room for 0 more — remove some of yours first');
+    expect(playbookRoomError(book(1), { functions: 140, checks: 0 }, 100)).toContain('room for 0 more');
   });
 });

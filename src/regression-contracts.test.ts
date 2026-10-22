@@ -569,6 +569,15 @@ describe('interactive UI regression contracts', () => {
     expect(load.indexOf('if (runInFlight) {')).toBeGreaterThan(-1);
     expect(load.indexOf('if (runInFlight) {')).toBeLessThan(load.indexOf('adoptScript(rec)'));
   });
+
+  it('checks a playbook fits the library before importing any of it', () => {
+    const imp = mainSource.match(/async function importPlaybookText\([\s\S]*?^\}/m)?.[0] ?? '';
+    const check = imp.indexOf('playbookRoomError(res.playbook');
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(imp.indexOf('await store.saveScript('));
+    expect(check).toBeLessThan(imp.indexOf('await store.saveCheck('));
+    expect(imp).toContain('store.KEEP_SAVED');
+  });
 });
 
 describe('document identity regression contracts', () => {

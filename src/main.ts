@@ -97,7 +97,7 @@ import type { SavedCheck, SavedScript } from './db';
 import { evaluateCheck, expectationText, type CheckExpectation } from './check';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
-import { parsePlaybook, serializePlaybook, looksLikePlaybook, PLAYBOOK_VERSION } from './playbook';
+import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, PLAYBOOK_VERSION } from './playbook';
 import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 import { CommandPalette, type PaletteCommand } from './palette';
@@ -6632,7 +6632,15 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
     showToast(`${fileName}: ${res.error}`, 'bad');
     return false;
   }
-  const taken = (await store.listScripts()).map((s) => s.name);
+  const scripts = await store.listScripts();
+  const checks = await store.listChecks();
+  // Past the library's cap, saving culls the oldest — refused before any write.
+  const full = playbookRoomError(res.playbook, { functions: scripts.length, checks: checks.length }, store.KEEP_SAVED);
+  if (full) {
+    showToast(`${fileName}: ${full}`, 'bad');
+    return false;
+  }
+  const taken = scripts.map((s) => s.name);
   let renamed = 0;
   for (const fn of res.playbook.functions) {
     const name = uniqueScriptName(fn.name, taken);
@@ -6640,7 +6648,7 @@ async function importPlaybookText(text: string, fileName: string): Promise<boole
     taken.push(name);
     await store.saveScript(name, fn.script, fn.reads, fn.numberMode);
   }
-  const takenChecks = (await store.listChecks()).map((check) => check.name);
+  const takenChecks = checks.map((check) => check.name);
   for (const check of res.playbook.checks) {
     const name = uniqueScriptName(check.name, takenChecks);
     if (name !== check.name) renamed++;

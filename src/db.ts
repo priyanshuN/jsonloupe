@@ -390,7 +390,7 @@ export interface SavedCheck {
 
 type SavedRecord = SavedQuery | SavedScript | SavedCheck;
 
-const KEEP_SAVED = 100;
+export const KEEP_SAVED = 100;
 
 function isScript(rec: SavedRecord): rec is SavedScript {
   return (rec as SavedScript).kind === 'script';
