@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { DocPool, MAX_DOCS, type DocHost, type DocRequest } from './pool';
 import { runDocOp, type AsyncEngine, type Engine } from './doc-ops';
 import { RESPONSE_CAP } from './render';
@@ -77,6 +78,7 @@ describe('tool definitions', () => {
       'diff_docs',
       'export_csv',
       'export_result',
+      'run_checks',
     ]);
   });
 
@@ -117,7 +119,7 @@ describe('tool definitions', () => {
   });
 
   it('lets single-document tools open a file directly without adding more top-level tools', () => {
-    for (const name of ['get_schema', 'run_query', 'profile', 'sample', 'export_csv', 'export_result']) {
+    for (const name of ['get_schema', 'run_query', 'profile', 'sample', 'export_csv', 'export_result', 'run_checks']) {
       const schema = TOOLS.find((item) => item.name === name)!.inputSchema;
       expect(schema.properties.filePath).toMatchObject({ type: 'string' });
       expect(schema.anyOf).toEqual([{ required: ['docId'] }, { required: ['filePath'] }]);
@@ -587,6 +589,280 @@ describe('exact digits survive the whole pipeline', () => {
     const r = await call('diff_docs', { docIdA: 'd2', docIdB: 'd1', keySpec: 'id' });
     expect(r.text).toContain('d2 → d1: 1 changed, 0 added, 0 removed');
     expect(r.text).toContain('~ $.tasks[0].status\t"PENDING" → "FAILED"');
+  });
+});
+
+// ---------- checks ----------
+
+describe('run_checks', () => {
+  const FAILED = { name: 'no failed tasks', query: "$.tasks[?(@.status == 'FAILED')]", expectation: { type: 'no-matches' } };
+  const ANY = { name: 'has tasks', query: '$.tasks[*]', expectation: { type: 'at-least-one' } };
+  const STATUSES = { name: 'few statuses', query: '$.tasks[*] | group(@.status)', expectation: { type: 'between', min: 1, max: 4 } };
+
+  async function playbookFile(body: Record<string, unknown>): Promise<string> {
+    const path = join(dir, `pb-${Math.random().toString(36).slice(2)}.json`);
+    await writeFile(path, JSON.stringify({ playbookVersion: 4, functions: [], ...body }));
+    return path;
+  }
+
+  it('answers a passing run inline, as a successful call', async () => {
+    await load(DOC);
+    const r = await call('run_checks', { docId: 'd1', checks: [ANY, STATUSES] });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/^checks: 2 · 2 passed · \d+ ms\n/);
+    expect(r.text).toContain('✓ has tasks — Pass — 2 matches; expected at least one match');
+    expect(r.text).toContain('✓ few statuses — Pass — 2 groups; expected between 1 and 4 groups');
+    expect(r.structuredContent).toMatchObject({
+      ok: true,
+      tool: 'run_checks',
+      verdict: 'pass',
+      total: 2,
+      passed: 2,
+      failed: 0,
+      inconclusive: 0,
+      errored: 0,
+      functionsSkipped: 0,
+      failing: [],
+      checks: [
+        { name: 'has tasks', verdict: 'pass', observed: 2, exact: true, unit: 'match', evidence: [] },
+        { name: 'few statuses', verdict: 'pass', observed: 2, unit: 'group', expected: 'between 1 and 4 groups' },
+      ],
+    });
+  });
+
+  it('reports a failing check as data, with its first paths, still ok:true', async () => {
+    await load(DOC);
+    const r = await call('run_checks', { docId: 'd1', checks: [ANY, FAILED] });
+    expect(r.isError).toBe(false);
+    // Failures lead the text even though the playbook listed them second.
+    expect(r.text.split('\n').slice(1)).toEqual([
+      '✕ no failed tasks — Fail — 1 match; expected no matches',
+      '    $.tasks[0]\t{ id, status } · 2 keys',
+      '✓ has tasks — Pass — 2 matches; expected at least one match',
+    ]);
+    expect(r.structuredContent).toMatchObject({
+      ok: true,
+      verdict: 'fail',
+      failed: 1,
+      failing: ['no failed tasks'],
+      // Structured checks stay in playbook order.
+      checks: [{ name: 'has tasks' }, { name: 'no failed tasks', evidence: [{ path: '$.tasks[0]' }] }],
+    });
+  });
+
+  it('runs a playbook file, and says its functions were not run', async () => {
+    const playbookPath = await playbookFile({
+      functions: [
+        { name: 'one', script: 'globalThis.ran = 1', numberMode: 'js' },
+        { name: 'two', script: 'globalThis.ran = 2', numberMode: 'js' },
+      ],
+      checks: [ANY, FAILED],
+    });
+    await load(DOC);
+    const r = await call('run_checks', { docId: 'd1', playbookPath });
+    expect(r.isError).toBe(false);
+    expect(r.text.split('\n').at(-1)).toBe('functions: 2 not run (checks only)');
+    expect(r.structuredContent).toMatchObject({ functionsSkipped: 2, verdict: 'fail' });
+    expect((globalThis as { ran?: number }).ran).toBeUndefined();
+  });
+
+  it('answers in one call from filePath and keeps the document for the next', async () => {
+    const filePath = join(dir, 'checks-one-shot.json');
+    await writeFile(filePath, DOC);
+    const r = await call('run_checks', { filePath, checks: [ANY] });
+    expect(r.text).toMatch(/^docId: d1\nchecks: 1 · 1 passed/);
+    expect(r.structuredContent).toMatchObject({ docId: 'd1', verdict: 'pass' });
+    expect(pool.list()).toHaveLength(1);
+  });
+
+  it('refuses a file that parses only after repair, as the CLI does, unless allowRepair says so', async () => {
+    // jsonrepair closes a truncated export, so the third task is simply gone.
+    const filePath = join(dir, 'truncated-tasks.json');
+    await writeFile(filePath, '{"tasks":[{"id":1,"status":"OK"},{"id":2,"status":"OK"},{"id":3,"status":"FAI');
+    const refused = await call('run_checks', { filePath, checks: [FAILED] });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('error: not valid JSON; it can be repaired, but a gate should not pass a broken file');
+    expect(refused.text).toContain('allowRepair=true');
+    expect(pool.list()).toEqual([]);
+
+    // A docId remembers its load was repaired.
+    const loaded = await call('load_doc', { path: filePath });
+    expect(loaded.text).toContain('repaired: true');
+    const docId = loaded.structuredContent.docId as string;
+    expect((await call('run_checks', { docId, checks: [FAILED] })).isError).toBe(true);
+    const allowed = await call('run_checks', { docId, checks: [FAILED], allowRepair: true });
+    expect(allowed.isError).toBe(false);
+    expect(allowed.text).toMatch(/^repaired: true — not valid JSON; verdicts describe the repaired document\nchecks: 1/);
+    expect(allowed.structuredContent).toMatchObject({ repaired: true, verdict: 'pass' });
+
+    // Valid JSON says so too, so a reader never has to infer it.
+    await load(DOC);
+    expect((await call('run_checks', { docId: 'd3', checks: [ANY] })).structuredContent).toMatchObject({ repaired: false });
+  });
+
+  it('settles a bad playbook before opening any document', async () => {
+    const filePath = join(dir, 'never-opened.json');
+    await writeFile(filePath, DOC);
+    const send = vi.fn();
+    pool = new DocPool(() => ({ send, close: async () => undefined }));
+    router = new ToolRouter(pool);
+    const r = await call('run_checks', { filePath, checks: [{ ...ANY, expectation: { type: 'at-least', count: 0 } }] });
+    expect(r).toMatchObject({ isError: true, text: 'error: invalid checks: check 1 (`has tasks`) has an invalid `expectation`' });
+    expect(send).not.toHaveBeenCalled();
+    expect(pool.list()).toEqual([]);
+  });
+
+  it('takes exactly one of playbookPath and checks', async () => {
+    await load(DOC);
+    const playbookPath = await playbookFile({ checks: [ANY] });
+    for (const args of [{ docId: 'd1' }, { docId: 'd1', playbookPath, checks: [ANY] }]) {
+      expect((await call('run_checks', args)).text).toBe('error: run_checks needs exactly one of playbookPath or checks');
+    }
+    expect((await call('run_checks', { docId: 'd1', checks: 'all' })).text)
+      .toBe('error: run_checks checks must be a list of {name, query, expectation}');
+  });
+
+  it('passes the playbook reader’s own message to the caller', async () => {
+    await load(DOC);
+    const stray = await playbookFile({ checks: [ANY], owner: 'ops' });
+    expect((await call('run_checks', { docId: 'd1', playbookPath: stray })).text)
+      .toContain('error: not a playbook jsonloupe can run: unknown field `owner`');
+    const v3 = join(dir, 'v3-playbook.json');
+    await writeFile(v3, JSON.stringify({ playbookVersion: 3, functions: [], checks: [STATUSES] }));
+    expect((await call('run_checks', { docId: 'd1', playbookPath: v3 })).text)
+      .toContain('uses `between`, which needs playbookVersion 4');
+    const missing = await call('run_checks', { docId: 'd1', playbookPath: join(dir, 'no-such-playbook.json') });
+    expect(missing.text).toContain('error: could not read playbook: ENOENT');
+  });
+
+  it('reads a playbook saved with a UTF-8 BOM, as the browser imports it', async () => {
+    await load(DOC);
+    const bom = join(dir, 'bom-playbook.json');
+    const text = JSON.stringify({ playbookVersion: 4, functions: [], checks: [ANY] });
+    await writeFile(bom, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]));
+    const r = await call('run_checks', { docId: 'd1', playbookPath: bom });
+    expect(r.isError).toBe(false);
+    expect(r.structuredContent).toMatchObject({ verdict: 'pass', total: 1 });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a device or FIFO as the playbook instead of reading it without end', async () => {
+    await load(DOC);
+    const fifo = join(dir, 'playbook.fifo');
+    execFileSync('mkfifo', [fifo]);
+    for (const playbookPath of ['/dev/zero', fifo]) {
+      const r = await call('run_checks', { docId: 'd1', playbookPath });
+      expect(r.isError, playbookPath).toBe(true);
+      expect(r.text).toContain(`error: could not read playbook: ${playbookPath} is not a regular file`);
+    }
+  });
+
+  it('refuses a playbook too large to be one, before reading it', async () => {
+    await load(DOC);
+    const big = join(dir, 'huge-playbook.json');
+    await writeFile(big, `{"rows":[${'1,'.repeat(600_000)}1]}`);
+    const r = await call('run_checks', { docId: 'd1', playbookPath: big });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('the playbook is over 1 MB');
+    expect(r.text).toContain('the document to check goes in filePath or docId');
+  });
+
+  it('refuses no checks and more than a library holds', async () => {
+    await load(DOC);
+    expect((await call('run_checks', { docId: 'd1', checks: [] })).text).toBe('error: run_checks needs at least one check');
+    const onlyFunctions = await playbookFile({ functions: [{ name: 'f', script: 'return 1', numberMode: 'js' }] });
+    expect((await call('run_checks', { docId: 'd1', playbookPath: onlyFunctions })).text)
+      .toBe('error: the playbook has no checks — its functions are JavaScript and are never run here');
+    const many = Array.from({ length: 101 }, (_, i) => ({ ...ANY, name: `check ${i}` }));
+    expect((await call('run_checks', { docId: 'd1', checks: many })).text)
+      .toBe('error: run_checks runs at most 100 checks per call; this has 101');
+    const manyInFile = await playbookFile({ checks: many });
+    expect((await call('run_checks', { docId: 'd1', playbookPath: manyInFile })).text)
+      .toBe('error: run_checks runs at most 100 checks per call; this playbook has 101');
+  });
+
+  it('marks a query that cannot count as could-not-run and still runs the others', async () => {
+    await load(DOC);
+    const r = await call('run_checks', {
+      docId: 'd1',
+      checks: [
+        { name: 'sum of ids', query: '$.tasks[*] | sum(@.id)', expectation: { type: 'at-least-one' } },
+        { name: 'typo', query: '$.tasks[?(@.status = 1)]', expectation: { type: 'no-matches' } },
+        ANY,
+      ],
+    });
+    expect(r.isError).toBe(false);
+    expect(r.structuredContent).toMatchObject({
+      verdict: 'inconclusive',
+      errored: 2,
+      passed: 1,
+      failing: ['sum of ids', 'typo'],
+      checks: [
+        { verdict: 'error', observed: null, error: expect.stringContaining('`| sum` gives one value, not a count') },
+        { verdict: 'error', observed: null },
+        { verdict: 'pass' },
+      ],
+    });
+    expect(r.text).toContain('✗ sum of ids — Could not run — `| sum` gives one value');
+  });
+
+  it('matches an int64 exactly, and shows it with every digit', async () => {
+    await load(DOC);
+    const r = await call('run_checks', {
+      docId: 'd1',
+      checks: [
+        { name: 'the int64 task', query: `$.tasks[?(@.id == ${INT64})]`, expectation: { type: 'exact-count', count: 1 } },
+        { name: 'no ids', query: '$.tasks[*].id', expectation: { type: 'no-matches' } },
+      ],
+    });
+    expect(r.structuredContent).toMatchObject({
+      checks: [
+        { verdict: 'pass', observed: 1 },
+        { verdict: 'fail', observed: 2, evidence: [{ path: '$.tasks[0].id', preview: INT64 }, { path: '$.tasks[1].id' }] },
+      ],
+    });
+    expect(r.text).toContain(`$.tasks[0].id\t${INT64}`);
+  });
+
+  it('limits paths per check to maxEvidence, at most 20', async () => {
+    await load(wideDoc(40));
+    const none = { name: 'no tasks', query: '$.tasks[*]', expectation: { type: 'no-matches' } };
+    const evidenceOf = async (maxEvidence?: number) =>
+      ((await call('run_checks', { docId: 'd1', checks: [none], maxEvidence })).structuredContent.checks as {
+        evidence: unknown[];
+      }[])[0].evidence.length;
+    expect(await evidenceOf()).toBe(3);
+    expect(await evidenceOf(0)).toBe(0);
+    expect(await evidenceOf(7)).toBe(7);
+    expect(await evidenceOf(500)).toBe(20);
+  });
+
+  it('keeps the counts and failing names when 100 failures overflow the cap', async () => {
+    await load(wideDoc(50));
+    const checks = Array.from({ length: 100 }, (_, i) => ({
+      name: `every task is gone, check number ${String(i).padStart(3, '0')} ${'·'.repeat(120)}`,
+      query: '$.tasks[*]',
+      expectation: { type: 'no-matches' },
+    }));
+    const r = await call('run_checks', { docId: 'd1', checks, maxEvidence: 20 });
+    expect(r.isError).toBe(false);
+    expect(r.text).toHaveLength(RESPONSE_CAP);
+    expect(r.text).toContain('…truncated');
+    const structured = r.structuredContent;
+    expect(JSON.stringify(structured).length).toBeLessThanOrEqual(RESPONSE_CAP);
+    expect(structured).toMatchObject({
+      ok: true,
+      tool: 'run_checks',
+      structuredTruncated: true,
+      verdict: 'fail',
+      total: 100,
+      failed: 100,
+      passed: 0,
+      hint: expect.stringContaining('the counts and failing names are kept'),
+    });
+    const failing = structured.failing as string[];
+    expect(failing.length).toBeGreaterThan(10);
+    expect(failing[0]).toBe(checks[0].name);
+    expect(structured).not.toHaveProperty('checks');
   });
 });
 

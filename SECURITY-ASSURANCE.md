@@ -52,6 +52,8 @@ identity of published packages. Relevant threats are:
 - a hostile website attempting loopback or DNS-rebinding access;
 - an untrusted or compromised model response;
 - a script copied from an untrusted source into the explicit Run surface;
+- a playbook from a coworker, a repository, or a model, handed to the CLI or
+  MCP server;
 - a caller supplying unsafe paths or oversized work to CLI/MCP;
 - a compromised dependency, publishing credential, or release channel;
 - accidental maintainer mistakes that violate a documented invariant.
@@ -65,9 +67,10 @@ identity of published packages. Relevant threats are:
 | DOM | Document/model strings | Browser rendering | `createElement`/`textContent`; no executable DOM sink |
 | Ask provider | OAuth code, user question, and document shape | External HTTPS provider | PKCE authorization, tab-only credential default, explicit enablement, visible payload, fixed provider URLs, constrained query parser |
 | Run worker | User-approved script and a plain-JSON document copy | Ephemeral execution worker | Network/storage/import capabilities removed, input shape checked, first-result termination and timeout |
+| Playbook in CLI/MCP | Playbook file or inline checks | Query engine | Parsed as declarative data, unknown fields refused, before any document is opened; at most 100 checks; functions counted and never executed |
 | Dev key endpoint | HTTP Host/Origin | Local key file | Loopback Host and expected Origin checks occur before file access |
 | Spreadsheet | Exported cells | CSV/XLSX consumer | Formula-prefix neutralization, exact numeric rules, format-limit reporting |
-| MCP/CLI filesystem | Client-supplied paths | Local files | Explicit paths, bounded reads, same-directory temporary output, overwrite flag |
+| MCP/CLI filesystem | Client-supplied paths | Local files | Explicit paths, bounded reads, same-directory temporary output, overwrite flag; playbook paths are read only when supplied, only as regular files, and never past 1 MB |
 | Release | Source/workflow identity | npm consumer | GitHub OIDC trusted publishing, npm registry signature, Sigstore/SLSA provenance |
 
 ## Secure-design argument
@@ -85,11 +88,15 @@ them after the fact.
 
 Document strings render as text nodes. Model output is parsed through a small
 query grammar before the project's deterministic engine evaluates it. Converter
-mappings are validated declarative data. The separate Run surface executes only
-code a user explicitly places in its editor, inside a fresh capability-stripped
-worker that is terminated after a result or timeout. These separations counter
-DOM XSS, prompt-to-code execution, and configuration-as-code injection without
-misrepresenting Run as a non-code feature.
+mappings and playbook checks are validated declarative data. The separate Run
+surface executes only code a user explicitly places in its editor, inside a
+fresh capability-stripped worker that is terminated after a result or timeout.
+The CLI and MCP server never execute a playbook's functions: Node has no
+equivalent sandbox, so `jsonloupe check` and `run_checks` count them and report
+them as not run, and the `check` bundle is tested to contain no code evaluator.
+These separations counter DOM XSS, prompt-to-code execution, and
+configuration-as-code injection without misrepresenting Run as a non-code
+feature.
 
 ### Fail closed at narrow boundaries
 
@@ -117,8 +124,8 @@ assertions are enabled throughout the run.
 
 - **Injection and XSS:** DOM sinks use text APIs; document and model content
   cannot reach a code constructor; the explicit Run constructors are isolated
-  in a capability-stripped worker; CSV formula prefixes are neutralized across
-  data and headers.
+  in a capability-stripped worker, and the CLI and MCP never run playbook
+  functions; CSV formula prefixes are neutralized across data and headers.
 - **Request forgery and DNS rebinding:** the only local credential endpoint
   validates loopback Host and Origin before file access and is absent from
   production builds.

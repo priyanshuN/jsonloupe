@@ -36,6 +36,9 @@
        ⚠ arriving in full emoji colour on three platforms. Characters survive
        only where they are universally covered and carry no weight of their own
        — ⋯ ×, the ▸ ▾ carets (load-bearing at 13px in a mono column) and ★ ☆.
+       The verdict marks are TEXT, not icons, and the same five everywhere a
+       check is judged: ✓ pass, ✕ fail, ? inconclusive, ✗ could not run, ◇ no
+       verdict yet (playbook-run.ts VERDICT_MARK, added to 2026-10-25).
        An icon inside a button centres on the CONTROL's box, never on the text
        baseline: button:has(> .ic) is a flex row, which is what made the old
        arrows sit a pixel low against their own labels.
@@ -210,6 +213,14 @@
        after the run and told you to do what you had just done. A status line
        that reads a control back to you is deleted, not restyled — what stays
        is what no control on screen already says.
+       STATUS INK SITS ONLY ON A CANVAS GROUND THAT DOES NOT CHANGE (2026-10-25,
+       measured): --warn on chrome is 3.97:1 in light and --danger on a hovered
+       or --bg-sel row 3.76–4.03, so a row that hovers or can be selected keeps
+       its verdict mark in a canvas lead cell beside the hovered button (the
+       playbook's .run-lib-mark), and a tier-2 verdict carries --bg-canvas of
+       its own wherever it lands on chrome. The linter checks these inks on
+       canvas only; the playbook's axe scan over a hovered ✕ row is the guard
+       for the rest.
    16. The inline pill has TWO SHAPES, split by whether clicking does anything.
        STATIC TAG — 4px radius, --bg-inset, no border: byte weights, count
        badges. It is a label, so it gets no affordance. ACTIONABLE CHIP —
@@ -428,9 +439,13 @@
   /* Rule 15's three tiers. The -soft pair is the tier-3 FILL, so it only ever
      appears on a state you must respond to — --warn-soft has no user today
      because nothing warn-coloured is currently blocking, and it stays declared
-     so the next one does not invent a fill of its own. */
+     so the next one does not invent a fill of its own. --danger-ink is the
+     words ON that fill: --danger on its own soft fill measured 4.39:1 here and
+     4.33 in light, under the 4.5 floor, so the two defaults lift it a step
+     (lint-checked on the composite); every named scheme already cleared it. */
   --danger: #e06c75;
   --danger-soft: rgba(224, 108, 117, 0.14);
+  --danger-ink: #e8808a;
   --ok: #a3be8c;
   --warn: #e6b35c;
 
@@ -526,6 +541,7 @@
 
   --danger: #cf3450;
   --danger-soft: rgba(207, 52, 80, 0.09);
+  --danger-ink: #bf2a45;
   --ok: #227a4b;
   --warn: #a56a00;
 
@@ -611,6 +627,7 @@
   --accent-fill-hover: #11709b;
   --danger: #fe869b;
   --danger-soft: rgba(254, 134, 155, 0.14);
+  --danger-ink: #fe869b;
   --ok: #9ece6a;
   --warn: #e0af68;
   --c-key: #82aafe;
@@ -670,6 +687,7 @@
   --accent-fill-hover: #7d53b4;
   --danger: #ff8982;
   --danger-soft: rgba(255, 137, 130, 0.14);
+  --danger-ink: #ff8982;
   --ok: #50fa7b;
   --warn: #f1fa8c;
   --c-key: #8be9fd;
@@ -729,6 +747,7 @@
   --accent-fill-hover: #7d59a4;
   --danger: #f38ba8;
   --danger-soft: rgba(243, 139, 168, 0.14);
+  --danger-ink: #f38ba8;
   --ok: #a6e3a1;
   --warn: #f9e2af;
   --c-key: #89b4fa;
@@ -789,6 +808,7 @@
   --accent-fill-hover: #886301;
   --danger: #fe9281;
   --danger-soft: rgba(254, 146, 129, 0.14);
+  --danger-ink: #fe9281;
   --ok: #b8bb26;
   --warn: #fabd2f;
   --c-key: #94b7a9;
@@ -849,6 +869,7 @@
   --accent-fill-hover: #1167c8;
   --danger: #ff6258;
   --danger-soft: rgba(255, 98, 88, 0.14);
+  --danger-ink: #ff6258;
   --ok: #3fb950;
   --warn: #d29922;
   --c-key: #7ee787;
@@ -908,6 +929,7 @@
   --accent-fill-hover: #036ead;
   --danger: #bd0112;
   --danger-soft: rgba(189, 1, 18, 0.09);
+  --danger-ink: #bd0112;
   --ok: #566304;
   --warn: #765800;
   --c-key: #00619a;
@@ -967,6 +989,7 @@
   --accent-fill-hover: #7d27e1;
   --danger: #b7022f;
   --danger-soft: rgba(183, 2, 47, 0.09);
+  --danger-ink: #b7022f;
   --ok: #196800;
   --warn: #814f02;
   --c-key: #014cd7;
@@ -1026,6 +1049,7 @@
   --accent-fill-hover: #76608e;
   --danger: #93465d;
   --danger-soft: rgba(147, 70, 93, 0.09);
+  --danger-ink: #93465d;
   --ok: #23647e;
   --warn: #855305;
   --c-key: #23647e;
@@ -1085,6 +1109,7 @@
   --accent-fill-hover: #015ec7;
   --danger: #c51125;
   --danger-soft: rgba(197, 17, 37, 0.09);
+  --danger-ink: #c51125;
   --ok: #00732b;
   --warn: #865a03;
   --c-key: #116329;
@@ -1299,7 +1324,10 @@ a:focus-visible,
 }
 /* Press darkens instead of moving — a data tool should not bounce. */
 button:active { background: var(--btn-bg-active); }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* aria-disabled is the same state for a button that must keep focus while it
+   is not answering — the playbook's `run all` while its batch runs. */
+button:disabled,
+button[aria-disabled='true'] { opacity: 0.45; cursor: not-allowed; }
 
 /* Rule 3: the icon set. The sprite is a definitions-only <svg> — it must take
    no space and paint nothing itself; only its <symbol>s are ever rendered,
@@ -1574,6 +1602,15 @@ select:focus {
 }
 .chk:checked, .cm-panel.cm-search input[type='checkbox']:checked { background: var(--accent); border-color: var(--accent); }
 .chk:checked::after, .cm-panel.cm-search input[type='checkbox']:checked::after { opacity: 1; }
+/* Some, not all — a box heading a list of ticks: the same fill, a bar for the
+   tick. */
+.chk:indeterminate { background: var(--accent); border-color: var(--accent); }
+.chk:indeterminate::after {
+  height: 0;
+  border-left: 0;
+  transform: none;
+  opacity: 1;
+}
 
 /* ---------- headings & empty states ---------- */
 
@@ -3660,11 +3697,10 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* Rule 11: an inline strip bordered against a pane — chrome, like every other
    bar, not a floating surface. It was --bg-elevated, so once the toolbar went
    tinted this panel stayed white directly beneath it: two full-width strips,
-   touching, different colours, for no reason. The run mode's producer strip
-   shares the recipe because it IS this strip, docked over its own pane instead
-   of over all of them. */
-#ask-panel,
-#run-producer {
+   touching, different colours, for no reason. The playbook's dock shared this
+   recipe until 2026-10-25; it carries verdict ink now, so it stands on canvas
+   (see #run-producer). */
+#ask-panel {
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
   /* Rule 11's strip geometry, like every other bar between the toolbar and the
@@ -3814,12 +3850,17 @@ button.ask-meta {
   padding: 2px var(--gap-2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
+  /* Rule 15's canvas clause: in the Query panel this sits on chrome, where a
+     fail measured 4.34:1 in light and an inconclusive would be 3.97. Its own
+     canvas ground keeps both over 4.5 wherever it lands. */
+  background: var(--bg-canvas);
   color: var(--text-dim);
   font-size: var(--fs-body);
 }
 .ask-verdict[hidden] { display: none; }
 .ask-verdict.pass { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
 .ask-verdict.fail { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.ask-verdict.inconclusive { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 
 #check-editor {
   display: flex;
@@ -3833,20 +3874,60 @@ button.ask-meta {
 }
 #check-editor[hidden] { display: none; }
 #check-name { flex: 1 1 22ch; }
-#check-expectation { flex: 0 1 34ch; font-family: var(--sans); }
-#check-count { width: 12ch; }
-#check-preview {
-  flex: 1 1 100%;
+/* The pass-condition picker and its count boxes, here and in the playbook's
+   dock: one recipe, so both editors measure alike. */
+/* 44ch holds the longest condition ("…at most this many matches are found")
+   with the select's own arrow; narrower, the sentence ends in an ellipsis. */
+#check-expectation,
+#pb-check-expectation { flex: 0 1 44ch; min-width: 0; font-family: var(--sans); }
+/* The dock's row breaks on basis, so the condition asks for less and grows to
+   its measure: with `between`, both counts stay on the condition's line. */
+#pb-check-expectation { flex: 1 1 30ch; max-width: 44ch; }
+#check-count,
+#check-count-max,
+#pb-check-count,
+#pb-check-count-max { width: 12ch; flex-shrink: 0; }
+#check-preview,
+#pb-check-preview {
   color: var(--text-dim);
   font-size: var(--fs-body);
 }
-#check-preview.pass { color: var(--ok); }
-#check-preview.fail { color: var(--danger); }
-.check-chip.pass { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
-.check-chip.fail { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+/* A line of its own in the card's wrapping row. The dock is a column, where a
+   100% basis would be the dock's height. */
+#check-preview { flex: 1 1 100%; }
+/* Both previews stand on canvas (the editor card, the dock), so the verdict
+   inks keep rule 15's canvas clause. */
+#check-preview.pass,
+#pb-check-preview.pass { color: var(--ok); }
+#check-preview.fail,
+#pb-check-preview.fail,
+#check-preview.invalid,
+#pb-check-preview.invalid { color: var(--danger); }
+#check-preview.inconclusive,
+#pb-check-preview.inconclusive { color: var(--warn); }
+.check-chip.v-pass { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.check-chip.v-fail,
+.check-chip.v-error { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.check-chip.v-inconclusive { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .check-chip .check-mark { font-weight: 700; }
-.check-chip.pass .check-mark { color: var(--ok); }
-.check-chip.fail .check-mark { color: var(--danger); }
+.check-chip.v-pass .check-mark { color: var(--ok); }
+.check-chip.v-fail .check-mark,
+.check-chip.v-error .check-mark { color: var(--danger); }
+.check-chip.v-inconclusive .check-mark { color: var(--warn); }
+/* From before you edited this document, as the sheet draws it: the glyph
+   stays, faint, and the verdict's hue and hairline go. */
+.check-chip.stale .check-mark { color: var(--text-faint); }
+/* The chip's name is a real button now, so the keyboard reaches it; it wears
+   the chip's own text and none of a button's chrome. */
+.check-chip-run {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.check-chip-run:hover { background: none; }
 
 /* live preview: same layout, marked provisional */
 #ask-result.preview {
@@ -3870,15 +3951,18 @@ button.ask-meta {
    pipeline card it closes is already the container, and a bordered card inside
    a bordered card is what made the receipt outrank the answer. The run
    console keeps the shell: it stands on chrome with nothing around it, and a
-   card sitting ON chrome takes the canvas (rule 11's corollary). */
-#run-console {
+   card sitting ON chrome takes the canvas (rule 11's corollary). A function's
+   own console in its playbook row is the same receipt. */
+#run-console,
+.pb-console {
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-canvas);
   padding: 5px 9px;
 }
 #ask-disclosure > summary,
-#run-console > summary {
+#run-console > summary,
+.pb-console > summary {
   cursor: pointer;
   user-select: none;
   color: var(--text-dim);
@@ -3894,7 +3978,8 @@ button.ask-meta {
 /* Rule 14: --bg-inset + --border-strong is the read-only OUTPUT surface, and
    this is the other one — what the model will be sent, verbatim. */
 .disc-pre,
-#run-console-body {
+#run-console-body,
+.pb-console-body {
   flex: 1;
   min-width: 0;
   margin: 0;
@@ -3917,7 +4002,7 @@ button.ask-meta {
 .ask-error,
 #run-error {
   padding: var(--gap-2) 10px;
-  color: var(--danger);
+  color: var(--danger-ink);
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
   border-radius: var(--r-sm);
@@ -3944,10 +4029,6 @@ button.ask-meta {
 }
 .ask-table th { color: var(--c-key); font-weight: 700; }
 #ask-result .hit { padding: 3px 0; }
-/* Run mode's saved chips still wrap into a block; the Query panel's two lists
-   are one non-wrapping scrolling rail in the head row (.ask-kept > div), so
-   they are deliberately not in this selector any more. */
-#run-saved { display: flex; flex-wrap: wrap; gap: 6px; }
 /* Rule 16, the ACTIONABLE CHIP: clicking it re-runs the query, so it wears the
    same fully-round canvas shape as .crumb-chip rather than a third radius. */
 .ask-chip {
@@ -3976,28 +4057,73 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .chip-del { border-radius: 10px; border: none; color: var(--text-dim); background: transparent; box-shadow: none; }
 .chip-del:hover { color: var(--danger); }
 
-/* ---------- run mode: producer strip + result pane ---------- */
+/* ---------- the playbook view: bar, dock, sheet, result ---------- */
 
-/* The phone-only source/workspace switch is a shell control, not a third Run
-   state. Desktop continues to show both panes and never pays for this row. */
+/* The phone-only source/playbook switch is a shell control, not a third
+   state. Desktop shows both panes and never pays for this row. */
 #run-mobile-switch { display: none; }
 
-/* The producer strip's box and its failure line are still the ask panel's,
-   shared by selector above rather than restated here — they are the same strip.
-   What is left is the script box, the facts only the runner has, and the column
-   the two of them stand in. */
+/* The dock's narration is a real one — it reports elapsed time and the shape
+   a sandbox returned, and the guard sentences of a two-press discard, which no
+   control on the dock says. */
+#run-status {
+  display: block;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+  font-style: italic;
+}
+/* Empty, it stays in the accessibility tree — a live region has to exist
+   before its words change — but out of the dock's column and its gap. */
+#run-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 
-/* The runner's narration is a real one — it reports elapsed time and the shape
-   a sandbox returned, which no control on that strip says. The Query panel's
-   twin was deleted with this redesign (it read back the button beside it), so
-   this recipe is now the run strip's alone rather than a shared rule. */
-#run-status { color: var(--text-dim); font-size: var(--fs-body); font-style: italic; }
-
-/* The strip is a scrolling column (it shares #ask-panel's max-height), so its
-   bands keep their own height and the STRIP scrolls. Without this the script
-   box is the thing that gives when a long error or console arrives, and the six
-   rows you were typing in collapse to one. */
-#run-producer > * { flex-shrink: 0; }
+/* THE DOCK — present only while a check or a function is being written.
+   Canvas, not chrome: its preview carries verdict ink, and rule 15 keeps that
+   ink on canvas (the converter's detail is the precedent). The hairline is
+   --border-strong because it is the sheet's top edge too: the reading surface
+   below it is a different thing from the form above it. Never glass — rule
+   25 never frosts the canvas. */
+#run-producer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  padding: var(--gap-2) var(--gap-3);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-canvas);
+  max-height: 46vh;
+  overflow-y: auto;
+}
+/* Query open over the view stacks above both panes; the dock gives way so the
+   sheet keeps a few rows. */
+#viewer[data-pane='run']:has(#ask-panel:not([hidden])) #run-producer { max-height: 30vh; }
+/* The dock is a scrolling column, so its bands keep their own height and the
+   DOCK scrolls. Without this the script box is the thing that gives when a
+   long error or console arrives, and the six rows you were typing in collapse
+   to one. */
+#run-producer > *,
+#pb-check-body > *,
+#pb-fn-body > * { flex-shrink: 0; }
+#pb-check-body,
+#pb-fn-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+}
+/* The pass condition reads as one sentence: the query on its own line (it is
+   the longest thing here), then the condition and its counts. */
+.check-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-2);
+}
+.pb-query-field { flex: 1 1 100%; }
+.pb-query-field > input { font-family: var(--mono); }
 
 /* Rule 15 tier 2 — ink AND a hairline: this function reads something the open
    document does not have, which you want to notice BEFORE reading a plausible
@@ -4007,9 +4133,9 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 .run-remark {
   display: flex;
   align-items: center;
-  /* The strip is a column, so a block child would stretch the hairline across
-     the whole pane and read as a banner. It is a remark: it is as wide as what
-     it says, like the `unsaved` and `re-run` marks. */
+  /* A column parent would stretch the hairline across the whole pane and read
+     as a banner. It is a remark: it is as wide as what it says, like the
+     `unsaved` and `re-run` marks. */
   align-self: flex-start;
   max-width: 100%;
   gap: var(--gap-1);
@@ -4076,32 +4202,13 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
    scroller, not the shell, is what scrolls. */
 #run-editor .cm-editor { flex: 1 1 auto; min-height: 0; max-height: 100%; }
 #run-editor .cm-scroller { font: inherit; overflow-y: auto; }
-/* Run is a compact commit in the stable function header. The editor keeps its
-   full width and no longer resembles a chat/search field with a submit button
-   embedded in its corner. */
-#run-exec { flex-shrink: 0; padding-inline: var(--gap-2); }
+#run-exec { flex-shrink: 0; }
 
-/* The head row: the one thing in this column that never moves. It names the
-   function that is loaded and carries the single action the current state has
-   — so it is a control row, on the strip's own ground rather than a bar of its
-   own (the strip IS the bar; rule 11's geometry is already on #run-producer). */
+/* The dock's head: one row for both kinds. The kind stands inside the name
+   field as its prefix (rule 14), so the head says what you are writing
+   without a label of its own. */
 .run-head { display: flex; align-items: center; gap: var(--gap-2); }
-/* Rule 22: the loaded function outranks the controls beside it the way the
-   active document does in the sidebar — by ink, not by a third weight. */
-.run-name {
-  color: var(--text);
-  font-size: var(--fs-base);
-  /* min-width: a derived name is a whole first line of code now, and a flex
-     item refuses to shrink below its content without this — the ellipsis
-     below only ever fires once the span is allowed to be narrower. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Rule 14's field recipe. It is the SAME slot the name label stands in, so it
-   holds the same measure rather than stretching the row. */
-.run-name-input { max-width: 32ch; flex: 1; }
+.run-name-field { flex: 1 1 16ch; max-width: 40ch; min-width: 12ch; }
 /* Rule 15 tier 2 — ink and a hairline: work that would be lost is worth
    noticing before you press something else, and no louder than that. */
 #run-dirty {
@@ -4112,12 +4219,14 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   font: var(--fs-chip) var(--mono);
   white-space: nowrap;
 }
-#run-status { display: block; }
 
-/* The right column: producer strip on top, result pane under it. It is a PANE,
-   so it takes the pane area's geometry and its own hairline against the source
-   half — the same seam the divider draws in split, minus the drag. */
+/* The right column. It is a PANE, so it takes the pane area's geometry and its
+   own hairline against the source half — the same seam the divider draws in
+   split, minus the drag. Its own container, so the narrow rules below key on
+   the column rather than the window: the sidebar and the split decide how
+   wide this is, not the viewport. */
 #run-pane {
+  container: playbook / inline-size;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4125,18 +4234,28 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 
 /* Rule 10, revised: a pane bar, because there genuinely are two panes here —
-   the result's ops act on the RESULT, not on the document, so they cannot ride
-   the toolbar. Same geometry as .tree-bar / .code-bar, one baseline across the
-   seam. */
+   its ops act on the playbook or the result, not on the document, so they
+   cannot ride the toolbar. Same geometry as .tree-bar / .code-bar, one
+   baseline across the seam. It may wrap — the designed-overflow exception
+   the halved bars already take — so no control is ever pushed out of reach. */
 .run-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  row-gap: 0;
   min-height: var(--bar-h);
   padding: var(--bar-pad-y) var(--gap-3);
   border-bottom: 1px solid var(--border);
   background: var(--bg-chrome);
 }
+#pb-heading { flex-shrink: 0; }
+/* The measure is a name, not the column: rule 14 gives it the rest. */
+/* The bar breaks lines on BASIS, before anything shrinks, so find asks for
+   14ch and grows to its 24ch measure out of the room that is left — at 1280
+   a 24ch basis was what pushed run all onto a second row. */
+.run-lib-search { flex: 1 1 14ch; max-width: 24ch; min-width: 10ch; }
+#pb-run-all { flex-shrink: 0; }
 /* Rule 13: the count moves 9 → 99 → 999 between runs and must not ripple. */
 #run-result-label {
   color: var(--text-dim);
@@ -4146,58 +4265,100 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 /* Rule 15 tier 2 — ink AND a hairline: the result on screen is not this
    document's any more. It never re-runs by itself, so it has to be noticeable
-   without being loud. */
+   without being loud. Its own canvas: --warn on the chrome bar is 3.97:1 in
+   light, on canvas 4.51. */
 #run-stale {
   padding: 2px var(--gap-2);
   color: var(--warn);
+  background: var(--bg-canvas);
   border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
   border-radius: var(--r-sm);
   font: var(--fs-chip) var(--mono);
   white-space: nowrap;
 }
-/* Quiet tier via .btn-quiet on each button — see the tier block up top. */
 
-/* ---------- the functions face: the library ---------- */
+/* ---------- the playbook face: the sheet ---------- */
 
 /* The column's other face. It fills the same box the result does, because the
-   two are never on screen together — before a run there is no result, and after
-   one the result wants the height. */
+   two are never on screen together. */
 #run-library {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
-/* Rule 13: this count moves 9 → 99 as the library grows and while a search
-   narrows it. */
-#run-lib-count {
-  color: var(--text-dim);
-  font: var(--fs-chip) var(--mono);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* The measure is a function's name, not the column: rule 14 gives it
-   everything else. */
-.run-lib-search { max-width: 24ch; }
-/* The list is a reading surface, like every other pane in this app. */
+/* The sheet is a reading surface, like every other pane in this app. */
 #run-lib-list {
   flex: 1;
   min-height: 0;
   overflow: auto;
   background: var(--bg-canvas);
 }
-.run-lib-row {
-  position: relative;
+
+/* A section head is a sticky column header (rule 11): canvas, with the strong
+   edge, and bounded by its own section, so the FUNCTIONS head pushes the
+   CHECKS head off rather than stacking under it. Its lead cell is the rows'
+   34px column, so the label starts where the names do. */
+.pb-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: var(--gap-2);
+  min-height: var(--head-h);
   padding-right: var(--gap-3);
-  border-bottom: 1px solid var(--border);
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--border-strong);
 }
-.run-lib-row:hover { background: var(--bg-hover); }
+.pb-lead {
+  flex: 0 0 34px;
+  align-self: stretch;
+  /* With the head's gap this lands the label on the names' column: the rows
+     indent their names by --gap-3 past the same 34px. */
+  margin-right: var(--gap-1);
+}
+/* Rule 2's SECTION LABEL rank — the keys sheet's and the palette's groups. */
+.pb-label {
+  flex-shrink: 0;
+  font: 400 var(--fs-label) var(--mono);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+/* Rule 13: the counts move as a run lands. The marks in it take their hue —
+   the head is canvas — and the words keep the line's own ink. */
+.pb-head-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--fs-chip);
+  font-variant-numeric: tabular-nums;
+}
+.pb-mark { font-weight: 700; }
+.pb-mark.v-pass { color: var(--ok); }
+.pb-mark.v-fail,
+.pb-mark.v-error { color: var(--danger); }
+.pb-mark.v-inconclusive,
+.pb-warn { color: var(--warn); }
+.pb-mark.v-not-run { color: var(--text-faint); }
+.pb-head .btn-mini,
+.pb-head .tb-chip { flex-shrink: 0; }
+
+/* One item: its row and, when it is open, its details. The hairline is the
+   item's, so an open row and its panel read as one thing. */
+.pb-item { border-bottom: 1px solid var(--border); }
+.run-lib-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
 /* Rule 18: an inset 2px left bar means SELECTED, here as everywhere — this is
-   the function the editor is bound to. Inset, so a selected row cannot shift
-   its own content. */
+   the item the dock is writing. Inset, so a selected row cannot shift its own
+   content. */
 .run-lib-row.selected::before {
   content: '';
   position: absolute;
@@ -4206,15 +4367,36 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   bottom: 0;
   width: 2px;
   background: var(--accent);
+  z-index: 1;
 }
-/* Rule 7's checkbox, and it is NOT hover-revealed like the delete beside it: a
-   tick that disappears when the pointer leaves cannot be counted by eye, and
-   counting them is the whole point of it.
-   THE TARGET IS THE COLUMN, NOT THE BOX. A 14px box inside a 38px row means
-   most of the space around it belonged to the row, so a near-miss aimed at the
-   cheapest act in the panel (ticking) performed the most expensive one
-   (running). The zone spans the row's full height and a comfortable width; the
-   box is only what it draws. */
+/* A check's lead cell: the verdict mark, on a canvas ground that never
+   changes — the button beside it hovers, this does not (rule 15's canvas
+   clause). The same 34px as a function's tick column, so every name in the
+   sheet starts on one line. */
+.run-lib-mark {
+  flex: 0 0 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-canvas);
+  color: var(--text-faint);
+  font: 700 var(--fs-body) var(--mono);
+}
+.run-lib-mark.v-pass { color: var(--ok); }
+.run-lib-mark.v-fail,
+.run-lib-mark.v-error { color: var(--danger); }
+.run-lib-mark.v-inconclusive { color: var(--warn); }
+.run-lib-mark.v-running { color: var(--text-dim); }
+/* A verdict from before you edited this document: the same glyph and words,
+   faint — present, but no longer about what is on screen. */
+.run-lib-row.stale .run-lib-mark,
+.run-lib-row.stale .pb-outcome > * { color: var(--text-faint); }
+
+/* Rule 7's checkbox, and it is NOT hover-revealed: a tick that disappears when
+   the pointer leaves cannot be counted by eye, and counting them is the whole
+   point of it. THE TARGET IS THE COLUMN, NOT THE BOX: a near-miss aimed at the
+   cheapest act in the sheet (ticking) used to perform the most expensive one
+   (running). The zone spans the row's full height; the box is what it draws. */
 .run-lib-pickzone {
   display: flex;
   align-items: center;
@@ -4223,27 +4405,25 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   width: 34px;
   flex-shrink: 0;
   cursor: pointer;
+  /* The column is DRAWN, not just present: one hairline makes the boundary
+     visible at rest — left of this line ticks, right of it opens. */
+  border-right: 1px solid var(--border);
 }
-/* The column is DRAWN, not just present. A hover tint alone could not say it —
-   the row lights up on hover too, so the two were indistinguishable and the
-   column still read as a checkbox floating in a row. One hairline makes the
-   boundary visible at rest, which is the whole claim: left of this line ticks,
-   right of it runs. Its hover then needs a ground of its own, one step off the
-   row's, or it disappears back into it. */
-.run-lib-pickzone { border-right: 1px solid var(--border); }
 .run-lib-pickzone:hover { background: var(--bg-inset); }
 .run-lib-pick { pointer-events: none; }
 
-/* The rest of the row is the press: loading a function and running it are one
-   act, so the name, its first line and the hit area are one button rather than
-   a label with a play control beside it. */
+/* The rest of the row is one button: it opens the row's details (the
+   disclosure pattern). Name, outcome and caret share one line: names start on
+   one column down the sheet, the outcome keeps one right edge, and when the
+   two do not fit they give way in proportion — never the name to nothing.
+   Only this button hovers — never the mark cell beside it. */
 .run-lib-open {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: baseline;
-  gap: var(--gap-2);
-  padding: var(--gap-2);
+  align-items: center;
+  column-gap: var(--gap-3);
+  padding: var(--gap-2) var(--gap-2) var(--gap-2) var(--gap-3);
   min-height: 38px;
   border: none;
   border-radius: 0;
@@ -4251,22 +4431,37 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   box-shadow: none;
   text-align: left;
 }
-.run-lib-open:hover { background: none; }
+.run-lib-open:hover { background: var(--bg-hover); border-color: transparent; }
+/* Rule 5's ring, drawn inside: the sheet scrolls, and a ring outside a
+   full-width row is cut by its edges. */
+.run-lib-open:focus-visible { outline-offset: -2px; }
+.pb-names {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* A name keeps a readable start however long the outcome beside it is. */
+  min-width: min(40%, 22ch);
+}
+.pb-name-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-2);
+  min-width: 0;
+}
 .run-lib-name {
   color: var(--text);
   font-size: var(--fs-base);
-  /* Same shrink permission as .run-name: a never-named function's name IS its
-     first line, at full length, and must ellipsise rather than push the row. */
+  /* A never-named function's name IS its first line, at full length, and must
+     ellipsise rather than push the row. */
   min-width: 0;
-  flex-shrink: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* What the function has to say about itself: its first line, dimmed, and the
-   first thing to give up width when the column is narrow. */
-.run-lib-note {
-  flex: 1;
+.run-lib-row.misfit .run-lib-name { color: var(--text-dim); }
+/* Collapsed and not passing: where to look first, one rank under the name. */
+.pb-first {
   min-width: 0;
   color: var(--text-faint);
   font: var(--fs-chip) var(--mono);
@@ -4274,33 +4469,151 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.run-lib-meta {
+/* Rule 16's STATIC TAG: a fact about the function, with no affordance. */
+.pb-tag {
+  flex-shrink: 0;
+  padding: 0 var(--gap-1);
+  border-radius: var(--r-xs);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font: var(--fs-micro) var(--mono);
+}
+/* The outcome: the figure in the row's own ink and what was expected one rank
+   quieter. Never hue — this sits inside a button that hovers; the verdict's
+   hue is the mark's, on canvas. Rule 13: figures stack in a column. */
+.pb-outcome {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font: var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.pb-expected,
+.pb-misfit,
+.pb-fail-mark { color: var(--text-dim); }
+.pb-pending { color: var(--text-faint); }
+/* A function's scalar result is a JSON VALUE, so it wears its syntax ink
+   (rule 18) — linted on the hover ground as well as on canvas. */
+.pb-value.c-string { color: var(--c-string); }
+.pb-value.c-number { color: var(--c-number); }
+.pb-value.c-boolean { color: var(--c-boolean); }
+.pb-value.c-null { color: var(--c-null); }
+.pb-caret {
+  flex: 0 0 16px;
   color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+  text-align: center;
+}
+
+/* An open row's details: canvas, never hoverable as a block, indented to the
+   names' column so the panel reads as the row's own. */
+.pb-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-2);
+  padding: var(--gap-1) var(--gap-3) var(--gap-3) calc(34px + var(--gap-3));
+  background: var(--bg-canvas);
+}
+.pb-detail > .ask-error { align-self: stretch; }
+.pb-note,
+.pb-summary {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+}
+.pb-summary {
+  font: var(--fs-chip) var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.pb-script {
+  color: var(--text-dim);
+  font: var(--fs-chip) var(--mono);
+}
+/* A labelled line: the standing label (rule 14's device above a value), then
+   the value. */
+.pb-line {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  max-width: 100%;
+  min-width: 0;
+}
+.pb-query {
+  min-width: 0;
+  color: var(--text);
+  font: var(--fs-body) var(--mono);
+  overflow-wrap: anywhere;
+}
+.pb-matched {
+  color: var(--text-dim);
   font-size: var(--fs-chip);
   font-variant-numeric: tabular-nums;
+}
+/* The matched paths, each one press from the tree. A button per path, with
+   its preview a rank under it; the one revealed last carries rule 18's bar. */
+.pb-evidence-list {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-width: 0;
+}
+.pb-evidence {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--gap-3);
+  /* Stacked flush, so each is its own whole target: 24px is WCAG 2.5.8's
+     floor, which a 22px mini control meets only by the spacing around it. */
+  min-height: calc(var(--ctl-h-mini) + 2px);
+  padding: 2px var(--gap-2);
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  text-align: left;
+}
+button.pb-evidence:hover { background: var(--bg-hover); border-color: transparent; }
+button.pb-evidence:focus-visible { outline-offset: -2px; }
+.pb-evidence.on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+.pb-ev-path {
+  color: var(--text);
+  font: var(--fs-body) var(--mono);
   white-space: nowrap;
 }
-/* Rule 15 tier 1 in a LIST: ink only. A row that reads something this document
-   lacks is worth seeing while scanning, but it is still a perfectly good
-   function — dimming the name or barring the row would read as broken. The
-   head's tier 2 line carries the weight once the function is loaded. */
-.run-lib-row.misfit .run-lib-name { color: var(--text-dim); }
-.run-lib-meta.misfit-note { color: var(--warn); }
-/* Rule 20: HOVER REVEALS, IT NEVER REFLOWS. The gutter is reserved on every
-   row, always, and the control fades in — and it answers to :focus-within too,
-   because hover is not a state a keyboard can enter. */
-.run-lib-del {
-  opacity: 0;
-  visibility: hidden;
-  color: var(--text-dim);
-  transition: opacity var(--dur) var(--ease);
+.pb-ev-preview {
+  min-width: 0;
+  color: var(--text-faint);
+  font: var(--fs-chip) var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.run-lib-row:hover .run-lib-del,
-.run-lib-row:focus-within .run-lib-del {
-  opacity: 1;
-  visibility: visible;
+.pb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-1);
+  margin-left: calc(-1 * var(--gap-2));
 }
-.run-lib-del:hover { color: var(--danger); }
+.pb-hint {
+  padding: 0 var(--gap-2);
+  color: var(--text-faint);
+  font-size: var(--fs-chip);
+}
+.pb-console { align-self: stretch; }
 
 /* The result IS a document surface: same canvas, same gutter stripe, same
    virtualized layer as #tree-viewport (see the note there for why the stripe is
@@ -4344,6 +4657,40 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
 }
 
 #run-console-body { max-height: 24vh; margin-top: 7px; }
+.pb-console-body { max-height: 24vh; margin-top: 7px; }
+
+/* Narrow columns, measured on the column itself. Under 600 (1280 with the
+   sidebar open) the heads keep their counts and drop the time into the title;
+   under 480 the bar takes two rows and a fail drops "expected …" to its panel
+   and its accessible name; under 420 a row's outcome moves under its name. */
+@container playbook (max-width: 600px) {
+  .pb-when { display: none; }
+}
+@container playbook (max-width: 480px) {
+  .run-bar > .spacer { flex-basis: 100%; }
+  .run-head { flex-wrap: wrap; }
+  .run-head > .spacer { flex-basis: 100%; }
+  /* The second row keeps the first row's right edge: a face's ops, and the
+     dock's buttons, end where they did on one line. */
+  #run-import,
+  #run-copy,
+  #pb-cancel { margin-left: auto; }
+  .pb-expected { display: none; }
+}
+@container playbook (max-width: 420px) {
+  /* Name and caret on the first line, the outcome on its own line under the
+     name. */
+  .run-lib-open {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .pb-caret { order: 1; }
+  .pb-outcome {
+    order: 2;
+    flex-basis: 100%;
+  }
+  .pb-detail { padding-left: var(--gap-3); }
+}
 
 /* ---------- download: naming the file ---------- */
 
@@ -4428,6 +4775,10 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   min-width: 0;
 }
 #pane-area.split > #tree-pane { flex: 0 0 var(--split-w, 50%); }
+/* The playbook column takes a little more than half — its rows carry a name,
+   an outcome and a caret where the source carries one line of JSON — and stops
+   growing at 760, past which a row is mostly air between name and figure. */
+#pane-area.run > #run-pane { flex: 0 0 min(56%, 760px); }
 
 /* A handle you can grab, not a seam that happens to be draggable. It was a 7px
    slab painted --border with the code pane adding its own 1px --border on top:
@@ -6469,13 +6820,15 @@ mark.hl {
   #run-pane { border-left: 0; }
   .run-head,
   .run-bar { flex-wrap: wrap; }
-  .run-name-input,
+  .run-name-field,
   .run-lib-search {
     flex: 1 1 150px;
     max-width: none;
     min-width: 0;
   }
   .run-bar > .spacer { flex-basis: 100%; }
+  #run-import,
+  #run-copy { margin-left: auto; }
   #run-producer {
     max-height: 52vh;
     max-height: 52dvh;
@@ -6631,6 +6984,10 @@ mark.hl {
     min-width: var(--bar-h);
     min-height: var(--bar-h);
   }
+  /* Nothing in the playbook is hover-only; its smallest presses are the
+     evidence paths and the panel's actions, which take a full control height. */
+  .pb-evidence,
+  .pb-actions > button { min-height: var(--ctl-h); }
 }
 
 /* ---------- glass (opt-in material, rule 25) ---------- */

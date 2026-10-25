@@ -106,7 +106,7 @@
     "esbuild": "^0.28.1",
     "fake-indexeddb": "^6.2.5",
     "fast-check": "^4.9.0",
-    "happy-dom": "^20.11.2",
+    "happy-dom": "^21.0.4",
     "jsonrepair": "^3.15.0",
     "lossless-json": "^4.3.0",
     "typescript": "^7.0.2",

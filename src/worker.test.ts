@@ -3,7 +3,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { fmtWhen, handle, handleAsync } from './worker';
 import { stringify as llStringify, parse as llParse, LosslessNumber } from 'lossless-json';
-import type { CompareRow } from './protocol';
+import type { CheckMeasureReply, CompareRow } from './protocol';
 import { EXPORT_CHUNK_BYTES } from './export-policy';
 import { SAMPLE_DOC } from './sample-doc';
 
@@ -2056,5 +2056,121 @@ describe('worker message glue', () => {
       error: 'TypeError: decodePayload input must be a string, ArrayBuffer, or Uint8Array',
     });
     expect(byId.get(9)).toEqual({ reqId: 9, error: 'no document open' });
+  });
+});
+
+// ---------- checkMeasure: one check's count, without touching the Ask panel ----------
+
+describe('checkMeasure', () => {
+  const ORDERS =
+    '{"orders":[' +
+    '{"id":9007199254740993,"status":"packing"},' +
+    '{"id":2,"status":"shipped","customerId":"C2"},' +
+    '{"id":3,"status":"packing"},' +
+    '{"id":4,"status":"shipped","customerId":"C4"}]}';
+  const measure = (q: unknown, evidence: unknown = 3, cardinalityCap?: unknown): CheckMeasureReply =>
+    h<CheckMeasureReply>({ type: 'checkMeasure', q, evidence, ...(cardinalityCap === undefined ? {} : { cardinalityCap }) });
+
+  it('returns the count, its unit and the first matched nodes as path, text and preview', () => {
+    parse(ORDERS);
+    expect(measure('$.orders[?(!@.customerId)]')).toEqual({
+      ok: true,
+      observed: 2,
+      exact: true,
+      unit: 'match',
+      evidence: [
+        { path: ['orders', 0], pathText: '$.orders[0]', preview: '{ id, status } · 2 keys' },
+        { path: ['orders', 2], pathText: '$.orders[2]', preview: '{ id, status } · 2 keys' },
+      ],
+    });
+    expect(measure('$.orders[*] | group(@.status)', 1)).toMatchObject({ ok: true, observed: 2, unit: 'group', evidence: [{ path: ['orders', 0] }] });
+    expect(measure('$.orders[*].status | distinct', 0)).toMatchObject({ ok: true, observed: 2, unit: 'distinct', evidence: [] });
+  });
+
+  it('keeps an int64 preview to its exact digits', () => {
+    parse(ORDERS);
+    const reply = measure('$.orders[*].id', 1);
+    if (!reply.ok) throw new Error(reply.error);
+    expect(reply.evidence).toEqual([{ path: ['orders', 0, 'id'], pathText: '$.orders[0].id', preview: '9007199254740993' }]);
+    expect(measure('$.orders[?(@.id == 9007199254740993)]')).toMatchObject({ ok: true, observed: 1 });
+  });
+
+  it('reports a capped count as inexact, with the engine\'s note', () => {
+    parse(ORDERS);
+    expect(measure('$.orders[*].id | distinct', 0, 2)).toEqual({
+      ok: true,
+      observed: 3,
+      exact: false,
+      unit: 'distinct',
+      note: 'stopped counting at 2 distinct values (the cardinality cap) — narrow the query',
+      evidence: [],
+    });
+  });
+
+  it('refuses what a check cannot count, and a query that is not there', () => {
+    parse(ORDERS);
+    expect(measure('$.orders[*] | sum(@.id)')).toMatchObject({ ok: false, pos: 0, error: expect.stringContaining('gives one value, not a count') });
+    expect(measure('$.orders[')).toMatchObject({ ok: false });
+    expect(measure('  ')).toEqual({ ok: false, error: 'a check needs a query', pos: 0 });
+    expect(measure(undefined)).toEqual({ ok: false, error: 'a check needs a query', pos: 0 });
+    // A non-number evidence request keeps nothing rather than failing.
+    expect(measure('$.orders[*]', 'all')).toMatchObject({ ok: true, observed: 4, evidence: [] });
+  });
+
+  it('answers "no document open" before any document arrives', async () => {
+    vi.resetModules();
+    const fresh = await import('./worker');
+    vi.resetModules();
+    expect(fresh.handle({ type: 'checkMeasure', q: '$.a', evidence: 1 })).toEqual({ ok: false, error: 'no document open', pos: 0 });
+  });
+
+  it('gives a JSONL document root paths like $[2]', () => {
+    expect(parse('{"id":1}\n{"id":2,"bad":true}\n{"id":3,"bad":true}')).toMatchObject({ ok: true, jsonl: true });
+    expect(measure('$[?(@.bad)]', 1)).toMatchObject({
+      ok: true,
+      observed: 2,
+      evidence: [{ path: [1], pathText: '$[1]' }],
+    });
+  });
+
+  // A run of every check goes through here; the Ask panel's reveal, filter and
+  // copy — and WebMCP's sample — must still act on the query on screen.
+  it('leaves the last query\'s reveal and sample exactly as they were', () => {
+    parse(ORDERS);
+    h({ type: 'query', q: "$.orders[?(@.status == 'shipped')]" });
+    const sampleBefore = h({ type: 'querySample', n: 5, chars: 2000, q: "$.orders[?(@.status == 'shipped')]" });
+    measure('$.orders[*].id', 3);
+    measure('$.orders[*] | group(@.status)', 3);
+    expect(h({ type: 'querySample', n: 5, chars: 2000, q: "$.orders[?(@.status == 'shipped')]" })).toEqual(sampleBefore);
+    // The row revealed is the first SHIPPED order, orders[1] — not the
+    // orders[0].id the last check matched first.
+    const revealed = h<Reveal>({ type: 'queryReveal', i: 0 });
+    const [row] = rows(revealed.rowIndex, 1);
+    expect(h<{ text: string }>({ type: 'nodePath', id: row.id }).text).toBe('$.orders[1]');
+    expect(h<{ count: number }>({ type: 'queryCopy' }).count).toBe(2);
+  });
+});
+
+describe('query replies carry what a check would count', () => {
+  type Counted = { check: { observed: number; exact: boolean; unit: string } | null };
+
+  it('attaches the count to every kind of result, and null to a value pipe', () => {
+    parse('{"items":[{"s":"a","n":1},{"s":"b","n":2},{"s":"a","n":3}]}');
+    expect(h<Counted>({ type: 'query', q: '$.items[*]' }).check).toEqual({ observed: 3, exact: true, unit: 'match' });
+    expect(h<Counted>({ type: 'query', q: '$.items[*] | count' }).check).toEqual({ observed: 3, exact: true, unit: 'match' });
+    expect(h<Counted>({ type: 'query', q: '$.items[*] | pluck(@.s)' }).check).toEqual({ observed: 3, exact: true, unit: 'match' });
+    expect(h<Counted>({ type: 'query', q: '$.items[*].s | distinct' }).check).toEqual({ observed: 2, exact: true, unit: 'distinct' });
+    // Stopped at a cap of one by a second value: at least two, not one.
+    expect(h<Counted>({ type: 'query', q: '$.items[*].s | distinct', cardinalityCap: 1 }).check)
+      .toEqual({ observed: 2, exact: false, unit: 'distinct' });
+    expect(h<Counted>({ type: 'query', q: '$.items[*] | sum(@.n)' }).check).toBeNull();
+    expect(h({ type: 'query', q: '$.items[' })).not.toHaveProperty('check');
+  });
+
+  it('counts every group, not the 1000 the reply carries', () => {
+    parse(JSON.stringify({ items: Array.from({ length: 1500 }, (_, id) => ({ id })) }));
+    const reply = h<Counted & { groups: unknown[]; total: number }>({ type: 'query', q: '$.items[*] | group(@.id)' });
+    expect(reply.groups).toHaveLength(1000);
+    expect(reply.check).toEqual({ observed: 1500, exact: true, unit: 'group' });
   });
 });

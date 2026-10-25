@@ -393,12 +393,12 @@ SPDX-License-Identifier: MIT -->
         <section class="lp-band lp-agents" id="agents">
           <div>
             <h2 class="lp-h2 lp-h2-sm">Your AI agent can use it too</h2>
-            <p class="lp-body lp-body-wide">The same engine runs as an 11-tool MCP server. An agent loads a file or compressed blob once, then inspects its shape, profiles fields, queries and samples bounded slices, compares documents, exports exact results, or drafts a spreadsheet mapping while the document stays in the server process.</p>
+            <p class="lp-body lp-body-wide">The same engine runs as a 12-tool MCP server. An agent loads a file or compressed blob once, then inspects its shape, profiles fields, queries and samples bounded slices, compares documents, exports exact results, gates it on a playbook's checks, or drafts a spreadsheet mapping while the document stays in the server process.</p>
             <pre class="lp-code">claude mcp add jsonloupe -- npx -y -p jsonloupe jsonloupe-mcp</pre>
             <p class="lp-body lp-body-wide">And in a browser that speaks <a href="https://github.com/priyanshuN/jsonloupe/blob/main/WEBMCP.md" rel="noreferrer">WebMCP</a> — ChatGPT's in-app browser, or Chrome 149+ — this very page registers those verbs on the open document, plus three no server can offer: an agent can load a document into your viewer, scroll your tree to a row and flash it, or filter your view to its evidence through the same toolbar button you would press yourself. You both look at one document; what it returns is always data, never instructions.</p>
           </div>
           <div class="lp-facts">
-            <div class="lp-fact"><span>11 tools</span><span class="lp-fact-accent">load · inspect · spec · convert · schema · query · profile · sample · diff · csv · result</span></div>
+            <div class="lp-fact"><span>12 tools</span><span class="lp-fact-accent">load · inspect · spec · convert · schema · query · profile · sample · diff · csv · result · checks</span></div>
             <div class="lp-fact"><span>webmcp, on this page</span><span class="lp-fact-accent">query · schema · profile · sample · load · reveal · highlight · clear</span></div>
             <div class="lp-fact"><span>document in model context</span><span class="lp-fact-ok">never</span></div>
             <div class="lp-fact"><span>network calls</span><span class="lp-fact-ok">none</span></div>
@@ -516,14 +516,17 @@ SPDX-License-Identifier: MIT -->
             <button id="original-btn" class="btn-quiet" title="reopen the document this was decoded from" hidden><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>original</button>
             <button id="reload-btn" class="btn-quiet" title="Re-read this file from disk" hidden><svg class="ic" aria-hidden="true"><use href="#i-reload"></use></svg>reload</button>
           </div>
-          <!-- Four layouts of the SAME document, so `functions` is a view here rather
-               than a button of its own: it composes the source pane with a
-               derived one, exactly as split composes tree with code. -->
+          <!-- Four layouts of the SAME document, so `playbook` is a view here
+               rather than a button of its own: it composes the source pane with
+               the checks and functions you keep, exactly as split composes tree
+               with code. It was `functions` until checks moved in beside them
+               (2026-10-25); one character shorter, so the toolbar keeps its
+               slack (style.css rule 10). data-mode stays `run`. -->
           <div class="mode-switch" id="mode-switch">
             <button data-mode="tree" class="on">tree</button>
             <button data-mode="code">code</button>
             <button data-mode="split" title="Tree and code side by side">split</button>
-            <button data-mode="run" title="Write, save, and run JavaScript functions over this document">functions</button>
+            <button data-mode="run" title="Run your saved checks and functions over this document">playbook</button>
           </div>
           <!-- Filter is a mode of search, not a sibling feature: the chip lives
                inside the search field. Regex / syntax hints ride the tooltip
@@ -606,13 +609,13 @@ SPDX-License-Identifier: MIT -->
             </div>
           </div>
         </div>
-        <!-- At phone widths Run uses one full-width surface at a time. This is
-             deliberately independent of the source's tree/code switch and the
-             workspace's functions/result switch: it only chooses which pane
+        <!-- At phone widths the playbook view uses one full-width surface at a
+             time. This is deliberately independent of the source's tree/code
+             switch and the playbook's own faces: it only chooses which pane
              receives the available width. -->
-        <div class="mode-switch" id="run-mobile-switch" role="group" aria-label="Run pane">
+        <div class="mode-switch" id="run-mobile-switch" role="group" aria-label="Playbook pane">
           <button type="button" data-mobile-run="source" aria-pressed="false">source</button>
-          <button type="button" data-mobile-run="workspace" class="on" aria-pressed="true">workspace</button>
+          <button type="button" data-mobile-run="workspace" class="on" aria-pressed="true">playbook</button>
         </div>
         <!-- Three zones — ASK, QUERY, ANSWER — where the first two are ONE
              bordered card because they are one operation with an order, and
@@ -728,8 +731,12 @@ SPDX-License-Identifier: MIT -->
                 <option value="no-matches">pass when no matches are found</option>
                 <option value="at-least-one">pass when at least one match is found</option>
                 <option value="exact-count">pass when exactly this many matches are found</option>
+                <option value="at-most">pass when at most this many matches are found</option>
+                <option value="at-least">pass when at least this many matches are found</option>
+                <option value="between">pass when the count is between these two</option>
               </select>
               <input id="check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count" hidden>
+              <input id="check-count-max" type="number" min="0" step="1" value="0" aria-label="Highest passing count" hidden>
               <span id="check-preview" aria-live="polite"></span>
               <button id="check-save" type="button" class="primary">save check</button>
               <button id="check-cancel" type="button" class="btn-quiet">cancel</button>
@@ -793,116 +800,180 @@ SPDX-License-Identifier: MIT -->
           </div>
           <div id="code-host"></div>
         </div>
-        <!-- Run mode's right column: a producer strip docked over a REAL
-             document surface. The strip owns everything about the run (script,
-             run button, status, console, the int64 note); the bar and viewport
-             under it are the result, read through a doc worker of its own —
-             virtualized and uncapped, like any other document. The script runs
-             in an ephemeral sandbox worker (run-sandbox.ts), never in a parser
-             worker that owns a document. -->
+        <!-- The playbook view's right column: the checks and functions you keep,
+             run over the document on the left. One stable sheet — a row per
+             item, a verdict in its lead cell, the evidence one press away —
+             with the dock above it while you write one, and the result face
+             behind `← playbook` for what a function returns. The column never
+             nests a reading head over an authoring head again: you are either
+             reading the sheet, or the dock says what you are writing.
+             Functions run in an ephemeral sandbox worker (run-sandbox.ts);
+             checks are measured by the document's own worker, one message
+             each, so the tree stays responsive between them. -->
         <div id="run-pane" hidden>
-          <div id="run-producer">
-            <!-- The one thing that never moves: which function is loaded, and
-                 the one thing to do with it. `run` while you are picking,
-                 `save` while you are writing — the bar itself holds still, and
-                 everything below it swaps. -->
-            <div class="run-head">
-              <span id="run-name" class="run-name">untitled</span>
-              <input id="run-name-input" class="run-name-input" type="text" hidden
-                placeholder="name this function" aria-label="Name of this function" />
-              <span id="run-dirty" hidden>unsaved</span>
-              <span class="spacer"></span>
-              <button id="run-edit" class="btn-quiet" type="button" title="Open this script in the editor">edit</button>
-              <button id="run-save" class="btn-quiet" type="button" hidden
-                title="Keep this script — the library survives across documents">save</button>
-              <button id="run-save-as" class="btn-quiet" type="button" hidden
-                title="Keep this as a second function, leaving the original alone">save as new</button>
-              <!-- Run stays in the function header. Putting it inside the code
-                   editor made it look like an Enter/submit affordance and took
-                   a third of the width from short scripts. -->
-              <button id="run-exec" type="button" class="primary"
-                title="Run this script over the document (Ctrl/Cmd+Enter)"
-                aria-label="Run this function over the document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg>run</button>
-            </div>
-            <!-- What this function was seen to read, against what the open
-                 document actually has. A remark about the script, never a gate
-                 in front of the run: it can only know the branch the last run
-                 took. -->
-            <div id="run-fit" class="run-remark" hidden></div>
-            <!-- Which functions in the last batch did not make it. A batch is
-                 not a failure because one of its functions was: the others
-                 produced, and their keys are in the report. -->
-            <div id="run-batch" class="run-remark" hidden></div>
-            <div id="run-number-setting">
-              <span class="standing-label">numbers</span>
-              <div class="mode-switch mode-switch-mini" id="run-number-switch" role="group"
-                aria-label="Numbers handed to this function" aria-describedby="run-number-help">
-                <button type="button" data-number-mode="js" class="on"
-                  title="Use ordinary JavaScript numbers; unsafe values may round">JavaScript</button>
-                <button type="button" data-number-mode="exact-text"
-                  title="Keep unsafe number literals as their original digit strings">exact text</button>
-              </div>
-              <svg id="run-number-warn" class="ic" aria-hidden="true" hidden><use href="#i-warn"></use></svg>
-              <span id="run-number-help">ordinary JavaScript numbers</span>
-            </div>
-            <div id="run-editor" hidden></div>
-            <span id="run-status" hidden></span>
-            <div id="run-error" hidden></div>
-            <details id="run-console" hidden>
-              <summary>console</summary>
-              <pre id="run-console-body"></pre>
-            </details>
-          </div>
+          <!-- Rule 10, revised: a pane bar, because there are two panes. It
+               serves both faces — the playbook's find, import, export and the
+               one `run all`; the result's back link and its document ops. -->
           <div class="run-bar">
-            <!-- The column has TWO FACES and never both at once: before a run
-                 there is no result, and after one the result wants the height.
-                 Same segmented component as the source pane's tree/code. -->
-            <div class="mode-switch mode-switch-mini" id="run-face-switch" role="group" aria-label="Right pane">
-              <button type="button" data-face="functions">functions</button>
-              <button type="button" data-face="result" class="on">result</button>
-            </div>
-            <span id="run-result-label">result</span>
-            <span id="run-lib-count" hidden>functions</span>
+            <span id="pb-heading" class="sem-heading"><strong>Playbook</strong></span>
+            <!-- Rule 14: the label stands inside the shell. Shown from eight
+                 items, where a list stops being readable whole. -->
+            <label id="pb-find" class="field run-lib-search" hidden>
+              <span class="field-prefix">find</span>
+              <input id="run-lib-search" type="search" spellcheck="false"
+                placeholder="name or query" aria-label="Find a check or function" />
+            </label>
+            <button id="pb-back" class="btn-quiet" type="button" hidden
+              title="Back to the playbook" aria-label="Back to the playbook"><svg class="ic" aria-hidden="true"><use href="#i-back"></use></svg>playbook</button>
+            <span id="run-result-label" hidden>result</span>
             <span id="run-stale" hidden>source changed — re-run</span>
             <span class="spacer"></span>
-            <input id="run-lib-search" class="run-lib-search" type="search" hidden
-              placeholder="find a function" aria-label="Find a function" />
-            <!-- Appears only once something is ticked: with nothing picked, a
-                 row press is still the whole interaction. -->
-            <!-- The one ▶ that keeps a word beside it, and the word is a NUMBER:
-                 how many functions this press is about to run. -->
-            <button id="run-picked" class="primary" type="button" hidden
-              title="Run every ticked function over this document"
-              aria-label="Run every ticked function over this document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg><span id="run-picked-n"></span></button>
-            <!-- A playbook: reusable functions and checks as a file, so the library survives a
-                 cleared browser and can be handed to someone. It never carries
-                 the document — you export the questions, not the data. -->
-            <button id="run-export" class="btn-quiet" type="button" hidden
-              title="Save these functions and checks as a playbook file">export</button>
-            <button id="run-import" class="btn-quiet" type="button" hidden
-              title="Add functions and checks from a playbook file">import</button>
+            <!-- A playbook is the library as a file, so it survives a cleared
+                 browser and can be handed to someone. It never carries the
+                 document — you export the questions, not the data. Quiet
+                 words, never a menu: import is how a teammate's playbook
+                 arrives, so it must not hide. -->
+            <button id="run-import" class="btn-quiet" type="button"
+              title="Add checks and functions from a playbook file">import</button>
             <input id="run-import-file" type="file" accept="application/json,.json" hidden />
-            <button id="run-new" class="btn-quiet" type="button" hidden
-              title="Start a new function" aria-label="Start a new function"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>new function</button>
-            <button id="run-copy" class="btn-icon btn-quiet" type="button" title="Copy the whole result" aria-label="Copy the whole result"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
+            <button id="run-export" class="btn-quiet" type="button" disabled
+              title="Nothing to export yet">export</button>
+            <!-- The one accent in this column's markup (rule 6). It never
+                 leaves the bar, so the bar never reflows under the pointer:
+                 disabled with nothing to run, `stop` while checks run,
+                 `running` while the function batch runs. main.ts demotes it
+                 while the dock or Query owns the next step. Its name is its
+                 visible word; what it is about to run rides the title, so the
+                 spoken name always contains the printed one (WCAG 2.5.3). -->
+            <button id="pb-run-all" class="primary" type="button" disabled
+              title="Nothing to run — add a check, or tick a function"
+              aria-keyshortcuts="Meta+Shift+Enter Control+Shift+Enter"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg><span id="pb-run-all-label">run all</span></button>
+            <button id="run-copy" class="btn-icon btn-quiet" type="button" hidden title="Copy the whole result" aria-label="Copy the whole result"><svg class="ic" aria-hidden="true"><use href="#i-copy"></use></svg></button>
             <!-- Rule 21's name popover, shared with the document's ⇩: main.ts
                  remembers which button opened it and downloads accordingly. -->
-            <button id="run-dl" class="btn-icon btn-quiet" type="button" popovertarget="dl-name" aria-expanded="false"
+            <button id="run-dl" class="btn-icon btn-quiet" type="button" hidden popovertarget="dl-name" aria-expanded="false"
               aria-label="Name and download the result" title="Name and download the result"><svg class="ic" aria-hidden="true"><use href="#i-download"></use></svg></button>
-              <button id="run-open" class="btn-quiet" type="button" title="Open this result as a document of its own">open result</button>
+            <button id="run-open" class="btn-quiet" type="button" hidden title="Open this result as a document of its own">open as document</button>
           </div>
-          <!-- The functions face: the library, a reading surface like any other
-               pane. It gets NO bar of its own — the bar above serves whichever
-               face is up (count and `new function` here, the result's ops there), so
-               the column never stacks a second strip to say the same thing. -->
+          <!-- THE DOCK: present only while a check or a function is being
+               written. One head for both kinds — the prefix says which — and
+               a canvas ground, because its preview carries verdict ink, and
+               verdict ink sits only on canvas (rule 15). -->
+          <div id="run-producer" hidden>
+            <div class="run-head">
+              <label class="field run-name-field">
+                <span class="field-prefix" id="pb-kind">check</span>
+                <input id="run-name-input" type="text" spellcheck="false"
+                  placeholder="name this check" aria-label="Name of this check" />
+              </label>
+              <span id="run-dirty" hidden>unsaved</span>
+              <span class="spacer"></span>
+              <button id="pb-cancel" class="btn-quiet" type="button" title="Close without saving">cancel</button>
+              <button id="run-save-as" class="btn-quiet" type="button" hidden
+                title="Keep this as a second check, leaving the original alone">save as new</button>
+              <button id="run-save" class="btn-quiet" type="button" title="Keep these changes (⌘S)">save</button>
+              <button id="run-exec" class="btn-icon btn-quiet" type="button"
+                title="Try this check on the document (⌘↵)"
+                aria-label="Try this check on the document"><svg class="ic" aria-hidden="true"><use href="#i-run"></use></svg></button>
+            </div>
+            <div id="pb-check-body" hidden>
+              <div class="check-fields">
+                <label class="field pb-query-field">
+                  <span class="field-prefix">query</span>
+                  <input id="pb-check-query" type="text" spellcheck="false"
+                    placeholder="$.orders[?(@.status == 'FAILED')]" aria-label="Query this check counts"
+                    aria-describedby="pb-check-error" />
+                </label>
+                <select id="pb-check-expectation" aria-label="Pass condition">
+                  <option value="no-matches">pass when no matches are found</option>
+                  <option value="at-least-one">pass when at least one match is found</option>
+                  <option value="exact-count">pass when exactly this many matches are found</option>
+                  <option value="at-most">pass when at most this many matches are found</option>
+                  <option value="at-least">pass when at least this many matches are found</option>
+                  <option value="between">pass when the count is between these two</option>
+                </select>
+                <input id="pb-check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count"
+                  aria-describedby="pb-check-preview" hidden />
+                <input id="pb-check-count-max" type="number" min="0" step="1" value="0" aria-label="Highest passing count"
+                  aria-describedby="pb-check-preview" hidden />
+              </div>
+              <span id="pb-check-preview" aria-live="polite"></span>
+              <!-- Rule 15 tier 3: a query this check cannot run is the one
+                   thing to fix before anything else here works. -->
+              <div id="pb-check-error" class="ask-error" aria-live="polite" hidden></div>
+            </div>
+            <div id="pb-fn-body" hidden>
+              <!-- What this function was seen to read, against what the open
+                   document actually has. A remark about the script, never a
+                   gate in front of the run. -->
+              <div id="run-fit" class="run-remark" hidden></div>
+              <div id="run-number-setting">
+                <span class="standing-label">numbers</span>
+                <div class="mode-switch mode-switch-mini" id="run-number-switch" role="group"
+                  aria-label="Numbers handed to this function" aria-describedby="run-number-help">
+                  <button type="button" data-number-mode="js" class="on"
+                    title="Use ordinary JavaScript numbers; unsafe values may round">JavaScript</button>
+                  <button type="button" data-number-mode="exact-text"
+                    title="Keep unsafe number literals as their original digit strings">exact text</button>
+                </div>
+                <svg id="run-number-warn" class="ic" aria-hidden="true" hidden><use href="#i-warn"></use></svg>
+                <span id="run-number-help">ordinary JavaScript numbers</span>
+              </div>
+              <div id="run-editor" hidden></div>
+              <div id="run-error" hidden></div>
+              <details id="run-console" hidden>
+                <summary>console</summary>
+                <pre id="run-console-body"></pre>
+              </details>
+            </div>
+            <!-- A live region, always in the page: a guard's sentence is the
+                 only answer a press gets, so it has to be announced. -->
+            <span id="run-status" role="status"></span>
+          </div>
+          <!-- THE SHEET: a reading surface, so canvas, and no bar of its own —
+               each section's head is a sticky column header (rule 11). Rows
+               are drawn by main.ts only while the view is on screen, so a
+               check's name is never in the page twice. -->
           <div id="run-library" hidden>
-            <div id="run-lib-list"></div>
+            <div id="run-lib-list">
+              <section id="pb-checks" class="pb-section" aria-labelledby="pb-checks-label">
+                <div class="pb-head">
+                  <span class="pb-lead"></span>
+                  <span id="pb-checks-label" class="pb-label">checks</span>
+                  <span id="pb-checks-status" class="pb-head-status" aria-live="polite"></span>
+                  <span class="spacer"></span>
+                  <button id="pb-not-passing" class="tb-chip" type="button" aria-pressed="false" hidden
+                    title="Show only checks that did not pass">not passing</button>
+                  <button id="pb-new-check" class="btn-mini btn-quiet" type="button"
+                    title="New check" aria-label="New check"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>check</button>
+                </div>
+                <div id="pb-check-rows" class="pb-rows"></div>
+              </section>
+              <section id="pb-fns" class="pb-section" aria-labelledby="pb-fns-label">
+                <div class="pb-head">
+                  <!-- Rule 7's one checkbox, in the same 34px column the
+                       rows' ticks stand in, so it reads as their header. -->
+                  <span class="pb-lead run-lib-pickzone">
+                    <input id="pb-tick-all" class="chk" type="checkbox" hidden
+                      title="Include every function in run all" aria-label="Include every function in run all" />
+                  </span>
+                  <span id="pb-fns-label" class="pb-label">functions</span>
+                  <span id="pb-fns-status" class="pb-head-status" aria-live="polite"></span>
+                  <span class="spacer"></span>
+                  <button id="pb-open-report" class="btn-mini btn-quiet" type="button" disabled
+                    title="Run all with ticked functions to build a report">open report</button>
+                  <button id="run-new" class="btn-mini btn-quiet" type="button"
+                    title="Start a new function" aria-label="Start a new function"><svg class="ic" aria-hidden="true"><use href="#i-plus"></use></svg>function</button>
+                </div>
+                <div id="pb-fn-rows" class="pb-rows"></div>
+              </section>
+            </div>
           </div>
           <div id="run-viewport" hidden>
             <div id="run-spacer"></div>
             <div id="run-layer"></div>
           </div>
-          <div id="run-empty"></div>
+          <div id="run-empty" hidden></div>
         </div>
         <div id="diff-view" hidden>
           <div class="diff-head">
@@ -1242,8 +1313,12 @@ SPDX-License-Identifier: MIT -->
         <span class="keys-group">window</span>
         <div class="keys-row"><span><kbd>⌘K</kbd> or <kbd>Ctrl K</kbd></span><span>command palette — every action and document</span></div>
         <div class="keys-row"><span><kbd>⌘B</kbd> or <kbd>Ctrl B</kbd></span><span>hide · show documents</span></div>
-        <span class="keys-group">functions</span>
-        <div class="keys-row"><span><kbd>⌘↵</kbd> or <kbd>Ctrl ↵</kbd></span><span>run the script</span></div>
+        <span class="keys-group">playbook</span>
+        <div class="keys-row"><span><kbd>⌘⇧↵</kbd> or <kbd>Ctrl ⇧↵</kbd></span><span>run all checks and ticked functions</span></div>
+        <div class="keys-row"><span><kbd>⌘↵</kbd> or <kbd>Ctrl ↵</kbd></span><span>run the focused check or function · in the editor, run what you wrote</span></div>
+        <div class="keys-row"><span><kbd>⌘S</kbd> or <kbd>Ctrl S</kbd></span><span>save the check or function you are editing</span></div>
+        <div class="keys-row"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span>move between checks and functions</span></div>
+        <div class="keys-row"><span><kbd>→</kbd> <kbd>←</kbd></span><span>open · close a row's details</span></div>
         <span class="keys-group">paste view</span>
         <div class="keys-row"><span><kbd>⌃↵</kbd></span><span>open the pasted text</span></div>
       </div>

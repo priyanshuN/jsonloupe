@@ -10,6 +10,8 @@ import type {
   SemanticSummary,
   SemanticVerdict,
 } from './semantic';
+import type { PathSeg } from './query';
+import type { CheckUnit } from './check';
 
 // 'chunk' is a synthetic range row ([0 … 9999]) interposed when a container has
 // more children than CHUNK — so expanding a 5M-element array materializes ~500
@@ -141,3 +143,30 @@ export interface SearchHit {
   preview: string;
   where: 'key' | 'value';
 }
+
+// ---------- checks ----------
+//
+// The first typed query-family messages. One `checkMeasure` per check, from
+// every host — the browser worker, the MCP document thread and the CLI all send
+// it to the same `handle` — so the three produce the same verdicts by
+// construction, and tree requests can interleave between the checks of a run.
+// It never touches the Ask panel's last-query state.
+
+export interface CheckMeasureRequest {
+  type: 'checkMeasure';
+  q: string;
+  /** Matched nodes to send back (the engine clamps it to MAX_CHECK_EVIDENCE). */
+  evidence: number;
+  cardinalityCap?: number;
+}
+
+/** One matched node: its segments go straight to `revealPath`; the text is for reading. */
+export interface CheckEvidence {
+  path: PathSeg[];
+  pathText: string;
+  preview: string;
+}
+
+export type CheckMeasureReply =
+  | { ok: true; observed: number; exact: boolean; unit: CheckUnit; evidence: CheckEvidence[]; note?: string }
+  | { ok: false; error: string; pos: number };

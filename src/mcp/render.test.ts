@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import type { FieldProfile, ProfileResult } from '../profile';
-import type { LoadResult } from './doc-ops';
+import type { ChecksResultView, CheckView, LoadResult } from './doc-ops';
 import {
   cap,
   RESPONSE_CAP,
+  renderChecks,
   renderCsv,
   renderDiff,
   renderError,
@@ -254,6 +255,78 @@ describe('renderCsv', () => {
   it('reports the file written, never its rows', () => {
     expect(renderCsv({ ok: true, format: 'jsonl', outPath: '/tmp/out.jsonl', rows: 2, bytes: 30, atomic: true })).toBe(
       'format: jsonl\noutPath: /tmp/out.jsonl\nrows: 2\nbytes: 30\ncomplete: true\natomic: true',
+    );
+  });
+});
+
+describe('renderChecks', () => {
+  const view = (over: Partial<CheckView> & Pick<CheckView, 'name' | 'verdict' | 'summary'>): CheckView => ({
+    observed: 0,
+    exact: true,
+    unit: 'match',
+    expected: 'no matches',
+    ms: 1,
+    evidence: [],
+    ...over,
+  });
+  const summary = (over: Partial<ChecksResultView['summary']>): ChecksResultView['summary'] => ({
+    total: 0,
+    passed: 0,
+    failed: 0,
+    inconclusive: 0,
+    errored: 0,
+    ms: 41,
+    verdict: 'pass',
+    ...over,
+  });
+
+  it('puts what needs looking at first, so the cap cuts the passes', () => {
+    const text = renderChecks({
+      ok: true,
+      summary: summary({ total: 4, passed: 1, failed: 1, inconclusive: 1, errored: 1, verdict: 'fail' }),
+      // Playbook order: a pass first, the failure last.
+      checks: [
+        view({ name: 'has tasks', verdict: 'pass', summary: 'Pass — 70,000 matches; expected at least one match' }),
+        view({
+          name: 'one row per order',
+          verdict: 'inconclusive',
+          summary: 'Inconclusive — at least 1,00,000 distinct values; expected exactly 1,20,000 distinct values',
+          note: 'stopped counting at 1,00,000 distinct values (the cardinality cap) — narrow the query',
+          evidence: [{ path: '$.tasks[0].orderId', preview: '"ORD-1"' }],
+        }),
+        view({ name: 'total', verdict: 'error', summary: 'Could not run — `| sum` gives one value, not a count' }),
+        view({
+          name: 'no failed tasks',
+          verdict: 'fail',
+          summary: 'Fail — 17,500 matches; expected no matches',
+          evidence: [{ path: '$.tasks[3]', preview: '{ id, orderId, status, … } · 7 keys' }],
+        }),
+      ],
+    }, 2);
+    expect(text.split('\n')).toEqual([
+      'checks: 4 · 1 failed · 1 could not run · 1 inconclusive · 1 passed · 41 ms',
+      '✕ no failed tasks — Fail — 17,500 matches; expected no matches',
+      '    $.tasks[3]\t{ id, orderId, status, … } · 7 keys',
+      '✗ total — Could not run — `| sum` gives one value, not a count',
+      '? one row per order — Inconclusive — at least 1,00,000 distinct values; expected exactly 1,20,000 distinct values' +
+        ' · stopped counting at 1,00,000 distinct values (the cardinality cap) — narrow the query',
+      '    $.tasks[0].orderId\t"ORD-1"',
+      '✓ has tasks — Pass — 70,000 matches; expected at least one match',
+      'functions: 2 not run (checks only)',
+    ]);
+  });
+
+  it('keeps playbook order within a verdict and says nothing of counts that are zero', () => {
+    const text = renderChecks({
+      ok: true,
+      summary: summary({ total: 2, passed: 2 }),
+      checks: [
+        view({ name: 'b', verdict: 'pass', summary: 'Pass — 0 matches; expected no matches' }),
+        view({ name: 'a', verdict: 'pass', summary: 'Pass — 0 matches; expected no matches' }),
+      ],
+    }, 0);
+    expect(text).toBe(
+      'checks: 2 · 2 passed · 41 ms\n✓ b — Pass — 0 matches; expected no matches\n✓ a — Pass — 0 matches; expected no matches',
     );
   });
 });
