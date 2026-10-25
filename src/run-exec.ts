@@ -33,6 +33,8 @@ export interface RunOk {
    * an empty list, and callers must not read it as "reads nothing".
    */
   reads?: string[];
+  /** What came back, in a few words — see `resultShape`. */
+  shape?: string;
 }
 
 export interface RunErr {
@@ -52,6 +54,8 @@ export interface BatchEntry {
   error?: string;
   ms: number;
   reads?: string[];
+  /** This function's own value, in a few words — see `resultShape`. Absent when it failed. */
+  shape?: string;
 }
 
 export interface BatchOk {
@@ -251,6 +255,45 @@ function serialize(value: unknown): { ok: true; text: string } | { ok: false; er
   return { ok: true, text };
 }
 
+// The longest scalar a shape repeats verbatim; past it, the shape names the kind.
+const SHAPE_LITERAL_CHARS = 40;
+
+/**
+ * A result in a few words, read off its serialized text: "array 37",
+ * "object 31", "null", a scalar's own JSON literal when it is short, and
+ * otherwise "string" or "number". Computed here, inside the sandbox, so a
+ * library row can say what a function returned without the page parsing a
+ * report it may never open — and read off the TEXT, never a reparse, so an
+ * exact-text int64 string comes back with exactly the digits it went in with.
+ *
+ * The text is JSON.stringify output, so it is compact: a top-level comma
+ * outside a string separates two items, and nothing else does.
+ */
+export function resultShape(text: string): string {
+  const first = text[0];
+  if (first === '[' || first === '{') {
+    // `[]` and `{}` are the only compact empties; anything longer holds one
+    // item more than it has top-level commas.
+    let items = text.length > 2 ? 1 : 0;
+    let depth = 0;
+    let inString = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      if (inString) {
+        if (c === 0x5c) i++; // a backslash escapes the next character, quotes included
+        else if (c === 0x22) inString = false;
+      } else if (c === 0x22) inString = true;
+      else if (c === 0x5b || c === 0x7b) depth++;
+      else if (c === 0x5d || c === 0x7d) depth--;
+      else if (c === 0x2c && depth === 1) items++;
+    }
+    return `${first === '[' ? 'array' : 'object'} ${items}`;
+  }
+  if (text === 'null') return 'null';
+  if (text.length <= SHAPE_LITERAL_CHARS) return text;
+  return first === '"' ? 'string' : 'number';
+}
+
 /**
  * Run `code` — an expression, or the body of `(data) => { … }` — over the
  * document in `docText`. Never throws: every failure comes back as
@@ -307,6 +350,7 @@ export function executeUserCode(
     logs,
     ms: Math.round(performance.now() - started),
     ...(one.reads ? { reads: one.reads } : {}),
+    shape: resultShape(text.text),
   };
 }
 
@@ -390,7 +434,13 @@ export function executeUserScripts(
         continue;
       }
       report.set(name, JSON.parse(text.text));
-      entries.push({ name, ok: true, ms: one.ms, ...(one.reads ? { reads: one.reads } : {}) });
+      entries.push({
+        name,
+        ok: true,
+        ms: one.ms,
+        ...(one.reads ? { reads: one.reads } : {}),
+        shape: resultShape(text.text),
+      });
     }
   } finally {
     Object.assign(console, saved);

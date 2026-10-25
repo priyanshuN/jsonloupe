@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
-import { executeUserCode, executeUserScripts, type RunOk } from './run-exec';
+import { executeUserCode, executeUserScripts, resultShape, type RunOk } from './run-exec';
 
 const DOC = JSON.stringify({
   tasks: [
@@ -295,5 +295,51 @@ describe('executeUserScripts', () => {
       'exact id': '9007199254740993',
       'safe arithmetic': 6,
     });
+  });
+});
+
+describe('result shape', () => {
+  it('names a container by its size and repeats a short scalar verbatim', () => {
+    expect(expectOk(executeUserCode(DOC, 'data.tasks')).shape).toBe('array 3');
+    expect(expectOk(executeUserCode(DOC, 'data.tasks[0]')).shape).toBe('object 2');
+    expect(expectOk(executeUserCode(DOC, '[]')).shape).toBe('array 0');
+    expect(expectOk(executeUserCode(DOC, '({})')).shape).toBe('object 0');
+    expect(expectOk(executeUserCode(DOC, 'data.tasks.length')).shape).toBe('3');
+    expect(expectOk(executeUserCode(DOC, 'data.tasks[0].status')).shape).toBe('"FAILED"');
+    expect(expectOk(executeUserCode(DOC, 'data.tasks.length > 2')).shape).toBe('true');
+    expect(expectOk(executeUserCode(DOC, 'null')).shape).toBe('null');
+  });
+
+  it('counts only top-level items, whatever their strings and children hold', () => {
+    const tricky = JSON.stringify([{ a: [1, 2, { b: 'x,y' }] }, 'quote " and , comma', ['\\', ','], 4]);
+    expect(resultShape(tricky)).toBe('array 4');
+    expect(resultShape(JSON.stringify({ 'k,1': 'v,"', k2: { nested: [1, 2, 3] }, k3: '\\"' }))).toBe('object 3');
+    expect(resultShape('[[]]')).toBe('array 1');
+    expect(resultShape('[{}]')).toBe('array 1');
+  });
+
+  it('names a long scalar by its kind instead of repeating it', () => {
+    // Forty characters, quotes included, is still short enough to repeat.
+    const fits = 'x'.repeat(38);
+    expect(expectOk(executeUserCode(DOC, JSON.stringify(fits))).shape).toBe(JSON.stringify(fits));
+    expect(expectOk(executeUserCode(DOC, JSON.stringify(`${fits}y`))).shape).toBe('string');
+    expect(resultShape('1'.repeat(41))).toBe('number');
+  });
+
+  it('keeps an exact-text int64 to the digits it was given', () => {
+    const res = expectOk(executeUserCode('{"id":9007199254740993}', 'data.id', false, 'exact-text'));
+    expect(res.shape).toBe('"9007199254740993"');
+    // The JavaScript-number contract really does round it, and the shape says so.
+    expect(expectOk(executeUserCode('{"id":9007199254740993}', 'data.id')).shape).toBe('9007199254740992');
+  });
+
+  it('gives each batch entry its own shape, and none to one that failed', () => {
+    const res = executeUserScripts(DOC, [
+      { name: 'ids', code: 'data.tasks.map(t => t.id)' },
+      { name: 'broken', code: 'data.nope.length' },
+      { name: 'first', code: 'data.tasks[0]' },
+    ]);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.entries.map((e) => e.shape)).toEqual(['array 3', undefined, 'object 2']);
   });
 });
