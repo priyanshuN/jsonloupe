@@ -202,6 +202,17 @@ test.describe('run all', () => {
     expect(await measures(page)).toBe(2);
   });
 
+  test('closing a row it opened keeps focus in the sheet, not on <body>', async ({ page }) => {
+    await page.locator('#pb-run-all').click();
+    const row = checkRow(page, PACKING.name);
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    // Tabbed into, not clicked: the row stays one run all opened by itself.
+    await itemOf(page, PACKING.name).locator('[data-act="edit"]').focus();
+    await page.keyboard.press('ControlOrMeta+Shift+Enter');
+    await expect(page.locator('#pb-checks-status')).toContainText('1 failed');
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
+    await expect(row).toBeFocused();
+  });
 });
 
 test('a forget undone after switching documents puts no verdict on the new one', async ({ page }) => {
@@ -263,6 +274,22 @@ test.describe('functions and the result face', () => {
     await importPlaybook(page, [], [{ name: 'order count', script: 'data.orders.length' }]);
   });
 
+  test('open result and ⌘⇧↵ move focus to what the new face shows', async ({ page }) => {
+    await page.locator('#pb-fn-rows .pb-open').first().click();
+    await itemOf(page, 'order count').locator('[data-act="run"]').click();
+    const open = itemOf(page, 'order count').locator('[data-act="open-result"]');
+    await expect(open).toBeVisible();
+    await open.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#run-library')).toBeHidden();
+    await expect(page.locator('#pb-back')).toBeFocused();
+
+    await page.locator('#run-viewport .row').first().click();
+    await page.keyboard.press('ControlOrMeta+Shift+Enter');
+    await expect(page.locator('#run-library')).toBeVisible();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
+  });
+
   test('open report after an edit says the source changed', async ({ page }) => {
     await page.locator('#pb-tick-all').check();
     await page.locator('#pb-run-all').click();
@@ -274,6 +301,14 @@ test.describe('functions and the result face', () => {
     await page.locator('#pb-open-report').click();
     await expect(page.locator('#run-library')).toBeHidden();
     await expect(page.locator('#run-stale')).toBeVisible();
+  });
+
+  test('cancel on a new function goes back to + function', async ({ page }) => {
+    await page.locator('#run-new').click();
+    await expect(page.locator('#run-producer')).toBeVisible();
+    await page.locator('#pb-cancel').click();
+    await expect(page.locator('#run-producer')).toBeHidden();
+    await expect(page.locator('#run-new')).toBeFocused();
   });
 
 });

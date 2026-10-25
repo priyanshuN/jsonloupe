@@ -6511,6 +6511,11 @@ const LIBRARY_SEARCH_MIN = 8;
 const NOT_PASSING_MIN = 8;
 
 function setRunFace(face: 'functions' | 'result'): void {
+  // A face that hides the focused control would drop focus to <body>: the
+  // pressed `open result`, or a result row under ⌘⇧↵.
+  const active = document.activeElement;
+  const leaving = face === 'functions' ? [runViewport, runEmpty] : [runLibrary];
+  const lost = active instanceof HTMLElement && leaving.some((el) => el.contains(active));
   runFace = face;
   const sheet = face === 'functions';
   runLibrary.hidden = !sheet;
@@ -6524,6 +6529,10 @@ function setRunFace(face: 'functions' | 'result'): void {
   for (const el of [pbBackBtn, runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = sheet;
   runStaleBadge.hidden = sheet || !runResultText || !runStaleWanted;
   if (!sheet) scheduleResponsiveRefresh();
+  if (!lost) return;
+  if (!sheet) pbBackBtn.focus({ preventScroll: true });
+  else if (pbReturnFocusId && runLibList.querySelector(`.pb-item[data-id="${CSS.escape(pbReturnFocusId)}"]`)) focusItem(pbReturnFocusId);
+  else pbRunAllBtn.focus({ preventScroll: true });
 }
 
 /** A stored or live run of this check, if it is a run of what the check is NOW. */
@@ -6868,9 +6877,11 @@ function sheetFocus(): { id: string; key: string } | null {
 function restoreSheetFocus(focus: { id: string; key: string } | null): void {
   if (!focus) return;
   const item = runLibList.querySelector<HTMLElement>(`.pb-item[data-id="${CSS.escape(focus.id)}"]`);
-  const target = item?.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus.key)}"]`)
-    ?? item?.querySelector<HTMLElement>('[data-focus="open"]');
-  target?.focus({ preventScroll: true });
+  const keyed = item?.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus.key)}"]`);
+  keyed?.focus({ preventScroll: true });
+  // The same control may be there and still unable to take focus — in a panel
+  // the repaint closed, or disabled — so the row's own button takes it.
+  if (!keyed || document.activeElement !== keyed) item?.querySelector<HTMLElement>('[data-focus="open"]')?.focus({ preventScroll: true });
 }
 
 function focusItem(id: string | null): void {
@@ -7894,9 +7905,13 @@ pbCancelBtn.addEventListener('click', () => {
     runNumberMode = runLoadedSnapshot.numberMode;
     runEditor?.setDoc(runLoadedSnapshot.script);
   }
+  const kind = pbDock;
   const id = closeDock();
-  if (id) focusItem(id);
-  else pbNewCheckBtn.focus();
+  // Over the result face the sheet is hidden, and its controls cannot take focus.
+  if (runFace === 'result') pbBackBtn.focus();
+  else if (id) focusItem(id);
+  // A new item goes back to the add button of its own section.
+  else (kind === 'function' ? runNewBtn : pbNewCheckBtn).focus();
 });
 
 runSaveBtn.addEventListener('click', () => void saveDock(false));
