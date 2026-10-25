@@ -6919,10 +6919,10 @@ function paintHeads(shownChecks: number, shownFns: number): void {
   paintHeadStatus(pbFnsStatus, functionHeadParts(pbScripts.length, shownFns, ticked, fnState), '');
   pbFnsStatus.setAttribute('aria-busy', String(pbFunctionsRunning));
 
-  // The tick-all box: two states only — checked when every function is in.
+  // The tick-all box: checked when every function is in, mixed when some are —
+  // and a press on a mixed box ticks the rest.
   pbTickAll.hidden = pbScripts.length === 0;
   pbTickAll.checked = pbScripts.length > 0 && ticked === pbScripts.length;
-  // Some ticked: the box says so, and a press still ticks the rest.
   pbTickAll.indeterminate = ticked > 0 && !pbTickAll.checked;
   pbTickAll.title = pbTickAll.checked ? 'Leave every function out of run all' : 'Include every function in run all';
   pbTickAll.setAttribute('aria-label', pbTickAll.title);
