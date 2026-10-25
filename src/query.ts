@@ -1140,6 +1140,16 @@ export type CheckMeasure =
   | { ok: true; observed: number; exact: boolean; unit: CheckUnit; evidence: Match[]; note?: string }
   | { ok: false; error: string; pos: number };
 
+/**
+ * The lower bound a group or distinct count proves. The engine stops counting
+ * only when a NEW bucket turns up with the cap already full, so an inexact
+ * total of `cap` means at least cap + 1 buckets exist — and a check at the cap
+ * boundary can then be decided rather than left inconclusive.
+ */
+function cappedCount(total: number, complete: boolean): number {
+  return complete ? total : total + 1;
+}
+
 function checkUnitOf(fn: string): CheckUnit | null | undefined {
   return Object.hasOwn(CHECK_UNIT_OF_PIPE, fn) ? CHECK_UNIT_OF_PIPE[fn] : undefined;
 }
@@ -1186,8 +1196,8 @@ export function measureQuery(root: unknown, src: string, options: CheckMeasureOp
   // ever building the window its RANK_CAP guards.
   const result = applyPipe(tapped(), pipe, { offset: 0, limit: 0, cardinalityCap: cap });
   if (!result.ok) return result;
-  const observed = result.kind === 'value' ? Number(result.value) : result.total;
   const exact = result.complete;
+  const observed = result.kind === 'value' ? Number(result.value) : cappedCount(result.total, exact);
   const note = !exact
     ? `stopped counting at ${cap.toLocaleString('en-IN')} ${unit === 'group' ? 'groups' : 'distinct values'} (the cardinality cap) — narrow the query`
     : result.kind === 'rows' ? result.note : undefined;
@@ -1213,5 +1223,5 @@ export function checkCountOf(
   if (result.kind === 'value') {
     return typeof result.value === 'number' ? { observed: result.value, exact: result.complete, unit } : null;
   }
-  return { observed: result.total, exact: result.complete, unit };
+  return { observed: cappedCount(result.total, result.complete), exact: result.complete, unit };
 }

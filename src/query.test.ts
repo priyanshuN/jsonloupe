@@ -15,6 +15,7 @@ import {
   type QueryResult,
 } from './query';
 import { QUERY_PIPES } from './query-grammar';
+import { evaluateCheck, type CheckExpectation } from './check';
 
 const doc = {
   account: 'acme-logistics',
@@ -575,11 +576,13 @@ describe('measureQuery (what a check counts)', () => {
   });
 
   it('reports a capped group or distinct count as a lower bound, and says so', () => {
+    // The engine stops only when a bucket past the cap turns up, so the bound
+    // it has proved is cap + 1, not the cap.
     const group = measured(measureQuery(doc, '$.tasks[*] | group(@.id)', { cardinalityCap: 2 }));
-    expect(group).toMatchObject({ observed: 2, exact: false, unit: 'group' });
+    expect(group).toMatchObject({ observed: 3, exact: false, unit: 'group' });
     expect(group.note).toBe('stopped counting at 2 groups (the cardinality cap) — narrow the query');
     const distinct = measured(measureQuery(doc, '$.tasks[*].id | distinct', { cardinalityCap: 2 }));
-    expect(distinct).toMatchObject({ observed: 2, exact: false, unit: 'distinct' });
+    expect(distinct).toMatchObject({ observed: 3, exact: false, unit: 'distinct' });
     expect(distinct.note).toBe('stopped counting at 2 distinct values (the cardinality cap) — narrow the query');
     // Under the cap the same count is exact, and has nothing to say.
     expect(measured(measureQuery(doc, '$.tasks[*] | group(@.status)', { cardinalityCap: 3 }))).not.toHaveProperty('note');
@@ -588,8 +591,23 @@ describe('measureQuery (what a check counts)', () => {
   it('prints the default cap the en-IN way', () => {
     const ids = { ids: Array.from({ length: 100_001 }, (_, i) => i) };
     const m = measured(measureQuery(ids, '$.ids[*] | distinct'));
-    expect(m).toMatchObject({ observed: 100_000, exact: false });
+    expect(m).toMatchObject({ observed: 100_001, exact: false });
     expect(m.note).toContain('stopped counting at 1,00,000 distinct values');
+  });
+
+  it('decides a check at the cap boundary from the bound the engine proved', () => {
+    // Three distinct values with a cap of two: the count is known to be over 2.
+    const judged = (expectation: CheckExpectation): string => {
+      const m = measured(measureQuery([1, 2, 3], '$[*] | distinct', { cardinalityCap: 2 }));
+      return evaluateCheck(expectation, m.observed, { exact: m.exact, unit: m.unit }).verdict;
+    };
+    expect(judged({ type: 'at-most', count: 2 })).toBe('fail');
+    expect(judged({ type: 'exact-count', count: 2 })).toBe('fail');
+    expect(judged({ type: 'between', min: 0, max: 2 })).toBe('fail');
+    expect(judged({ type: 'at-least', count: 3 })).toBe('pass');
+    // A capped count is never a pass where the true count is still open.
+    expect(judged({ type: 'at-most', count: 3 })).toBe('inconclusive');
+    expect(judged({ type: 'exact-count', count: 3 })).toBe('inconclusive');
   });
 
   it('keeps the first matched nodes in document order, never more than asked', () => {

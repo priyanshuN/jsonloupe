@@ -120,11 +120,24 @@ describe('exit status', () => {
     const r = await check(pb, await file('ids.json', IDS));
     expect(r.code).toBe(4);
     expect(r.out).toContain(
-      '? one row per id — Inconclusive — at least 1,00,000 distinct values; expected exactly 1,00,001 distinct values' +
+      '? one row per id — Inconclusive — at least 1,00,001 distinct values; expected exactly 1,00,001 distinct values' +
         ' · stopped counting at 1,00,000 distinct values (the cardinality cap) — narrow the query\n',
     );
     expect(r.out).toContain('✓ has ids — Pass — 1,00,001 matches; expected at least 1,000 matches');
     expect(r.out.trimEnd().split('\n').at(-1)).toBe('? 1 inconclusive · ✓ 1 passed');
+  });
+
+  it('is 3, not 4, when a capped count is already over the limit', async () => {
+    // 1,00,001 distinct ids stop the count at the cap with one more seen, so
+    // "at most 1,00,000" has provably failed and "at least 1,00,001" passed.
+    const pb = await playbook([
+      { name: 'at most the cap', query: '$.ids[*] | distinct', expectation: { type: 'at-most', count: 100_000 } },
+      { name: 'past the cap', query: '$.ids[*] | distinct', expectation: { type: 'at-least', count: 100_001 } },
+    ]);
+    const r = await check(pb, await file('ids.json', IDS));
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('✕ at most the cap — Fail — at least 1,00,001 distinct values; expected at most 1,00,000 distinct values');
+    expect(r.out).toContain('✓ past the cap — Pass — at least 1,00,001 distinct values');
   });
 });
 
@@ -364,7 +377,7 @@ describe('--format json', () => {
     const ids = await check(pb, await file('ids.json', IDS), '--format', 'json');
     expect(ids.code).toBe(4);
     const capped = JSON.parse(ids.out).documents[0].checks[0];
-    expect(capped).toMatchObject({ verdict: 'inconclusive', observed: 100_000, exact: false, unit: 'distinct' });
+    expect(capped).toMatchObject({ verdict: 'inconclusive', observed: 100_001, exact: false, unit: 'distinct' });
     expect(capped.note).toContain('the cardinality cap');
 
     const r = await check(pb, await orders(), '--format', 'json');
@@ -403,7 +416,7 @@ describe('--format github', () => {
     const [line] = r.out.split('\n').filter((l) => l.startsWith('::'));
     expect(line).toMatch(/^::warning file=.+,title=Check inconclusive%3A 100%25%3A ids%2C one each::/);
     // Data keeps its `:` and `,` — only properties lose them.
-    expect(line).toContain(' — Inconclusive — at least 1,00,000 distinct values;');
+    expect(line).toContain(' — Inconclusive — at least 1,00,001 distinct values;');
   });
 
   it('escapes CR, LF and % in a message', async () => {

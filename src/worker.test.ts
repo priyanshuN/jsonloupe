@@ -2099,7 +2099,7 @@ describe('checkMeasure', () => {
     parse(ORDERS);
     expect(measure('$.orders[*].id | distinct', 0, 2)).toEqual({
       ok: true,
-      observed: 2,
+      observed: 3,
       exact: false,
       unit: 'distinct',
       note: 'stopped counting at 2 distinct values (the cardinality cap) — narrow the query',
@@ -2160,8 +2160,9 @@ describe('query replies carry what a check would count', () => {
     expect(h<Counted>({ type: 'query', q: '$.items[*] | count' }).check).toEqual({ observed: 3, exact: true, unit: 'match' });
     expect(h<Counted>({ type: 'query', q: '$.items[*] | pluck(@.s)' }).check).toEqual({ observed: 3, exact: true, unit: 'match' });
     expect(h<Counted>({ type: 'query', q: '$.items[*].s | distinct' }).check).toEqual({ observed: 2, exact: true, unit: 'distinct' });
+    // Stopped at a cap of one by a second value: at least two, not one.
     expect(h<Counted>({ type: 'query', q: '$.items[*].s | distinct', cardinalityCap: 1 }).check)
-      .toEqual({ observed: 1, exact: false, unit: 'distinct' });
+      .toEqual({ observed: 2, exact: false, unit: 'distinct' });
     expect(h<Counted>({ type: 'query', q: '$.items[*] | sum(@.n)' }).check).toBeNull();
     expect(h({ type: 'query', q: '$.items[' })).not.toHaveProperty('check');
   });

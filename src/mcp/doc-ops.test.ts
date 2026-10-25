@@ -721,9 +721,9 @@ describe('checks', () => {
       { name: 'at most one status', query: '$.orders[*] | group(@.status)', expectation: { type: 'at-most', count: 1 } },
     ], 1, 2);
     expect(r.checks.map((c) => [c.verdict, c.observed, c.exact])).toEqual([
-      ['inconclusive', 2, false],
-      ['pass', 2, false],
-      ['fail', 2, false],
+      ['inconclusive', 3, false],
+      ['pass', 3, false],
+      ['fail', 3, false],
     ]);
     expect(r.checks[0].note).toBe('stopped counting at 2 groups (the cardinality cap) — narrow the query');
     expect(r.summary.verdict).toBe('fail');
