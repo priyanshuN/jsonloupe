@@ -106,14 +106,18 @@ flagged, with the original bytes preserved.
   containers so the heavy node is findable at a glance.
 - **Tables & CSV** — any array gets a sortable table view; export exact-digit
   CSV (RFC 4180) of tables or query results.
-- **Functions — a library of your own scripts** — write JavaScript for the
-  questions no query language should have to answer, keep it under a name, and press it
-  over tomorrow's file. Scripts run in an ephemeral sandbox worker with `fetch`,
+- **Playbook — your checks and functions on one sheet** — a check is a query
+  and the count it should come to (none, at most 3 groups, between 1 and 10);
+  `run all` judges every one over the open document and points at the first
+  nodes behind each failure. A function is JavaScript for the questions
+  no query language should have to answer, kept under a name and pressed over
+  tomorrow's file. Scripts run in an ephemeral sandbox worker with `fetch`,
   storage and the network removed, and the result opens as a document of its
   own. A function can keep JavaScript-number behavior or receive unsafe numeric
   literals as exact digit strings; safe numbers stay numbers in either mode.
   Tick several and one press answers all of them as a single report, honoring
-  each function's number contract.
+  each function's number contract. The same checks gate CI through
+  `jsonloupe check`.
   ([below](#playbooks-your-functions-and-checks-as-a-file).)
 - **JSON → Excel / CSV converter** — rename and reorder columns, choose source
   fields, add constants, set date and coordinate handling, take the column names
@@ -122,7 +126,7 @@ flagged, with the original bytes preserved.
 - **File handles** — drop `.json`/`.jsonl`/`.zst` files; reload re-reads from
   disk and shows what changed since the version you were looking at.
 - **Query** — run JSON queries locally, save useful ones, or turn a result into
-  a reusable pass/fail Check. Optional **English → query** mode translates a question using
+  a reusable check. Optional **English → query** mode translates a question using
   **only the document's shape (field names/types — never values)**, then stops
   so you can review the generated query before running it locally. Bring your
   own connection: authorize with OpenRouter without pasting a key, or use the
@@ -218,27 +222,83 @@ cannot read are reported or refused, never quietly written wrong.
 ## Playbooks: your functions and checks as a file
 
 The document changes daily; the handful of questions you ask of it does not. So
-**functions** opens on your library rather than an empty editor — named functions,
-newest first — and pressing one runs it over whatever is open. Tick several and
-one press answers all of them, as a single object keyed by function name: today's
-report, which downloads and reopens as a document like any other.
+**playbook** in the toolbar opens them beside the document, as one sheet: your
+**checks** — a query and the count it should come to — and your **functions**,
+each list in name order. `run all` (`⌘⇧↵`) measures every check over whatever
+is open and paints each row's verdict in place, then runs the ticked functions.
+The first row that did not pass opens by itself, showing the first nodes it
+matched; press a path and the tree beside the sheet selects that node, while
+the sheet stays where it is.
+
+### Checks
+
+Press **+ check** in the sheet, or turn a Query result into one with **save as
+check**. A check counts matches — groups for `| group`, distinct values for
+`| distinct` — and passes when the count meets its expectation:
+
+| Pass when | `expectation` | Playbook version |
+|---|---|---|
+| no matches are found | `{"type": "no-matches"}` | 3 |
+| at least one match is found | `{"type": "at-least-one"}` | 3 |
+| exactly N are found | `{"type": "exact-count", "count": N}` | 3 |
+| at most N are found | `{"type": "at-most", "count": N}` | 4 |
+| at least N are found (N ≥ 1) | `{"type": "at-least", "count": N}` | 4 |
+| between M and N are found, both included | `{"type": "between", "min": M, "max": N}` | 4 |
+
+A count is a whole number within JavaScript's safe range; one past it is
+refused, never rounded. A query that ends in `| sum`, `| avg`, `| min` or
+`| max` yields one value rather than a count, so a check on it says it could
+not run instead of judging a number it was never meant to count.
+
+Every check comes back as **✓ pass**, **✕ fail**, **? inconclusive**, or **✗
+could not run**. Inconclusive is the honest third answer: `| group` and
+`| distinct` stop counting at 100,000 values (the cardinality cap), and past
+that point the count is only a lower bound. A lower bound passes only when it
+proves the expectation by itself (*at least one*, or *at least N* already
+reached), fails when it is already over the limit, and is inconclusive
+otherwise — it is never reported as a pass it has not earned. Narrowing the
+query decides it.
+
+A saved check keeps its last verdict for the document it ran on, with up to
+five matched paths and a short preview of each. Reopen that document and the
+verdicts are still there; edit it and they fade, marked "document edited",
+until you run again. That record stays in this browser: it is never written
+into an exported playbook, and removing the document removes it.
+
+### Functions
 
 A function learns what it reads. The first time one runs it is handed the
 document through a recording proxy, and the paths it actually touched are kept
-with it. That is what lets the panel say
+with it. That is what lets the sheet say
 
 > this reads `orders`, `orders[].deliveredInHours` — this document has none of that
 
 *before* you press run, instead of leaving you to read an empty result as "none
 today". It is always a remark and never a gate: the reading knows only the branch
-that last run took, so the run button still works.
+that last run took, so the run button still works. Tick several functions and
+one press answers all of them, as a single object keyed by function name:
+today's report, which downloads and reopens as a document like any other. A
+function's result lasts for the session; after a reload its row says it has
+not run.
+
+Scripts run in an ephemeral worker with `fetch`, `XMLHttpRequest`, WebSockets,
+IndexedDB, `importScripts` and nested workers removed before any user code, terminated on its
+result or after ten seconds — a pasted script cannot reach the network or the
+documents you have opened. `JavaScript` number mode preserves the behavior of
+existing functions and says when a document contains values it will round.
+`exact text` mode instead hands those unsafe literals to the function as their
+original digit strings (`"9007199254740993"`); ordinary values such as `3` and
+`1.5` remain numbers, so normal counting and arithmetic still work. The mode is
+saved and exported with the function rather than left as a browser preference.
+
+### The file
 
 A playbook is that reusable work as a file — the questions and expectations,
 never the data:
 
 ```json
 {
-  "playbookVersion": 3,
+  "playbookVersion": 4,
   "name": "carrier dumps",
   "functions": [
     {
@@ -253,30 +313,99 @@ never the data:
       "name": "no failed orders",
       "query": "$.orders[?(@.status == 'FAILED')]",
       "expectation": { "type": "no-matches" }
+    },
+    {
+      "name": "a full day of orders",
+      "query": "$.orders[*]",
+      "expectation": { "type": "at-least", "count": 1000 }
+    },
+    {
+      "name": "a handful of carriers",
+      "query": "$.orders[*] | group(@.carrier)",
+      "expectation": { "type": "between", "min": 1, "max": 5 }
     }
   ]
 }
 ```
 
-Export writes one; dropping one on the window installs it. Import **merges and
-never replaces** — a name you already use keeps yours and the incoming one lands
-as `slow orders 2`, because a duplicate is one `×` away and an overwrite is not.
-Unknown fields are refused by name rather than dropped, so a file from a newer
-jsonloupe cannot import as a subset of itself and look like it worked. The
-library keeps 100 functions and 100 checks; a playbook that would not fit is
-refused whole, rather than pushing your oldest ones out.
+Export writes one, at the lowest version that can hold what is in it: a library
+with no `at-most`, `at-least` or `between` check still exports as version 3,
+which jsonloupe 1.7 reads. Dropping one on the window installs it. Import
+**merges and never replaces** — a name you already use keeps yours and the
+incoming one lands as `slow orders 2`, because a duplicate is one `×` away and
+an overwrite is not. Unknown fields are refused by name rather than dropped, so
+a file from a newer jsonloupe cannot import as a subset of itself and look like
+it worked. The library keeps 100 functions and 100 checks: saving a 101st is
+refused with a message saying so, and a playbook that would not fit is refused
+whole, rather than pushing your oldest ones out. Version 1, 2 and 3 playbooks
+still import; version 1 functions keep their original JavaScript-number mode.
 
-Scripts run in an ephemeral worker with `fetch`, `XMLHttpRequest`, WebSockets,
-IndexedDB, `importScripts` and nested workers removed before any user code, terminated on its
-result or after ten seconds — a pasted script cannot reach the network or the
-documents you have opened. `JavaScript` number mode preserves the behavior of
-existing functions and says when a document contains values it will round.
-`exact text` mode instead hands those unsafe literals to the function as their
-original digit strings (`"9007199254740993"`); ordinary values such as `3` and
-`1.5` remain numbers, so normal counting and arithmetic still work. The mode is
-saved and exported with the function rather than left as a browser preference.
-Version 1 and 2 playbooks still import; version 1 functions keep their original
-JavaScript-number mode.
+### In CI: `jsonloupe check`
+
+The same checks gate a pipeline. `jsonloupe check` runs a playbook's checks
+against one or more files with the browser's own engine, and exits non-zero
+when one fails:
+
+```bash
+npx -y jsonloupe@^1.8.0 check carrier-dumps.playbook.json out/orders.json
+```
+
+```
+out/orders.json · 3 checks · 4 ms
+  ✕ no failed orders — Fail — 2 matches; expected no matches
+      first: $.orders[312]
+             $.orders[877]
+  ✓ a full day of orders — Pass — 1,204 matches; expected at least 1,000 matches
+  ✓ a handful of carriers — Pass — 3 groups; expected between 1 and 5 groups
+1 function not run — functions run only in the browser
+✕ 1 failed · ✓ 2 passed
+```
+
+Pin the version. jsonloupe before 1.8 has no `check` verb: it starts the viewer
+instead and waits for a browser that a CI runner never opens. From 1.8 on, a
+word jsonloupe does not know exits 1 rather than starting anything.
+
+The playbook comes first, then any number of files: `.json`, `.jsonl`/`.ndjson`,
+raw Zstd, or a Base64-Zstd / bytea payload, detected as they are in the
+browser. A file that is not valid JSON fails the gate rather than being repaired
+behind your back; `--allow-repair` checks the repaired document instead. Every
+query is checked before any file is read, so a typo in the last check costs no
+parsing. Functions are JavaScript and never run outside the browser's sandbox,
+so `check` counts them and says it did not run them. The text report prints
+matched paths and never values, since CI logs are often public; `--format json`
+writes one object with short previews for a program to read, and
+`--max-evidence N` (0–100, default 3) or `--no-evidence` sets how many paths a
+check that did not pass names.
+
+| Exit status | Meaning |
+|---|---|
+| 0 | every check passed on every file |
+| 1 | usage, read or parse error — including a file that would need repairing |
+| 2 | the playbook is invalid, has no checks, or has a query no check can count; nothing was checked |
+| 3 | at least one check failed |
+| 4 | nothing failed, but a check was inconclusive or could not run |
+
+With several files the most actionable status wins: 3, then 1, then 4. Undecided
+has its own status so a pipeline can tolerate it on purpose
+(`… || test $? -eq 4`).
+
+In GitHub Actions, `--format github` adds an annotation on the playbook for each
+check that did not pass — a warning when it was inconclusive, an error otherwise:
+
+```yaml
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npx -y jsonloupe@^1.8.0 check carrier-dumps.playbook.json out/orders.json --format github
+```
+
+An agent gets the same gate from the MCP server's `run_checks`
+([below](#use-with-ai-agents)), with a playbook's path or the checks inline.
 
 ## Use with AI agents
 
@@ -293,9 +422,11 @@ have to be decoded first, int64 and decimal digits that must survive the whole
 pipeline exactly, identity-keyed semantic diff between two documents, and MCP
 hosts that have no shell to run jq in.
 
-Eleven tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
+Twelve tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
 `diff_docs`, `export_csv`, `export_result`, plus `inspect`, `draft_spec`, and
-`convert` for the spreadsheet path above. For one question, pass `filePath`
+`convert` for the spreadsheet path above, and `run_checks`, which gates a
+document on a [playbook](#playbooks-your-functions-and-checks-as-a-file)'s
+checks and never runs its functions. For one question, pass `filePath`
 straight to a tool; it opens the document and returns a reusable `docId` in the
 same call. For a sequence of questions, call `load_doc` once and reuse that
 `docId`. Query details default to 10 rows (use `limit=0` for summary only, or
@@ -319,6 +450,9 @@ draft_spec d1 outPath=tasks.spec.json
                                   → reviewable mapping on disk
 convert d1 specPath=tasks.spec.json outPath=tasks.xlsx
                                   → workbook path + row/skipped/warning counts, never its rows
+run_checks d1 playbookPath=tasks.playbook.json
+                                  → pass, fail or inconclusive per check; a failure names its
+                                    first paths ($.tasks[3]); functions counted, never run
 ```
 
 The common schema → profile → query loop is deliberately cheaper than loading
