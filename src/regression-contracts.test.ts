@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateCheck } from './check';
 import { fmtBytes, hasRawZstdMagic, payloadSniffNeedsDecode } from './intake';
-import { runQuery } from './query';
+import { checkCountOf, runQuery } from './query';
 import appHtml from '../index.html?raw';
 import converterHtml from '../json-to-excel.html?raw';
 import readme from '../README.md?raw';
@@ -508,14 +508,26 @@ describe('interactive UI regression contracts', () => {
     // groups and the real number in `total`. A check that counted the page
     // would pre-fill "exactly 1000" and keep passing on 2000 groups.
     const items = Array.from({ length: 1500 }, (_, id) => ({ id }));
-    const grouped = runQuery({ items }, '$.items[*] | group(@.id)');
+    const q = '$.items[*] | group(@.id)';
+    const grouped = runQuery({ items }, q);
     if (!grouped.ok || grouped.kind !== 'groups') throw new Error('expected groups');
     expect(grouped.groups).toHaveLength(1000);
-    expect(evaluateCheck({ type: 'exact-count', count: 1500 }, grouped.total).pass).toBe(true);
+    const counted = checkCountOf(q, grouped);
+    expect(counted).toEqual({ observed: 1500, exact: true, unit: 'group' });
+    expect(evaluateCheck({ type: 'exact-count', count: 1500 }, counted!.observed, counted!).pass).toBe(true);
+    // The page reads the engine's count and never re-derives one from a result
+    // shape — that is how `| sum` = 12 once counted as "12 matches", and how a
+    // capped group count once passed as exact.
     const count = mainSource.match(/function queryResultCount\([\s\S]*?\n\}/)?.[0] ?? '';
-    expect(count).toMatch(/res\.kind === 'groups'\) return res\.total;/);
+    expect(count).toContain('return res?.ok ? res.check?.observed ?? null : null;');
     expect(count).not.toContain('groups.length');
+    expect(count).not.toContain('res.value');
     expect(mainSource).toContain('more.textContent = `… +${fmtNumber(res.total - 50)} more groups`');
+    // A capped count reaches the verdict as the lower bound it is.
+    const preview = mainSource.match(/function paintCheckPreview\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(preview).toContain('evaluateCheck(expectation, observed, { exact: counted?.exact, unit: counted?.unit })');
+    const commit = mainSource.match(/function commitQueryResult\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(commit).toContain('judgeCheck(runningCheck, { ok: true, ...counted, evidence: [] }, 0)');
   });
 
   it('exports a playbook\'s checks by name, query and expectation alone, at the lowest version that holds them', () => {

@@ -94,7 +94,8 @@ import {
   functionActionState,
 } from './run-script';
 import type { SavedCheck, SavedScript } from './db';
-import { evaluateCheck, expectationText, type CheckExpectation } from './check';
+import { evaluateCheck, expectationText, type CheckExpectation, type CheckUnit } from './check';
+import { judgeCheck, VERDICT_MARK, type RunVerdict } from './playbook-run';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
 import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, playbookVersionFor } from './playbook';
@@ -4736,11 +4737,16 @@ $('#table-close').addEventListener('click', () => showTree());
 
 // ---------- ask: English questions & direct queries ----------
 
+// What a saved check would count for a result, as the worker decided it
+// (query.ts checkCountOf): null for a value pipe, `exact: false` for a group or
+// distinct count that hit its cap and is only a lower bound.
+type QueryCheckCount = { observed: number; exact: boolean; unit: CheckUnit } | null;
+
 type QueryResp =
-  | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: { i: number; pathText: string; preview: string }[] }
-  | { ok: true; kind: 'value'; label: string; value: number | string | null; note?: string }
-  | { ok: true; kind: 'groups'; label: string; total: number; groups: { key: string; count: number }[]; truncated: boolean }
-  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean }
+  | { ok: true; kind: 'matches'; total: number; truncated: boolean; matches: { i: number; pathText: string; preview: string }[]; check?: QueryCheckCount }
+  | { ok: true; kind: 'value'; label: string; value: number | string | null; note?: string; check?: QueryCheckCount }
+  | { ok: true; kind: 'groups'; label: string; total: number; groups: { key: string; count: number }[]; truncated: boolean; check?: QueryCheckCount }
+  | { ok: true; kind: 'rows'; cols: string[]; rows: string[][]; total: number; truncated: boolean; check?: QueryCheckCount }
   | { ok: false; error: string; pos: number };
 
 const askPanel = $('#ask-panel');
@@ -4847,7 +4853,7 @@ let runningCheck: SavedCheck | null = null;
 // empty, so each renderer records its own count rather than its own wrapper.
 let keptQueryCount = 0;
 let keptCheckCount = 0;
-const checkRuns = new Map<string, { pass: boolean; summary: string }>();
+const checkRuns = new Map<string, store.CheckLastRun>();
 const OPENROUTER_MODEL_STORAGE = 'wb-openrouter-model';
 let openRouterModelMemory: OpenRouterModel = OPENROUTER_FREE_MODEL;
 
@@ -5280,14 +5286,14 @@ function setAskFail(msg: string | null, preview = false): void {
   askFail.append(msg);
 }
 
-// VERDICT (tier 2, leading the answer): a saved check's pass/fail. The one
+// VERDICT (tier 2, leading the answer): a saved check's verdict. The one
 // sentence this panel prints that no control on screen already says, which is
 // why it is the only one that kept a band of its own.
-function setAskVerdict(msg: string | null, pass?: boolean): void {
+function setAskVerdict(msg: string | null, verdict?: RunVerdict): void {
   askVerdict.hidden = !msg;
   askVerdict.textContent = msg ?? '';
-  askVerdict.classList.remove('pass', 'fail');
-  if (msg && pass !== undefined) askVerdict.classList.add(pass ? 'pass' : 'fail');
+  askVerdict.classList.remove('pass', 'fail', 'inconclusive', 'error');
+  if (msg && verdict !== undefined) askVerdict.classList.add(verdict);
 }
 
 /** The answer zone, emptied — summary, actions, body and verdict together. */
@@ -5355,19 +5361,16 @@ function queryCsvButton(): HTMLButtonElement {
   return btn;
 }
 
+// The count is the worker's, never a reading of the result shape here: that
+// reading once counted `| sum` = 12 as "12 matches" and took a capped group
+// count for an exact one. The worker counts every group, not the first page.
 function queryResultCount(res: QueryResp | null): number | null {
-  if (!res?.ok) return null;
-  // `groups` is the first page (the engine caps it at 1000); a check counts
-  // every group, exactly as it counts every match or row.
-  if (res.kind === 'matches' || res.kind === 'rows' || res.kind === 'groups') return res.total;
-  if (res.kind === 'value' && typeof res.value === 'number' && Number.isSafeInteger(res.value) && res.value >= 0) {
-    return res.value;
-  }
-  return null;
+  return res?.ok ? res.check?.observed ?? null : null;
 }
 
 function paintCheckPreview(): void {
   const observed = lastCommittedResult ? queryResultCount(lastCommittedResult) : null;
+  const counted = lastCommittedResult?.ok ? lastCommittedResult.check : null;
   const exact = Number.parseInt(checkCount.value, 10);
   const expectation: CheckExpectation = checkExpectation.value === 'at-least-one'
     ? { type: 'at-least-one' }
@@ -5381,8 +5384,10 @@ function paintCheckPreview(): void {
     checkPreview.textContent = 'Run a query that returns a countable result first.';
     return;
   }
-  const evaluation = evaluateCheck(expectation, observed);
-  checkPreview.textContent = `Would ${evaluation.summary.toLowerCase()}`;
+  const evaluation = evaluateCheck(expectation, observed, { exact: counted?.exact, unit: counted?.unit });
+  checkPreview.textContent = evaluation.verdict === 'inconclusive'
+    ? `Would be ${evaluation.summary.toLowerCase()}`
+    : `Would ${evaluation.summary.toLowerCase()}`;
   checkPreview.classList.add(evaluation.pass ? 'pass' : 'fail');
 }
 
@@ -5392,10 +5397,17 @@ function commitQueryResult(query: string, res: QueryResp): void {
   renderAskResult(res, false);
   const observed = queryResultCount(res);
   askSaveCheck.disabled = observed === null;
-  if (runningCheck && observed !== null) {
-    const evaluation = evaluateCheck(runningCheck.expectation, observed);
-    checkRuns.set(runningCheck.id, { pass: evaluation.pass, summary: evaluation.summary });
-    setAskVerdict(`${runningCheck.name}: ${evaluation.summary}`, evaluation.pass);
+  const counted = res.ok ? res.check : null;
+  if (runningCheck && counted) {
+    // Judged by the runner, so a capped count reads inconclusive here exactly
+    // as it does in a run of every check. The hits on screen carry no path
+    // segments, so this in-memory run keeps no evidence.
+    const outcome = judgeCheck(runningCheck, { ok: true, ...counted, evidence: [] }, 0);
+    checkRuns.set(
+      runningCheck.id,
+      store.lastRunOf(outcome, { id: currentDocId ?? '', hash: store.sampleHash(currentText) }, Date.now()),
+    );
+    setAskVerdict(`${runningCheck.name}: ${outcome.summary}`, outcome.verdict);
   } else {
     setAskVerdict(null);
   }
@@ -5857,10 +5869,10 @@ async function renderSavedChecks(): Promise<void> {
     chip.dataset.id = check.id;
     chip.title = `${check.query} · expected ${expectationText(check.expectation)}`;
     const latest = checkRuns.get(check.id);
-    if (latest) chip.classList.add(latest.pass ? 'pass' : 'fail');
+    if (latest) chip.classList.add(latest.verdict);
     const mark = document.createElement('span');
     mark.className = 'check-mark';
-    mark.textContent = latest ? (latest.pass ? '✓' : '✕') : '◇';
+    mark.textContent = latest ? VERDICT_MARK[latest.verdict] : '◇';
     const label = document.createElement('span');
     label.textContent = check.name.length > 38 ? `${check.name.slice(0, 38)}…` : check.name;
     const del = document.createElement('button');
