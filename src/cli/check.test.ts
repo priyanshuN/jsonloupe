@@ -451,6 +451,54 @@ describe('--format github', () => {
     expect(line).toContain('odd%0Aname%25.json — Fail');
   });
 
+  it('never lets a file name or the playbook start a workflow command of its own', async () => {
+    // The runner reads stdout and stderr line by line and obeys any line that
+    // begins `::`. Only the annotations the CLI writes itself may.
+    const own = (r: { out: string; err: string }) =>
+      `${r.out}\n${r.err}`.split('\n').filter((line) => /^\s*::/.test(line));
+    const pb = await playbook([NO_ORPHANS]);
+    const broken = await file('odd\n::warning file=x::forged.json', ORDERS);
+    await writeFile(join(dir, '::notice::lead.json'), ORDERS);
+    const missing = join(dir, 'gone\n::add-mask::secret.json');
+    // A relative name is what can start a line, so this one runs from `dir`.
+    const cwd = process.cwd();
+    process.chdir(dir);
+    let r: Awaited<ReturnType<typeof check>>;
+    try {
+      r = await check(pb, broken, '::notice::lead.json', missing, '--format', 'github');
+    } finally {
+      process.chdir(cwd);
+    }
+    expect(r.code).toBe(3);
+    // The header names the file it always named: ./ in front, the same path.
+    expect(r.out).toContain('./::notice::lead.json · 1 check');
+    expect(r.out).toContain('odd\\n::warning file=x::forged.json · 1 check');
+    expect(r.out).toContain('gone\\n::add-mask::secret.json — ENOENT');
+    const commands = own(r);
+    expect(commands).toHaveLength(3);
+    for (const line of commands) expect(line).toMatch(/^::error file=[^\n]+,title=(Check failed%3A|File not checked::)/);
+
+    // A playbook's own text reaches stderr when it is refused: an unknown
+    // field quotes its key, and a query that cannot run names its check.
+    const stray = await file('stray.playbook.json', JSON.stringify({
+      playbookVersion: 4,
+      functions: [],
+      checks: [{ ...NO_ORPHANS, 'x\n::stop-commands::tok': 1 }],
+    }));
+    for (const format of ['text', 'github']) {
+      const refused = await check(stray, await orders(), '--format', format);
+      expect(refused.code).toBe(2);
+      expect(refused.err).toContain('unknown field `x\\n::stop-commands::tok`');
+      expect(own({ out: '', err: refused.err })).toEqual([]);
+    }
+    // A name that breaks the line is refused without being quoted.
+    const named = await playbook([{ ...NO_ORPHANS, name: 'ok\n::add-mask::secret' }]);
+    const byName = await check(named, await orders(), '--format', 'github');
+    expect(byName.code).toBe(2);
+    expect(byName.err).toContain('check 1 has a line break or control character in its name');
+    expect(`${byName.out}${byName.err}`).not.toContain('add-mask');
+  });
+
   it('annotates a file it could not check', async () => {
     const pb = await playbook([HAS_ORDERS]);
     const missing = join(dir, 'missing-for-ci.json');

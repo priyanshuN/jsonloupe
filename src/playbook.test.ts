@@ -120,6 +120,29 @@ describe('parsePlaybook', () => {
     const res = parsePlaybook('{"playbookVersion":2,"functions":[{"name":"a","script":"data","reads":"orders","numberMode":"js"}]}');
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('`reads`') });
   });
+
+  it('refuses a name that breaks the line, by position, never quoting it', () => {
+    // A check name is printed on a line of its own in CI logs, where a second
+    // line beginning `::` is a GitHub workflow command.
+    const forged = 'no orphans\n::add-mask::secret';
+    const check = (name: string) => ({ name, query: '$.a', expectation: { type: 'no-matches' } });
+    const fn = (name: string) => ({ name, script: 'data', numberMode: 'js' });
+    const cases: [Record<string, unknown>, string][] = [
+      [{ functions: [], checks: [check('ok'), check(forged)] }, 'check 2 has a line break or control character in its name'],
+      [{ functions: [fn(forged)], checks: [] }, 'function 1 has a line break or control character in its name'],
+      [{ name: forged, functions: [], checks: [] }, '`name` has a line break or control character in it'],
+      [{ functions: [], checks: [check('bad\r')] }, 'check 1 has a line break'],
+      [{ functions: [], checks: [check('bad\u2028')] }, 'check 1 has a line break'],
+      [{ functions: [], checks: [check('bad\u0000')] }, 'check 1 has a line break'],
+    ];
+    for (const [body, error] of cases) {
+      const res = parsePlaybook(JSON.stringify({ playbookVersion: 4, ...body }));
+      expect(res).toEqual({ ok: false, error: expect.stringContaining(error) });
+      if (!res.ok) expect(res.error).not.toContain('add-mask');
+    }
+    // A tab breaks no line, and an input can hold one, so it stays legal.
+    expect(parsePlaybook(JSON.stringify({ playbookVersion: 4, functions: [], checks: [check('a\tb')] })).ok).toBe(true);
+  });
 });
 
 describe('playbook version 4', () => {

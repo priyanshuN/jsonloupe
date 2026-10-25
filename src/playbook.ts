@@ -65,6 +65,14 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+/**
+ * A line break or other control character (a tab is fine). A name is printed
+ * on a line of its own in the CLI report, the MCP text and CI logs, where a
+ * name that breaks the line can start a GitHub workflow command of its own
+ * (`::add-mask::`, `::stop-commands::`) — and no real name needs one.
+ */
+const NAME_CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f\u2028\u2029]/;
+
 function unknownKey(value: Record<string, unknown>, allowed: Set<string>): string | null {
   for (const key of Object.keys(value)) if (!allowed.has(key)) return key;
   return null;
@@ -105,6 +113,9 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   if (raw.name !== undefined && typeof raw.name !== 'string') {
     return { ok: false, error: '`name` must be text' };
   }
+  if (typeof raw.name === 'string' && NAME_CONTROL.test(raw.name)) {
+    return { ok: false, error: '`name` has a line break or control character in it' };
+  }
   if (!Array.isArray(raw.functions)) return { ok: false, error: '`functions` must be a list' };
 
   const functions: PlaybookFunction[] = [];
@@ -117,6 +128,8 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
     if (typeof entry.name !== 'string' || !entry.name.trim()) {
       return { ok: false, error: `${at} has no name` };
     }
+    // Before any message that quotes the name, so none of them can carry one.
+    if (NAME_CONTROL.test(entry.name)) return { ok: false, error: `${at} has a line break or control character in its name` };
     if (typeof entry.script !== 'string' || !entry.script.trim()) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has no script` };
     }
@@ -146,6 +159,7 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
     const strayKey = unknownKey(entry, CHECK_KEYS);
     if (strayKey) return { ok: false, error: `${at} has an unknown field \`${strayKey}\`` };
     if (typeof entry.name !== 'string' || !entry.name.trim()) return { ok: false, error: `${at} has no name` };
+    if (NAME_CONTROL.test(entry.name)) return { ok: false, error: `${at} has a line break or control character in its name` };
     if (typeof entry.query !== 'string' || !entry.query.trim()) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has no query` };
     }

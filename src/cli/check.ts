@@ -294,11 +294,12 @@ async function refuse(
 ): Promise<void> {
   const { problems, hint } = load;
   // stderr says it to a person in every format; stdout says it to whatever
-  // reads the chosen format.
+  // reads the chosen format. A problem can quote the playbook (an unknown
+  // field's key), so each is made one line before it is printed.
   io.err(
     (load.queries
-      ? `jsonloupe: ${problems.length} check${problems.length === 1 ? '' : 's'} in ${a.playbook} cannot run, so nothing was checked:\n${problems.map((p) => `  ${p}`).join('\n')}`
-      : `jsonloupe: ${problems[0]}`) + (hint ? `\n  hint: ${hint}` : '') + '\n',
+      ? `jsonloupe: ${problems.length} check${problems.length === 1 ? '' : 's'} in ${oneLine(a.playbook)} cannot run, so nothing was checked:\n${problems.map((p) => `  ${oneLine(p)}`).join('\n')}`
+      : `jsonloupe: ${oneLine(problems[0])}`) + (hint ? `\n  hint: ${oneLine(hint)}` : '') + '\n',
   );
   if (a.format === 'json') {
     await io.out(`${JSON.stringify({
@@ -359,6 +360,25 @@ function shownEvidence(outcome: CheckOutcome): CheckOutcome['evidence'] {
 
 // ---------- text ----------
 
+/**
+ * Text from a playbook, a file name or an error, made one line of a report.
+ * A line break in any of them starts a line of its own, and in a GitHub
+ * Actions log — stdout and stderr alike — a line beginning `::` is a workflow
+ * command (`::add-mask::`, `::stop-commands::`). A playbook is untrusted
+ * input, so it must not be able to write one: control characters are shown as
+ * escapes. (A tab breaks no line, so it stays.)
+ */
+function oneLine(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000a-\u001f\u007f\u2028\u2029]/g, (c) =>
+    c === '\n' ? '\\n' : c === '\r' ? '\\r' : `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/** A path that STARTS a line could still begin a command; `./` names the same file. */
+function linePath(path: string): string {
+  const safe = oneLine(path);
+  return /^\s*::/.test(safe) ? `./${safe}` : safe;
+}
+
 function loadNote(load: LoadResult): string {
   const notes = [load.jsonl && 'jsonl', load.repaired && 'repaired', load.decoded].filter(
     (n): n is string => typeof n === 'string' && n.length > 0,
@@ -371,11 +391,11 @@ function loadNote(load: LoadResult): string {
  * public, and a preview is document data.
  */
 function docText(result: DocResult): string {
-  if (!result.ok) return `${VERDICT_MARK.error} ${result.path} — ${result.error}`;
+  if (!result.ok) return `${VERDICT_MARK.error} ${oneLine(result.path)} — ${oneLine(result.error)}`;
   const n = result.outcomes.length;
-  const lines = [`${result.path}${loadNote(result.load)} · ${n} check${n === 1 ? '' : 's'} · ${result.summary.ms} ms`];
+  const lines = [`${linePath(result.path)}${loadNote(result.load)} · ${n} check${n === 1 ? '' : 's'} · ${result.summary.ms} ms`];
   for (const outcome of result.outcomes) {
-    lines.push(`  ${outcomeLine(outcome)}`);
+    lines.push(`  ${oneLine(outcomeLine(outcome))}`);
     for (const [i, e] of shownEvidence(outcome).entries()) {
       lines.push(`${i ? '             ' : '      first: '}${e.pathText}`);
     }
