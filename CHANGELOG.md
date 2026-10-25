@@ -2,6 +2,141 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## 1.8.0 — 2026-10-25
+
+- **Playbook: run your checks as a set.** The functions view is now the
+  playbook view: saved checks and functions on one sheet. Each check shows its
+  last verdict (✓ pass, ✕ fail, ? inconclusive, ✗ could not run), and each
+  function a few words on its last result in this session. **run all** (⌘⇧↵,
+  Ctrl ⇧↵ elsewhere) judges every check over the open document, then runs the
+  ticked functions as one report. The first check that did not pass opens by
+  itself with its first matched paths, and pressing one selects that row in
+  the tree without leaving the view. Checks are written, edited, run and
+  forgotten (with undo) in the view, as well as saved from Query. ⌘K still
+  finds the view by the word "functions".
+- **More pass conditions, and an honest "inconclusive".** Besides none, at
+  least one and exactly N, a check can now pass on at most N, at least N, or
+  between M and N. When `| group` or `| distinct` reaches its 100,000-value
+  cap, the count is only a lower bound. It passes an *at least* condition it
+  already meets, fails a limit it is already past, and otherwise says
+  inconclusive.
+- **Check results are kept.** Each check keeps its last verdict and up to five
+  matched paths across reloads, for the one document it last ran on. Running
+  it on another document replaces them. Editing the document draws them faint,
+  marked "document edited", until you run again. Reloading it from disk, or
+  reopening it after an edit, sets them back to not run. A check whose query
+  names a field the document does not have says so, since a "no matches"
+  check passes just as well on a renamed field.
+- **`jsonloupe check`, for CI.** `npx jsonloupe check <playbook> <file…>` runs
+  a playbook's checks with the browser's own engine. It exits 0 when every
+  check passes on every file, 3 when one fails, and 4 when nothing failed but
+  a check was inconclusive or could not run. 1 is a usage, read or parse
+  error. 2 is a playbook that is invalid, has no checks, or holds a query no
+  check can count, such as `| sum`, and nothing is checked then. It reads
+  `.json`, `.jsonl`, raw Zstd, Base64-Zstd and bytea, and refuses a file that
+  is not valid JSON unless `--allow-repair` is given. `--format json` and
+  `--format github` (workflow annotations) change the output, and
+  `--max-evidence N` or `--no-evidence` sets how many matched paths a failing
+  check shows. Functions are counted, never run outside the browser. Pin
+  `jsonloupe@^1.8.0` in CI: earlier versions start the viewer for `check` and
+  wait.
+- **MCP `run_checks`**, the twelfth tool, gives an agent the same verdicts from
+  a playbook file or from checks passed inline. Like `jsonloupe check`, it
+  refuses a document that is not valid JSON unless `allowRepair` is set.
+- **Playbook format 4** carries the new conditions. Export still writes version
+  3 when no check needs 4, so jsonloupe 1.4 to 1.7 can read it.
+- **Landing pages.** json-editor.html, json-diff.html and
+  large-json-viewer.html each hand what you paste to the app, the diff page as
+  two documents to compare. The JSON to Excel page shows the converter's real
+  output for a sample you can open in one press. Shared links now get a
+  preview card, and the public pages a sitemap and canonical links.
+- **Converter.** A top-level list becomes a `rows` sheet instead of `$`. The
+  preview draws spreadsheet gridlines and row numbers, and each column's
+  settings fold behind a ▸. A sheet is renamed in the "sheet" field above its
+  columns, no longer in the rail. A mapping whose missing-value default is not
+  text, such as `"onMissing": 0`, is now refused with a hint to put it in
+  quotes. It used to fail the XLSX or CSV export at its first empty cell.
+- **Loaded when used.** The converter view now loads on its first open. The
+  code editor ships as 2 files instead of 9, so opening the code view fetches
+  3 files instead of 10.
+- **The sidebar footer** links to the source on GitHub and to GitHub Sponsors,
+  and its about link now works in the same tab.
+- **The MCP server reports the package version** in its handshake.
+- **Query fixes**, each with a regression test. Queries ranked numbers between
+  0 and 1 below zero (since 1.2): `@.p > 0` skipped 0.5, `@.p < 0` matched it,
+  and min, max and top put zero on the wrong side. Group checks counted only
+  the first page. Queries treated built-in names such as `constructor` and
+  `toString` as keys every record had.
+- **Document fixes.** A document with a repeated key now opens and keeps that
+  key's last value, as JSON.parse and jq do. Earlier values are dropped
+  without a notice. One such line used to fail a whole JSONL file. A
+  `__proto__` member is now an ordinary key, not the object's prototype.
+  Multi-frame Zstd, and bytea with surrounding whitespace, now decode. An
+  edit, unpack or Apply made while another document was opening could land on
+  the wrong document or never be saved. A playbook refused because the
+  library was full opened as a JSON document over the one on screen.
+- **Compare and table fixes.** Compare reported a reordered array of objects
+  with no identity key as changes to every element, not as a reorder. It
+  called two objects different when keys that differ only by case or accent
+  (`a` and `A`) came in a different order. It counted guessed pairings of
+  duplicate identities as moves, and asked to review an array that was empty
+  on one side. A descending table sort put records missing the field first,
+  and the table view could pass its 40-column cap.
+- **Converter fixes.** `_parent_row` pointed at the wrong parent after a
+  skipped parent row. A key containing a dot (`"user.id"`) came out as an
+  empty column, or a sheet with no rows, without a warning. After an edit or
+  unpack, the converter kept offering the fields from before. XLSX rounded a
+  decimal with more than 15 significant digits in all, such as
+  123456789012345.678, and now writes it as text. Long whole numbers were
+  already text. A U+FFFE or U+FFFF in a cell, key or sheet name made Excel
+  offer to repair the workbook. They are now dropped, as control characters
+  already were.
+- **Other fixes.** Functions failed every time under `npx jsonloupe` (since
+  1.3), because the page's CSP also reached the sandbox worker. The packaged
+  server now gives the sandbox its own policy, which also keeps a function's
+  `import()` from loading code from another site. MCP: a failed load in a
+  full pool closed a live document, `sample` could return fewer values than
+  asked, and the truncation notice was off by one. The glass band on the spec
+  page is gone, and its back link returns to the about page.
+- **Security.** With an empty `OPENROUTER_API_KEY=` or `ANTHROPIC_API_KEY=`
+  line, `jsonloupe --key-file` read the next line as the key, and the page
+  could send that line, which may hold another secret, to OpenRouter. An
+  unquoted value now also ends at a ` # comment`. A request with a malformed
+  `%` escape, which any web page could send, crashed `npx jsonloupe`; it now
+  gets a 400. The Run sandbox now removes `Worker`, `SharedWorker`,
+  `WebTransport` and `BroadcastChannel`, since a function could start a nested
+  worker that had `fetch` and IndexedDB back.
+- **Dependencies.** `jsonloupe-mcp` is now built with zod 4.6.7 and fast-uri
+  3.1.9, which clear new security advisories (zod's could exhaust memory
+  while validating oversized input). vite, and body-parser and ip-address
+  under the MCP SDK, are updated too. They only build and test jsonloupe and
+  are not part of what npm installs.
+
+Changes to know about:
+
+- Saved checks whose query ends in `| sum`, `| avg`, `| min` or `| max` now
+  say they could not run, and `jsonloupe check` refuses a playbook that holds
+  one (exit 2, nothing checked). Those pipes give one value, not a count, so
+  the pass or fail they used to show judged a number that was never a count.
+- Saved checks on a `| group` or `| distinct` that reaches the 100,000 cap no
+  longer pass on a count of 100,000. They say inconclusive, or fail when the
+  bound alone already breaks them.
+- A check whose query compares numbers between 0 and 1 with zero, or takes
+  their min, max or top, may now give a different verdict.
+- A regex with a nested unbounded quantifier behind an inner group, such as
+  `^((\w+)\s?)+$`, could hang a query and is now refused. A check that uses
+  one says it could not run.
+- Saving a 101st check or function is refused with a message. It used to
+  delete the oldest one without saying so. Importing a playbook that would
+  take the library past 100 checks or 100 functions is refused whole. It used
+  to push the oldest functions out to make room.
+- The converter writes a key containing a dot as `["user.id"]` in a mapping,
+  which 1.7 cannot read.
+- `jsonloupe` followed by a bare word that is not one of its commands, a file
+  name included, exits 1 instead of starting the viewer and ignoring the word.
+  A pipeline then never hangs on a verb its install lacks. `jsonloupe`,
+  `jsonloupe serve` and every flag work as before.
+
 ## 1.7.0 — 2026-10-19
 
 - **Colour schemes.** Nine named schemes join jsonloupe's own dark and
