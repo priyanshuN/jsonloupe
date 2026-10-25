@@ -5918,16 +5918,24 @@ async function renderSavedChips(): Promise<void> {
 
 async function renderSavedChecks(): Promise<void> {
   const checks = await store.listChecks();
+  // The rail is rebuilt whole, so what had focus in it is given back — by id,
+  // since pressing a chip moves it to the front (touchSaved).
+  const active = document.activeElement;
+  const focused = active instanceof HTMLElement && askChecks.contains(active) ? active : null;
+  const focusId = focused?.closest<HTMLElement>('.check-chip')?.dataset.id;
+  const focusDel = !!focused?.closest('.chip-del');
+  const focusAt = focused ? [...askChecks.children].findIndex((el) => el.contains(focused)) : -1;
   askChecks.replaceChildren();
   for (const check of checks.slice(0, CHECK_CHIPS_MAX)) {
     const chip = document.createElement('span');
     chip.className = 'ask-chip check-chip';
     chip.dataset.id = check.id;
     const latest = checkRuns.get(check.id);
-    const current = latest && latest.query === check.query && sameExpectation(latest.expectation, check.expectation)
-      ? latest
-      : undefined;
-    if (current) chip.classList.add(verdictClass(current.verdict));
+    const current = latest && measuresAsDefined(latest, check) ? latest : undefined;
+    // Measured before an edit made here: the sheet draws it faint, and so does
+    // the rail — the glyph stays, the verdict's hue does not.
+    const stale = !!current && runIsStale(current);
+    if (current) chip.classList.add(stale ? 'stale' : verdictClass(current.verdict));
     const mark = document.createElement('span');
     mark.className = 'check-mark';
     mark.textContent = current ? VERDICT_MARK[current.verdict] : '◇';
@@ -5937,7 +5945,8 @@ async function renderSavedChecks(): Promise<void> {
     run.type = 'button';
     run.className = 'check-chip-run';
     run.textContent = check.name.length > 38 ? `${check.name.slice(0, 38)}…` : check.name;
-    run.title = `${check.query} · expected ${expectationText(check.expectation)} · in your playbook`;
+    run.title = `${check.query} · expected ${expectationText(check.expectation)} · in your playbook`
+      + (stale ? ' · from before you edited this document' : '');
     const del = document.createElement('button');
     del.className = 'chip-del';
     del.textContent = '×';
@@ -5959,6 +5968,16 @@ async function renderSavedChecks(): Promise<void> {
   // panel's foot, stranded under an empty result area at rest and pushed below
   // the scroll fold after a run.
   askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0;
+  if (focused && !focused.isConnected) {
+    const chip = focusId ? askChecks.querySelector(`.check-chip[data-id="${CSS.escape(focusId)}"]`) : null;
+    // A chip that is gone (forgotten, or pushed past the rail) leaves focus on
+    // its neighbour, then on the rail's last control, then on the query field.
+    const target = chip?.querySelector<HTMLElement>(focusDel ? '.chip-del' : '.check-chip-run')
+      ?? askChecks.children[Math.min(focusAt, askChecks.children.length - 1)]?.querySelector<HTMLElement>('.check-chip-run')
+      ?? askChecks.querySelector<HTMLElement>('.chip-add')
+      ?? askQueryEdit;
+    target.focus({ preventScroll: true });
+  }
 }
 
 askSaveQuery.addEventListener('click', async () => {
@@ -8176,6 +8195,8 @@ function markPlaybookStale(): void {
   pbEditedAt = Date.now();
   pbDraft = null;
   pbSchema = null;
+  // The Query rail's chips read the same runs, and are on screen in any view.
+  void renderSavedChecks();
   if (activePane !== 'run') return;
   paintSheet();
   if (pbDock === 'check') scheduleDraftMeasure();

@@ -3914,6 +3914,9 @@ button.ask-meta {
 .check-chip.v-fail .check-mark,
 .check-chip.v-error .check-mark { color: var(--danger); }
 .check-chip.v-inconclusive .check-mark { color: var(--warn); }
+/* From before you edited this document, as the sheet draws it: the glyph
+   stays, faint, and the verdict's hue and hairline go. */
+.check-chip.stale .check-mark { color: var(--text-faint); }
 /* The chip's name is a real button now, so the keyboard reaches it; it wears
    the chip's own text and none of a button's chrome. */
 .check-chip-run {

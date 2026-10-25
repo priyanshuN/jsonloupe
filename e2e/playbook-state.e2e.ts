@@ -166,6 +166,35 @@ test('a forget undone after switching documents puts no verdict on the new one',
   await expect(page.locator('#pb-checks-status')).not.toContainText('failed');
 });
 
+test('a Query chip goes faint, like its row, once the document is edited', async ({ page }) => {
+  await openSample(page);
+  await openPlaybook(page);
+  await importPlaybook(page, [PACKING]);
+  await page.locator('#pb-run-all').click();
+  await expect(page.locator('#pb-checks-status')).toContainText('1 failed');
+  await page.locator('#ask-btn').click();
+  const chip = page.locator('#ask-checks .check-chip');
+  await expect(chip).toHaveClass(/\bv-fail\b/);
+
+  await page.locator('#mode-switch button[data-mode="tree"]').click();
+  await editValue(page, 'packing', 'shipped');
+  await expect(chip).toHaveClass(/\bstale\b/);
+  await expect(chip).not.toHaveClass(/\bv-fail\b/);
+  await expect(chip.locator('.check-chip-run')).toHaveAttribute('title', /from before you edited this document/);
+});
+
+test('pressing a Query check chip from the keyboard keeps focus on that chip', async ({ page }) => {
+  await openSample(page);
+  await openPlaybook(page);
+  await importPlaybook(page, [ORDERS, PACKING]);
+  await page.locator('#ask-btn').click();
+  const chip = page.locator('#ask-checks .check-chip', { hasText: PACKING.name }).locator('.check-chip-run');
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#ask-verdict')).toContainText(`${PACKING.name}: Fail`);
+  await expect(page.locator('#ask-checks .check-chip', { hasText: PACKING.name }).locator('.check-chip-run')).toBeFocused();
+});
+
 test('reload from disk shows none of the old file\'s verdicts as the new file\'s', async ({ page }) => {
   // A file over 64 KB whose middle changes at the same length: the sampled
   // hash reads only its first and last 32 KB, so only the time can tell.
