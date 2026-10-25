@@ -25,6 +25,8 @@ export interface DocEntry {
   host: DocHost;
   /** What was loaded, for the docs listing — a path, or `<text>` for inline input. */
   origin: string;
+  /** The input was not valid JSON and parsed only after repair — what a gate must not pass unasked. */
+  repaired?: boolean;
 }
 
 /**

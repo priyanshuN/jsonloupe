@@ -405,7 +405,9 @@ jobs:
 ```
 
 An agent gets the same gate from the MCP server's `run_checks`
-([below](#use-with-ai-agents)), with a playbook's path or the checks inline.
+([below](#use-with-ai-agents)), with a playbook's path or the checks inline. It
+refuses a document that is not valid JSON in the same way; `allowRepair: true`
+checks the repaired document and says so.
 
 ## Use with AI agents
 

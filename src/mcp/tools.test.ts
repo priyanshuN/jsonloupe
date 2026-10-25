@@ -675,6 +675,31 @@ describe('run_checks', () => {
     expect(pool.list()).toHaveLength(1);
   });
 
+  it('refuses a file that parses only after repair, as the CLI does, unless allowRepair says so', async () => {
+    // jsonrepair closes a truncated export, so the third task is simply gone.
+    const filePath = join(dir, 'truncated-tasks.json');
+    await writeFile(filePath, '{"tasks":[{"id":1,"status":"OK"},{"id":2,"status":"OK"},{"id":3,"status":"FAI');
+    const refused = await call('run_checks', { filePath, checks: [FAILED] });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('error: not valid JSON; it can be repaired, but a gate should not pass a broken file');
+    expect(refused.text).toContain('allowRepair=true');
+    expect(pool.list()).toEqual([]);
+
+    // A docId remembers its load was repaired.
+    const loaded = await call('load_doc', { path: filePath });
+    expect(loaded.text).toContain('repaired: true');
+    const docId = loaded.structuredContent.docId as string;
+    expect((await call('run_checks', { docId, checks: [FAILED] })).isError).toBe(true);
+    const allowed = await call('run_checks', { docId, checks: [FAILED], allowRepair: true });
+    expect(allowed.isError).toBe(false);
+    expect(allowed.text).toMatch(/^repaired: true — not valid JSON; verdicts describe the repaired document\nchecks: 1/);
+    expect(allowed.structuredContent).toMatchObject({ repaired: true, verdict: 'pass' });
+
+    // Valid JSON says so too, so a reader never has to infer it.
+    await load(DOC);
+    expect((await call('run_checks', { docId: 'd3', checks: [ANY] })).structuredContent).toMatchObject({ repaired: false });
+  });
+
   it('settles a bad playbook before opening any document', async () => {
     const filePath = join(dir, 'never-opened.json');
     await writeFile(filePath, DOC);

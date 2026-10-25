@@ -372,7 +372,8 @@ export const TOOLS: ToolDefinition[] = [
       'JavaScript and are never run here. Expectations: {"type":"no-matches"}, {"type":"at-least-one"}, ' +
       '{"type":"exact-count","count":N}, {"type":"at-most","count":N}, {"type":"at-least","count":N}, ' +
       '{"type":"between","min":M,"max":N}. A check counts matches (groups/distinct values for | group / | distinct); ' +
-      'value pipes like | sum are refused. Failed and inconclusive checks list their first matched paths. Pass filePath ' +
+      'value pipes like | sum are refused. A document that is not valid JSON is refused unless allowRepair is true. ' +
+      'Failed and inconclusive checks list their first matched paths. Pass filePath ' +
       'for a one-call answer, or docId to reuse an open document.',
     inputSchema: {
       type: 'object',
@@ -399,6 +400,10 @@ export const TOOLS: ToolDefinition[] = [
           minimum: 0,
           maximum: MAX_CHECK_EVIDENCE,
           description: `Paths per failed/inconclusive check (default ${DEFAULT_EVIDENCE}).`,
+        },
+        allowRepair: {
+          type: 'boolean',
+          description: 'Check a document that is not valid JSON after repairing it (default false: refused, as a gate should not pass a broken file).',
         },
       },
       anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
@@ -560,6 +565,8 @@ export class ToolRouter {
       await this.pool.close(doc.id);
       return r;
     }
+    // Kept on the entry, so run_checks by docId knows it as well as by filePath.
+    doc.repaired = r.repaired;
     return { ok: true, doc, load: r };
   }
 
@@ -640,14 +647,27 @@ export class ToolRouter {
     const { checks, functionsSkipped } = resolved;
     const evidence = integer(args.maxEvidence, 0, MAX_CHECK_EVIDENCE, DEFAULT_EVIDENCE);
     return this.onDoc(args, async (doc) => {
+      // The same gate as `jsonloupe check`, which refuses a file that parses
+      // only after repair: a truncated export jsonrepair closed would otherwise
+      // pass on the part of it that survived.
+      const repaired = doc.repaired === true;
+      if (repaired && args.allowRepair !== true) {
+        return {
+          ok: false,
+          error: 'not valid JSON; it can be repaired, but a gate should not pass a broken file',
+          hint: 'pass allowRepair=true to check the repaired document.',
+        };
+      }
       const r = (await doc.host.send({ op: 'checks', checks, evidence })) as ChecksResultView | OpError;
       if (!r.ok) return r;
       const { summary } = r;
       // A failing check is a successful call: the verdict is the answer. The
       // counts and the failing names lead, because they are what survives the
       // structured cap when the per-check details do not.
-      return success(renderChecks(r, functionsSkipped), {
+      const text = renderChecks(r, functionsSkipped);
+      return success(repaired ? `repaired: true — not valid JSON; verdicts describe the repaired document\n${text}` : text, {
         ok: true,
+        repaired,
         verdict: summary.verdict,
         total: summary.total,
         passed: summary.passed,
@@ -760,7 +780,7 @@ function capStructured(value: Record<string, unknown>): Record<string, unknown> 
     'docId', 'docIdA', 'docIdB', 'kind', 'label', 'value', 'total', 'offset',
     'complete', 'truncated', 'matched', 'autoFields', 'fieldDiscoveryComplete',
     'format', 'outPath', 'rows', 'bytes', 'atomic', 'error', 'hint', 'evicted',
-    'verdict', 'passed', 'failed', 'inconclusive', 'errored', 'functionsSkipped', 'failing',
+    'verdict', 'passed', 'failed', 'inconclusive', 'errored', 'functionsSkipped', 'failing', 'repaired',
   ]) {
     const item = value[key];
     if (typeof item === 'string') summary[key] = item.length > scalarCap ? item.slice(0, scalarCap) + '…' : item;
