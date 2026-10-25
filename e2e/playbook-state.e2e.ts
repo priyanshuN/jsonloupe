@@ -311,6 +311,17 @@ test.describe('functions and the result face', () => {
     await expect(page.locator('#run-new')).toBeFocused();
   });
 
+  test('the tick-all column is one target, padding and box alike', async ({ page }) => {
+    const box = page.locator('#pb-tick-all');
+    await expect(box).not.toBeChecked();
+    const zone = await page.locator('#pb-fns .pb-head .run-lib-pickzone').boundingBox();
+    const tick = await box.boundingBox();
+    // Inside the column, clear of the 15px box.
+    await page.mouse.click(zone!.x + zone!.width - 3, zone!.y + zone!.height / 2);
+    expect(zone!.x + zone!.width - 3).toBeGreaterThan(tick!.x + tick!.width);
+    await expect(box).toBeChecked();
+    await expect(page.locator('#pb-fns-status')).toContainText('1 in run all');
+  });
 });
 
 test('a function batch outlived by a document switch opens no row on the next document', async ({ page }) => {

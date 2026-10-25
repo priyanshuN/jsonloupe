@@ -7805,6 +7805,14 @@ async function openReport(fromId: string | null): Promise<void> {
 
 runLibList.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
+  // The FUNCTIONS head's tick-all column is a zone like a row's: its padding
+  // means the same as its box.
+  if (target !== pbTickAll && target.closest('.pb-head .run-lib-pickzone')) {
+    if (pbTickAll.hidden) return;
+    pbTickAll.checked = !pbTickAll.checked;
+    pbTickAll.dispatchEvent(new Event('change'));
+    return;
+  }
   const item = target.closest<HTMLElement>('.pb-item');
   if (!item) return;
   const id = item.dataset.id!;
