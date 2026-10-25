@@ -1,10 +1,12 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    // Node-only, and unlike the MCP config it needs no vite/client: the
-    // converter engine imports no assets and touches no browser API, which is
-    // the DOM-free boundary of SPEC-converter.md §9.1 stated as a type config.
-    "types": ["node"]
+    // Node-only. vite/client is here for `jsonloupe check`, which runs the
+    // worker's engine in-process and so reaches the codec's `?url` asset import
+    // (resolved to nothing in Node by scripts/node-wasm-plugin.mjs). The
+    // converter's no-asset boundary (SPEC-converter.md §9.1) is enforced by
+    // build-cli's plugin-free first build instead of by this type config.
+    "types": ["node", "vite/client"]
   },
   "include": ["src/cli"],
   "exclude": []

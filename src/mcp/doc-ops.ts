@@ -22,8 +22,10 @@ import {
   oversizeMessage,
   payloadSniffNeedsDecode,
 } from '../intake';
-import type { NodeType, Row } from '../protocol';
+import type { CheckMeasureReply, NodeType, Row } from '../protocol';
 import type { ProfileResult } from '../profile';
+import { expectationText, type CheckUnit } from '../check';
+import { runCheckSet, type RunnableCheck, type RunSummary, type RunVerdict } from '../playbook-run';
 import { QUERY_GRAMMAR, QUERY_PIPES } from '../query-grammar';
 import type { ConvertReport, ConvertSpec, DraftHints, Inspection, SpecError } from '../convert';
 import type { DocRequest } from './pool';
@@ -117,6 +119,30 @@ export interface ConversionFileResult {
   bytes: number;
   rows: number;
   report: ConvertReport;
+}
+
+/** One check's verdict as a caller reads it; the counts are raw integers. */
+export interface CheckView {
+  name: string;
+  verdict: RunVerdict;
+  /** A lower bound when `exact` is false; null when the check could not run. */
+  observed: number | null;
+  exact: boolean;
+  unit: CheckUnit;
+  /** The expectation in words, e.g. `at most 3 groups`. */
+  expected: string;
+  summary: string;
+  note?: string;
+  error?: string;
+  ms: number;
+  /** The first matched paths, only for a check that did not pass. */
+  evidence: { path: string; preview: string }[];
+}
+
+export interface ChecksResultView {
+  ok: true;
+  summary: RunSummary;
+  checks: CheckView[];
 }
 
 /** Top-level keys are a fingerprint, not a listing: enough to aim the next call. */
@@ -558,6 +584,51 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+// ---------- checks ----------
+
+/**
+ * Run checks against this document: one `checkMeasure` per check through the
+ * same engine seam the browser and the CLI use, so a verdict means the same
+ * thing in all three. A failing check is still a successful run — the verdict
+ * is the data. Only a check that did not pass carries its first paths: a
+ * pass's matches show nothing wrong, and the response cap is better spent on
+ * the checks someone has to look at.
+ */
+export async function runChecks(
+  engine: Engine,
+  checks: RunnableCheck[],
+  evidence: number,
+  cardinalityCap?: number,
+): Promise<ChecksResultView> {
+  const report = await runCheckSet(checks, (q) =>
+    engine({
+      type: 'checkMeasure',
+      q,
+      evidence,
+      ...(cardinalityCap !== undefined ? { cardinalityCap } : {}),
+    }) as CheckMeasureReply,
+  );
+  return {
+    ok: true,
+    summary: report.summary,
+    checks: report.outcomes.map((o) => ({
+      name: o.name,
+      verdict: o.verdict,
+      observed: o.observed,
+      exact: o.exact,
+      unit: o.unit,
+      expected: expectationText(o.expectation, o.unit),
+      summary: o.summary,
+      ...(o.note ? { note: o.note } : {}),
+      ...(o.error ? { error: o.error } : {}),
+      ms: o.ms,
+      evidence: o.verdict === 'pass'
+        ? []
+        : o.evidence.map((e) => ({ path: e.pathText, preview: clip(e.preview, CELL_CHARS) })),
+    })),
+  };
+}
+
 // ---------- converter ----------
 
 export async function inspectConversion(
@@ -655,6 +726,13 @@ export async function runDocOp(
         request.outPath as string,
         request.format as 'csv' | 'jsonl',
         request.overwrite === true,
+      );
+    case 'checks':
+      return runChecks(
+        engine,
+        request.checks as RunnableCheck[],
+        request.evidence as number,
+        request.cardinalityCap as number | undefined,
       );
     case 'convertInspect':
       return asyncEngine

@@ -8,9 +8,10 @@
 // inspect → draft_spec → human review → convert. A model may help author the
 // small spec, but it never walks rows or invents cells during conversion.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { open, readFile, writeFile, type FileHandle } from 'node:fs/promises';
 import { MAX_DOCS, type DocEntry, type DocPool } from './pool';
 import type {
+  ChecksResultView,
   ConversionFileResult,
   ConversionInspectionResult,
   DiffResultView,
@@ -23,7 +24,20 @@ import type {
 import type { ConvertSpec, DraftHints, Inspection, Kind, Suggestion } from '../convert';
 import type { ProfileResult } from '../profile';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from '../query-grammar';
-import { cap, RESPONSE_CAP, renderCsv, renderDiff, renderError, renderLoad, renderProfile, renderQuery, renderSample } from './render';
+import { MAX_PLAYBOOK_BYTES, PLAYBOOK_VERSION, parsePlaybook, type PlaybookCheck } from '../playbook';
+import { DEFAULT_EVIDENCE } from '../playbook-run';
+import {
+  cap,
+  RESPONSE_CAP,
+  renderChecks,
+  renderCsv,
+  renderDiff,
+  renderError,
+  renderLoad,
+  renderProfile,
+  renderQuery,
+  renderSample,
+} from './render';
 
 export interface ToolDefinition {
   name: string;
@@ -58,6 +72,10 @@ const MAX_QUERY_LIMIT = 100;
 const DEFAULT_PROFILE_TOP = 10;
 const MAX_PROFILE_TOP = 50;
 const MAX_PROFILE_FIELDS = 20;
+/** The most a library holds of one kind (db.ts KEEP_SAVED), so the most one call runs. */
+const MAX_CHECKS = 100;
+/** Paths per failed check; past a few they repeat the point and crowd the cap. */
+const MAX_CHECK_EVIDENCE = 20;
 
 const TOOL_OUTPUT_SCHEMA: ToolDefinition['outputSchema'] = {
   type: 'object',
@@ -342,6 +360,49 @@ export const TOOLS: ToolDefinition[] = [
       anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
     },
   },
+  {
+    name: 'run_checks',
+    outputSchema: TOOL_OUTPUT_SCHEMA,
+    annotations: readOnly('Run playbook checks against JSON'),
+    description:
+      'Run deterministic checks — a query plus the count it expects — against a document; one verdict per check: ' +
+      'pass, fail, or inconclusive (a | group or | distinct hit its 100,000-value cap, so the count is only a lower bound; ' +
+      'never reported as a pass). Pass playbookPath for a jsonloupe playbook file, or checks inline. Playbook functions are ' +
+      'JavaScript and are never run here. Expectations: {"type":"no-matches"}, {"type":"at-least-one"}, ' +
+      '{"type":"exact-count","count":N}, {"type":"at-most","count":N}, {"type":"at-least","count":N}, ' +
+      '{"type":"between","min":M,"max":N}. A check counts matches (groups/distinct values for | group / | distinct); ' +
+      'value pipes like | sum are refused. Failed and inconclusive checks list their first matched paths. Pass filePath ' +
+      'for a one-call answer, or docId to reuse an open document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        docId: { type: 'string', description: 'A docId returned by load_doc.' },
+        filePath: { type: 'string', description: 'File to open and check now instead of supplying docId.' },
+        playbookPath: { type: 'string', description: 'A jsonloupe playbook (.json) whose checks to run.' },
+        checks: {
+          type: 'array',
+          maxItems: MAX_CHECKS,
+          description: 'Inline checks; use either this or playbookPath.',
+          items: {
+            type: 'object',
+            required: ['name', 'query', 'expectation'],
+            properties: {
+              name: { type: 'string' },
+              query: { type: 'string' },
+              expectation: { type: 'object' },
+            },
+          },
+        },
+        maxEvidence: {
+          type: 'integer',
+          minimum: 0,
+          maximum: MAX_CHECK_EVIDENCE,
+          description: `Paths per failed/inconclusive check (default ${DEFAULT_EVIDENCE}).`,
+        },
+      },
+      anyOf: [{ required: ['docId'] }, { required: ['filePath'] }],
+    },
+  },
 ];
 
 type Args = Record<string, unknown>;
@@ -464,6 +525,8 @@ export class ToolRouter {
           const r = (await doc.host.send({ op: 'export', query, outPath, format, overwrite: args.overwrite === true })) as CsvResult | OpError;
           return r.ok ? success(renderCsv(r), { ...r, complete: true }) : r;
         });
+      case 'run_checks':
+        return this.runChecks(args);
       default:
         return { ok: false, error: `unknown tool '${name}'` };
     }
@@ -568,6 +631,36 @@ export class ToolRouter {
     });
   }
 
+  private async runChecks(args: Args): Promise<Rendered> {
+    // Settled before any document is opened, so a bad playbook never costs a
+    // load — and with filePath, never leaves a document behind.
+    const resolved = await resolveChecks(args);
+    if (!resolved.ok) return resolved;
+    const { checks, functionsSkipped } = resolved;
+    const evidence = integer(args.maxEvidence, 0, MAX_CHECK_EVIDENCE, DEFAULT_EVIDENCE);
+    return this.onDoc(args, async (doc) => {
+      const r = (await doc.host.send({ op: 'checks', checks, evidence })) as ChecksResultView | OpError;
+      if (!r.ok) return r;
+      const { summary } = r;
+      // A failing check is a successful call: the verdict is the answer. The
+      // counts and the failing names lead, because they are what survives the
+      // structured cap when the per-check details do not.
+      return success(renderChecks(r, functionsSkipped), {
+        ok: true,
+        verdict: summary.verdict,
+        total: summary.total,
+        passed: summary.passed,
+        failed: summary.failed,
+        inconclusive: summary.inconclusive,
+        errored: summary.errored,
+        ms: summary.ms,
+        functionsSkipped,
+        failing: r.checks.filter((c) => c.verdict !== 'pass').map((c) => c.name),
+        checks: r.checks,
+      });
+    });
+  }
+
   private async diffDocs(args: Args): Promise<Rendered> {
     const idA = str(args.docIdA);
     const idB = str(args.docIdB);
@@ -666,6 +759,7 @@ function capStructured(value: Record<string, unknown>): Record<string, unknown> 
     'docId', 'docIdA', 'docIdB', 'kind', 'label', 'value', 'total', 'offset',
     'complete', 'truncated', 'matched', 'autoFields', 'fieldDiscoveryComplete',
     'format', 'outPath', 'rows', 'bytes', 'atomic', 'error', 'hint', 'evicted',
+    'verdict', 'passed', 'failed', 'inconclusive', 'errored', 'functionsSkipped', 'failing',
   ]) {
     const item = value[key];
     if (typeof item === 'string') summary[key] = item.length > scalarCap ? item.slice(0, scalarCap) + '…' : item;
@@ -674,8 +768,86 @@ function capStructured(value: Record<string, unknown>): Record<string, unknown> 
       summary[key] = item.slice(0, 50).map((part) => part.length > scalarCap ? part.slice(0, scalarCap) + '…' : part);
     }
   }
-  summary.hint ??= 'Structured details exceeded the response cap; narrow the query or request fewer profile values.';
+  summary.hint ??= value.tool === 'run_checks'
+    ? 'Per-check details exceeded the response cap; the counts and failing names are kept — run fewer checks per call for the details.'
+    : 'Structured details exceeded the response cap; narrow the query or request fewer profile values.';
+  // Fifty failing check names can be long enough to break the cap on their
+  // own, so the name list gives way last, one name at a time, until it fits.
+  const failing = summary.failing;
+  if (Array.isArray(failing)) {
+    while (failing.length && JSON.stringify(summary).length > RESPONSE_CAP) failing.pop();
+  }
   return summary;
+}
+
+/**
+ * The checks a run_checks call names: exactly one of a playbook file or an
+ * inline list, both read by parsePlaybook so they are refused with the same
+ * positional messages the browser's import gives.
+ */
+async function resolveChecks(
+  args: Args,
+): Promise<{ ok: true; checks: PlaybookCheck[]; functionsSkipped: number } | OpError> {
+  const playbookPath = str(args.playbookPath);
+  const inline = args.checks;
+  if ((playbookPath !== undefined) === (inline !== undefined)) {
+    return { ok: false, error: 'run_checks needs exactly one of playbookPath or checks' };
+  }
+  let text: string;
+  if (playbookPath !== undefined) {
+    const read = await readPlaybook(playbookPath);
+    if (!read.ok) return read;
+    text = read.text;
+  } else {
+    if (!Array.isArray(inline)) return { ok: false, error: 'run_checks checks must be a list of {name, query, expectation}' };
+    // Counted before parsing, so an oversized list is refused without the work.
+    if (inline.length > MAX_CHECKS) {
+      return { ok: false, error: `run_checks runs at most ${MAX_CHECKS} checks per call; this has ${inline.length}` };
+    }
+    text = JSON.stringify({ playbookVersion: PLAYBOOK_VERSION, functions: [], checks: inline });
+  }
+  const parsed = parsePlaybook(text);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: playbookPath !== undefined ? `not a playbook jsonloupe can run: ${parsed.error}` : `invalid checks: ${parsed.error}`,
+    };
+  }
+  const { checks, functions } = parsed.playbook;
+  if (!checks.length) {
+    return {
+      ok: false,
+      error: playbookPath !== undefined
+        ? `the playbook has no checks${functions.length ? ' — its functions are JavaScript and are never run here' : ''}`
+        : 'run_checks needs at least one check',
+    };
+  }
+  if (checks.length > MAX_CHECKS) {
+    return { ok: false, error: `run_checks runs at most ${MAX_CHECKS} checks per call; this playbook has ${checks.length}` };
+  }
+  return { ok: true, checks, functionsSkipped: functions.length };
+}
+
+/** Measured before it is read, like a document: a playbook is a short list, not a blob. */
+async function readPlaybook(path: string): Promise<{ ok: true; text: string } | OpError> {
+  let file: FileHandle | undefined;
+  try {
+    file = await open(path, 'r');
+    const { size } = await file.stat();
+    const bytes = size > MAX_PLAYBOOK_BYTES ? null : await file.readFile();
+    if (!bytes || bytes.length > MAX_PLAYBOOK_BYTES) {
+      return {
+        ok: false,
+        error: `the playbook is over ${MAX_PLAYBOOK_BYTES / 1_048_576} MB, too large to be one`,
+        hint: 'playbookPath names the playbook; the document to check goes in filePath or docId.',
+      };
+    }
+    return { ok: true, text: bytes.toString('utf8') };
+  } catch (error) {
+    return { ok: false, error: `could not read playbook: ${error instanceof Error ? error.message : String(error)}` };
+  } finally {
+    await file?.close().catch(() => undefined);
+  }
 }
 
 function str(v: unknown): string | undefined {
