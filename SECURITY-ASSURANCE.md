@@ -70,7 +70,7 @@ identity of published packages. Relevant threats are:
 | Playbook in CLI/MCP | Playbook file or inline checks | Query engine | Parsed as declarative data, unknown fields refused, before any document is opened; at most 100 checks; functions counted and never executed |
 | Dev key endpoint | HTTP Host/Origin | Local key file | Loopback Host and expected Origin checks occur before file access |
 | Spreadsheet | Exported cells | CSV/XLSX consumer | Formula-prefix neutralization, exact numeric rules, format-limit reporting |
-| MCP/CLI filesystem | Client-supplied paths | Local files | Explicit paths, bounded reads, same-directory temporary output, overwrite flag; playbook paths are read only when supplied, size-capped at 1 MB |
+| MCP/CLI filesystem | Client-supplied paths | Local files | Explicit paths, bounded reads, same-directory temporary output, overwrite flag; playbook paths are read only when supplied, only as regular files, and never past 1 MB |
 | Release | Source/workflow identity | npm consumer | GitHub OIDC trusted publishing, npm registry signature, Sigstore/SLSA provenance |
 
 ## Secure-design argument

@@ -8,8 +8,9 @@
 // inspect → draft_spec → human review → convert. A model may help author the
 // small spec, but it never walks rows or invents cells during conversion.
 
-import { open, readFile, writeFile, type FileHandle } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { MAX_DOCS, type DocEntry, type DocPool } from './pool';
+import { readPlaybookFile } from './playbook-file';
 import type {
   ChecksResultView,
   ConversionFileResult,
@@ -830,23 +831,18 @@ async function resolveChecks(
 
 /** Measured before it is read, like a document: a playbook is a short list, not a blob. */
 async function readPlaybook(path: string): Promise<{ ok: true; text: string } | OpError> {
-  let file: FileHandle | undefined;
   try {
-    file = await open(path, 'r');
-    const { size } = await file.stat();
-    const bytes = size > MAX_PLAYBOOK_BYTES ? null : await file.readFile();
-    if (!bytes || bytes.length > MAX_PLAYBOOK_BYTES) {
-      return {
-        ok: false,
-        error: `the playbook is over ${MAX_PLAYBOOK_BYTES / 1_048_576} MB, too large to be one`,
-        hint: 'playbookPath names the playbook; the document to check goes in filePath or docId.',
-      };
-    }
-    return { ok: true, text: bytes.toString('utf8') };
+    const read = await readPlaybookFile(path);
+    if (read.ok) return read;
+    return read.reason === 'not-a-file'
+      ? { ok: false, error: `could not read playbook: ${path} is not a regular file`, hint: 'playbookPath names a playbook file.' }
+      : {
+          ok: false,
+          error: `the playbook is over ${MAX_PLAYBOOK_BYTES / 1_048_576} MB, too large to be one`,
+          hint: 'playbookPath names the playbook; the document to check goes in filePath or docId.',
+        };
   } catch (error) {
     return { ok: false, error: `could not read playbook: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    await file?.close().catch(() => undefined);
   }
 }
 

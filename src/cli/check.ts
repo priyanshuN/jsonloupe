@@ -24,6 +24,7 @@
 import { open, type FileHandle } from 'node:fs/promises';
 import { handle } from '../worker';
 import { loadDoc, type Engine, type LoadResult } from '../mcp/doc-ops';
+import { readPlaybookFile } from '../mcp/playbook-file';
 import { looksLikePlaybook, MAX_PLAYBOOK_BYTES, parsePlaybook, type Playbook } from '../playbook';
 import {
   checkQueryProblem,
@@ -211,14 +212,14 @@ type PlaybookLoad =
  */
 async function loadPlaybook(a: CheckArgs): Promise<PlaybookLoad> {
   let text: string;
-  let file: FileHandle | undefined;
   try {
-    file = await open(a.playbook, 'r');
     // Measured before it is read: a 200 MB document passed first by mistake
     // costs a stat, not a heap.
-    const { size } = await file.stat();
-    const bytes = size > MAX_PLAYBOOK_BYTES ? null : await file.readFile();
-    if (!bytes || bytes.length > MAX_PLAYBOOK_BYTES) {
+    const read = await readPlaybookFile(a.playbook);
+    if (!read.ok && read.reason === 'not-a-file') {
+      return { ok: false, code: 1, problems: [`could not read the playbook: ${a.playbook} is not a regular file`] };
+    }
+    if (!read.ok) {
       return {
         ok: false,
         code: 2,
@@ -226,11 +227,9 @@ async function loadPlaybook(a: CheckArgs): Promise<PlaybookLoad> {
         hint: await swappedHint(a),
       };
     }
-    text = bytes.toString('utf8');
+    text = read.text;
   } catch (error) {
     return { ok: false, code: 1, problems: [`could not read the playbook: ${message(error)}`] };
-  } finally {
-    await file?.close().catch(() => undefined);
   }
 
   const parsed = parsePlaybook(text);

@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { DocPool, MAX_DOCS, type DocHost, type DocRequest } from './pool';
 import { runDocOp, type AsyncEngine, type Engine } from './doc-ops';
 import { RESPONSE_CAP } from './render';
@@ -707,6 +708,27 @@ describe('run_checks', () => {
       .toContain('uses `between`, which needs playbookVersion 4');
     const missing = await call('run_checks', { docId: 'd1', playbookPath: join(dir, 'no-such-playbook.json') });
     expect(missing.text).toContain('error: could not read playbook: ENOENT');
+  });
+
+  it('reads a playbook saved with a UTF-8 BOM, as the browser imports it', async () => {
+    await load(DOC);
+    const bom = join(dir, 'bom-playbook.json');
+    const text = JSON.stringify({ playbookVersion: 4, functions: [], checks: [ANY] });
+    await writeFile(bom, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]));
+    const r = await call('run_checks', { docId: 'd1', playbookPath: bom });
+    expect(r.isError).toBe(false);
+    expect(r.structuredContent).toMatchObject({ verdict: 'pass', total: 1 });
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a device or FIFO as the playbook instead of reading it without end', async () => {
+    await load(DOC);
+    const fifo = join(dir, 'playbook.fifo');
+    execFileSync('mkfifo', [fifo]);
+    for (const playbookPath of ['/dev/zero', fifo]) {
+      const r = await call('run_checks', { docId: 'd1', playbookPath });
+      expect(r.isError, playbookPath).toBe(true);
+      expect(r.text).toContain(`error: could not read playbook: ${playbookPath} is not a regular file`);
+    }
   });
 
   it('refuses a playbook too large to be one, before reading it', async () => {

@@ -4,6 +4,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { compressToB64, compressToBytes } from '../codec';
 import { CHECK_USAGE, run, type CheckIo } from './check';
 
@@ -157,6 +158,17 @@ describe('an invalid playbook exits 2 and checks nothing', () => {
     expect(r.err).toContain('check 1 (`few statuses`) uses `at-most`, which needs playbookVersion 4');
   });
 
+  it('reads a playbook saved with a UTF-8 BOM, as the browser imports it', async () => {
+    const text = JSON.stringify({ playbookVersion: 4, functions: [], checks: [HAS_ORDERS] });
+    const bom = await file('bom.playbook.json', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]));
+    const r = await check(bom, await orders());
+    expect(r.err).toBe('');
+    expect(r.code).toBe(0);
+    // Only one is the encoding's; a second is in the text, and refused as the app refuses it.
+    const two = await file('bom2.playbook.json', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf, 0xef, 0xbb, 0xbf]), Buffer.from(text)]));
+    expect((await check(two, await orders())).code).toBe(2);
+  });
+
   it('still runs a v3 file whose checks v3 can say', async () => {
     const pb = await file('v3-ok.json', JSON.stringify({ playbookVersion: 3, functions: [], checks: [HAS_ORDERS, THE_INT64] }));
     expect((await check(pb, await orders())).code).toBe(0);
@@ -270,6 +282,18 @@ describe('usage, read and parse errors exit 1', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('could not read the playbook: ENOENT');
     expect(r.err).not.toContain('\n    at ');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a device or FIFO as the playbook instead of reading it without end', async () => {
+    // Both report size 0, so a size check alone let them through to a
+    // whole-file read: /dev/zero filled the heap, and a FIFO with no writer hung.
+    const fifo = join(dir, 'playbook.fifo');
+    execFileSync('mkfifo', [fifo]);
+    for (const path of ['/dev/zero', fifo]) {
+      const r = await check(path, await orders());
+      expect(r.code, path).toBe(1);
+      expect(r.err).toContain(`could not read the playbook: ${path} is not a regular file`);
+    }
   });
 
   it('marks a missing or unparseable document as not checked', async () => {
