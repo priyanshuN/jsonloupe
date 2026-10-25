@@ -143,6 +143,45 @@ test.describe('a verdict that could not run', () => {
   });
 });
 
+test.describe('run all', () => {
+  test.beforeEach(async ({ page }) => {
+    await countMeasures(page);
+    await openSample(page);
+    await openPlaybook(page);
+    await importPlaybook(page, [PACKING, ORDERS]);
+  });
+
+  test('two presses dispatched back to back start one run', async ({ page }) => {
+    await page.locator('#pb-run-all').evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      (button as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#pb-checks-status')).toContainText('1 failed');
+    await expect.poll(() => measures(page)).toBe(2);
+    await page.waitForTimeout(300);
+    expect(await measures(page)).toBe(2);
+    await expect(page.locator('#pb-checks-status')).not.toContainText('nothing kept');
+  });
+
+  test('a held ⌘⇧↵ runs once: its repeats are not presses', async ({ page }) => {
+    const chord = (repeat: boolean) => page.evaluate((r) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter', metaKey: true, ctrlKey: true, shiftKey: true, repeat: r, bubbles: true, cancelable: true,
+      }));
+    }, repeat);
+    await chord(false);
+    await chord(true);
+    await expect(page.locator('#pb-checks-status')).toContainText('1 failed');
+    await expect(page.locator('#pb-checks-status')).not.toContainText('stopped');
+    expect(await measures(page)).toBe(2);
+    // After the run, a repeat starts nothing either.
+    await chord(true);
+    await page.waitForTimeout(300);
+    expect(await measures(page)).toBe(2);
+  });
+
+});
+
 test('a forget undone after switching documents puts no verdict on the new one', async ({ page }) => {
   await page.goto('/');
   await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');

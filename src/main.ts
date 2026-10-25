@@ -6289,6 +6289,8 @@ let pbRevealed: { id: string; index: number } | null = null;
 const pbLive = new Map<string, CheckOutcome | 'waiting' | 'running'>();
 /** Run all's check phase, while it lasts. */
 let pbChecksRun: { done: number; total: number } | null = null;
+/** A run all from its first await to its end, functions included. */
+let pbRunAllBusy = false;
 /** Set by `stop`, read by the run's keepGoing before the next check. */
 let runAllStop = false;
 /** What the CHECKS head says after a run that did not finish, until the next one. */
@@ -8120,7 +8122,20 @@ async function runAll(): Promise<void> {
     pbSay('a function is still running — press again when it finishes');
     return;
   }
-  if (!currentText) return;
+  // pbChecksRun is set only after two reads of the library, so a second press
+  // inside them (two clicks dispatched back to back) would pass every guard
+  // above and start a second run, which `stop` could not reach. This flag is
+  // set before the first await.
+  if (pbRunAllBusy || !currentText) return;
+  pbRunAllBusy = true;
+  try {
+    await runAllNow();
+  } finally {
+    pbRunAllBusy = false;
+  }
+}
+
+async function runAllNow(): Promise<void> {
   if (activePane === 'run' && runFace === 'result') setRunFace('functions');
   const [checks, scripts] = await Promise.all([store.listChecks(), store.listScripts()]);
   const ticked = sortItems(scripts.filter((s) => runPicked.has(s.id)));
@@ -8797,6 +8812,9 @@ window.addEventListener('keydown', (e) => {
   if (viewer.hidden || activePane !== 'run' || document.querySelector('dialog[open]')) return;
   e.preventDefault();
   e.stopPropagation();
+  // A held chord repeats, and a second press stops a run: only a new press
+  // counts. (Still swallowed, so no field reads the repeats as Enter.)
+  if (e.repeat) return;
   void runAll();
 }, true);
 

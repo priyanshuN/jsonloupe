@@ -781,7 +781,7 @@ describe('the playbook view', () => {
   });
 
   it('runs checks without saving them, and drops a run the document moved under', () => {
-    for (const name of ['runAll', 'runAllChecks', 'runOneCheck', 'runChecksNow', 'keepCheckRuns']) {
+    for (const name of ['runAll', 'runAllNow', 'runAllChecks', 'runOneCheck', 'runChecksNow', 'keepCheckRuns']) {
       const body = fn(new RegExp(`async function ${name}\\([\\s\\S]*?\\n\\}`));
       expect(body, `${name} exists`).not.toBe('');
       // touchSaved bumps updatedAt and uses, which reorders and culls.
