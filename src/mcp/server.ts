@@ -22,8 +22,10 @@ sample, or an export tool; it opens the document and returns a reusable docId
 in the same call. For several questions, load once with load_doc, then work from its
 docId: get_schema to learn the shape, profile to get field coverage/statistics,
 run_query to count/filter/group with small paged results, sample to read real
-values, diff_docs to compare two loads, and export_result to write complete CSV
-or JSONL without putting rows in context. For deterministic spreadsheet output
+values, diff_docs to compare two loads, export_result to write complete CSV
+or JSONL without putting rows in context, and run_checks to gate a document on
+a playbook's checks (pass, fail or inconclusive per check; playbook functions
+are never run). For deterministic spreadsheet output
 use inspect, draft_spec, review or edit that small spec, then convert;
 conversion rows stay outside the conversation too. Every response is capped, so
 prefer aggregates/profile or offset+limit over asking for everything. Numeric

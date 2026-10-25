@@ -216,6 +216,7 @@ export function exitCodeFor(summary: RunSummary): 0 | 3 | 4 {
   return summary.verdict === 'pass' ? 0 : summary.verdict === 'fail' ? 3 : 4;
 }
 
-export function outcomeLine(outcome: CheckOutcome): string {
+/** Reads only these four fields, so an MCP check view prints the same line as an outcome. */
+export function outcomeLine(outcome: Pick<CheckOutcome, 'verdict' | 'name' | 'summary' | 'note'>): string {
   return `${VERDICT_MARK[outcome.verdict]} ${outcome.name} — ${outcome.summary}${outcome.note ? ` · ${outcome.note}` : ''}`;
 }

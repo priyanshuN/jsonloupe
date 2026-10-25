@@ -145,7 +145,7 @@ try {
   // converter host; it has landed, so they are part of the one frozen contract.
   check(
     'tools/list is the frozen contract',
-    ['load_doc', 'get_schema', 'run_query', 'profile', 'sample', 'diff_docs', 'export_csv', 'export_result', 'inspect', 'draft_spec', 'convert']
+    ['load_doc', 'get_schema', 'run_query', 'profile', 'sample', 'diff_docs', 'export_csv', 'export_result', 'inspect', 'draft_spec', 'convert', 'run_checks']
       .every((n) => names.includes(n)),
     names.join(','),
   );
@@ -207,6 +207,38 @@ try {
 
   const stillThere = text(await call('run_query', { docId: 'd1', query: '$.tasks[*] | count' }));
   check('d1 is untouched by d2', stillThere.includes(`count: ${TASKS}`), stillThere);
+
+  // Checks gate the big document in one call: a failure is still an answer
+  // (ok, not an error), it names its first path, and the passes stay quiet.
+  const gated = await call('run_checks', {
+    docId: 'd1',
+    maxEvidence: 1,
+    checks: [
+      { name: 'no failed tasks', query: "$.tasks[?(@.status == 'FAILED')]", expectation: { type: 'no-matches' } },
+      { name: 'has tasks', query: '$.tasks[*]', expectation: { type: 'at-least-one' } },
+      { name: 'four statuses at most', query: '$.tasks[*] | group(@.status)', expectation: { type: 'between', min: 1, max: 4 } },
+    ],
+  });
+  const gatedText = text(gated);
+  check(
+    'run_checks fails the failed tasks at 17,500 and names the first one',
+    gated.result?.isError === false &&
+      gatedText.includes(`✕ no failed tasks — Fail — ${(TASKS / 4).toLocaleString('en-IN')} matches; expected no matches`) &&
+      gatedText.includes('    $.tasks[3]\t'),
+    gatedText.slice(0, 400),
+  );
+  check(
+    'run_checks passes the rest and counts groups as groups',
+    gatedText.includes('✓ has tasks — Pass') && gatedText.includes('✓ four statuses at most — Pass — 4 groups; expected between 1 and 4 groups'),
+    gatedText.slice(0, 400),
+  );
+  check(
+    'run_checks returns the verdict as structured data',
+    gated.result?.structuredContent?.verdict === 'fail' &&
+      gated.result?.structuredContent?.failed === 1 &&
+      gated.result?.structuredContent?.failing?.[0] === 'no failed tasks',
+    JSON.stringify(gated.result?.structuredContent).slice(0, 300),
+  );
 
   const diffed = text(await call('diff_docs', { docIdA: 'd2', docIdB: 'd1', keySpec: 'id' }));
   check('diff_docs compares the two loads', /d2 → d1: \d+ changed/.test(diffed), diffed.slice(0, 200));

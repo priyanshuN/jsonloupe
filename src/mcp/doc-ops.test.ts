@@ -16,6 +16,7 @@ import {
   loadDoc,
   profile,
   queryError,
+  runChecks,
   runDocOp,
   runQuery,
   sample,
@@ -656,5 +657,88 @@ describe('export streaming edge cases', () => {
     await writeFile(file, 'x');
     const r = await exportCsv(streaming([{ text: 'id\r\n' }]), '$', join(file, 'out.csv'));
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/ENOTDIR/) });
+  });
+});
+
+describe('checks', () => {
+  const ORDERS = `{"orders":[
+    {"id":${INT64},"status":"FAILED","note":"${'n'.repeat(400)}"},
+    {"id":2,"status":"OK"},
+    {"id":3,"status":"FAILED"},
+    {"id":4,"status":"LATE"}
+  ]}`;
+
+  it('is routed through the op table, one verdict per check in the order given', async () => {
+    await load(ORDERS);
+    const r = await runDocOp(engine, {
+      op: 'checks',
+      evidence: 3,
+      checks: [
+        { name: 'no failures', query: "$.orders[?(@.status == 'FAILED')]", expectation: { type: 'no-matches' } },
+        { name: 'has orders', query: '$.orders[*]', expectation: { type: 'at-least-one' } },
+        { name: 'statuses', query: '$.orders[*] | group(@.status)', expectation: { type: 'between', min: 1, max: 3 } },
+      ],
+    } as DocRequest) as Awaited<ReturnType<typeof runChecks>>;
+    expect(r.ok).toBe(true);
+    expect(r.summary).toMatchObject({ total: 3, passed: 2, failed: 1, inconclusive: 0, errored: 0, verdict: 'fail' });
+    expect(r.checks.map((c) => [c.name, c.verdict, c.observed, c.unit])).toEqual([
+      ['no failures', 'fail', 2, 'match'],
+      ['has orders', 'pass', 4, 'match'],
+      ['statuses', 'pass', 3, 'group'],
+    ]);
+    expect(r.checks[0]).toMatchObject({
+      exact: true,
+      expected: 'no matches',
+      summary: 'Fail — 2 matches; expected no matches',
+    });
+    expect(r.checks[2].expected).toBe('between 1 and 3 groups');
+  });
+
+  it('gives evidence only to a check that did not pass, clipped, with int64 digits intact', async () => {
+    await load(ORDERS);
+    const r = await runChecks(engine, [
+      { name: 'ids', query: "$.orders[?(@.status == 'FAILED')].id", expectation: { type: 'no-matches' } },
+      { name: 'notes', query: '$.orders[*].note', expectation: { type: 'no-matches' } },
+      { name: 'any', query: '$.orders[*]', expectation: { type: 'at-least-one' } },
+    ], 5);
+    expect(r.checks[0].evidence).toEqual([
+      { path: '$.orders[0].id', preview: INT64 },
+      { path: '$.orders[2].id', preview: '3' },
+    ]);
+    // The worker cuts a string to 160 characters and this view to the cell
+    // limit, so a long value never reaches a response whole.
+    expect(r.checks[1].evidence[0].path).toBe('$.orders[0].note');
+    expect(r.checks[1].evidence[0].preview.length).toBeLessThan(240);
+    expect(r.checks[2].verdict).toBe('pass');
+    expect(r.checks[2].evidence).toEqual([]);
+  });
+
+  it('calls a count stopped by the cardinality cap inconclusive, never a pass', async () => {
+    await load(ORDERS);
+    const r = await runChecks(engine, [
+      { name: 'exactly three statuses', query: '$.orders[*] | group(@.status)', expectation: { type: 'exact-count', count: 3 } },
+      { name: 'some statuses', query: '$.orders[*].status | distinct', expectation: { type: 'at-least', count: 2 } },
+      { name: 'at most one status', query: '$.orders[*] | group(@.status)', expectation: { type: 'at-most', count: 1 } },
+    ], 1, 2);
+    expect(r.checks.map((c) => [c.verdict, c.observed, c.exact])).toEqual([
+      ['inconclusive', 2, false],
+      ['pass', 2, false],
+      ['fail', 2, false],
+    ]);
+    expect(r.checks[0].note).toBe('stopped counting at 2 groups (the cardinality cap) — narrow the query');
+    expect(r.summary.verdict).toBe('fail');
+  });
+
+  it('turns a query that cannot count into an error, and still runs the rest', async () => {
+    await load(ORDERS);
+    const r = await runChecks(engine, [
+      { name: 'sum', query: '$.orders[*] | sum(@.id)', expectation: { type: 'at-least-one' } },
+      { name: 'broken', query: '$.orders[?(@.id ==', expectation: { type: 'no-matches' } },
+      { name: 'any', query: '$.orders[*]', expectation: { type: 'at-least-one' } },
+    ], 0);
+    expect(r.checks.map((c) => c.verdict)).toEqual(['error', 'error', 'pass']);
+    expect(r.checks[0]).toMatchObject({ observed: null, error: expect.stringContaining('gives one value, not a count') });
+    expect(r.checks[1].summary).toMatch(/^Could not run — .+ \(at \d+\)$/);
+    expect(r.summary).toMatchObject({ errored: 2, passed: 1, verdict: 'inconclusive' });
   });
 });

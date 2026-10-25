@@ -8,6 +8,8 @@
 // loud and says what to do about it.
 
 import type {
+  ChecksResultView,
+  CheckView,
   DiffResultView,
   LoadResult,
   OpError,
@@ -16,6 +18,7 @@ import type {
   CsvResult,
 } from './doc-ops';
 import type { ProfileResult } from '../profile';
+import { outcomeLine, type RunVerdict } from '../playbook-run';
 
 export const RESPONSE_CAP = 10_000;
 
@@ -150,4 +153,28 @@ export function renderCsv(r: CsvResult): string {
     'complete: true',
     'atomic: true',
   );
+}
+
+/** fail → error → inconclusive → pass, so the cap cuts the passes first. */
+const CHECK_ORDER: Readonly<Record<RunVerdict, number>> = { fail: 0, error: 1, inconclusive: 2, pass: 3 };
+
+export function renderChecks(r: ChecksResultView, functionsSkipped: number): string {
+  const { summary } = r;
+  const counts = [
+    summary.failed && `${summary.failed} failed`,
+    summary.errored && `${summary.errored} could not run`,
+    summary.inconclusive && `${summary.inconclusive} inconclusive`,
+    summary.passed && `${summary.passed} passed`,
+  ].filter((part): part is string => typeof part === 'string');
+  // A stable sort, so checks of one verdict keep their playbook order.
+  const ordered = [...r.checks].sort((a, b) => CHECK_ORDER[a.verdict] - CHECK_ORDER[b.verdict]);
+  return lines(
+    [`checks: ${summary.total}`, ...counts, `${summary.ms} ms`].join(' · '),
+    ...ordered.map(renderCheck),
+    functionsSkipped > 0 && `functions: ${functionsSkipped} not run (checks only)`,
+  );
+}
+
+function renderCheck(check: CheckView): string {
+  return lines(outcomeLine(check), ...check.evidence.map((e) => `    ${e.path}\t${e.preview}`));
 }
