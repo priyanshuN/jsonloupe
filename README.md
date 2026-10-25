@@ -25,22 +25,30 @@
 jsonloupe is a browser-based workbench for inspecting, diffing, editing, and
 querying JSON documents that are too big or too precise for ordinary viewers —
 and for turning them into spreadsheets: nested JSON goes in, linked tables come
-out, as one `.xlsx` or a zip of CSVs. Everything runs in your browser: documents
-are parsed in a web worker, stored in IndexedDB, and never uploaded anywhere. No
-backend, no account, no telemetry.
+out, as one `.xlsx` or a zip of CSVs. The questions you ask of every file can be
+kept as checks in a playbook: one press judges them all over the open document,
+and the same file gates CI through `jsonloupe check`. Nothing leaves your
+machine: in the browser, documents are parsed in a web worker, stored in
+IndexedDB, and never uploaded anywhere. No backend, no account, no telemetry.
 
 ## Run it
 
-Use the hosted app at **[jsonloupe.dev](https://jsonloupe.dev)** — or run the identical bundle from your own machine, fully offline:
+Use the hosted app at **[jsonloupe.dev](https://jsonloupe.dev)**, rebuilt from
+`main` on every merge — or run the latest npm release from your own machine,
+fully offline:
 
 ```bash
 npx jsonloupe
 ```
 
-That starts a loopback-only static server (`127.0.0.1:5199`) serving the prebuilt
-app from the package — no runtime dependencies, no network calls, ~60 lines of
-auditable server in [bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and
-`--no-open` do what they say.
+That starts a loopback-only static server (`127.0.0.1:5199`, or the next free
+port) serving the prebuilt app from the package — no runtime dependencies, no
+network calls, one auditable file of about 200 lines with its comments:
+[bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and `--no-open` do what
+they say; `--key-file <path>` serves a model key from that file to the page,
+over loopback only. The same command carries the converter's verbs (`inspect`,
+`draft`, `convert`, [below](#nested-json-to-linked-tables)) and the CI gate
+(`check`, [below](#in-ci-jsonloupe-check)); `npx jsonloupe --help` lists them.
 
 ## Why another JSON viewer?
 
@@ -67,11 +75,17 @@ auditable server in [bin/jsonloupe.mjs](bin/jsonloupe.mjs). `--port <n>` and
   pipes (`$.tasks[?(@.status == 'FAILED')] | group(@.failureReason)`), executed
   locally with live preview as you type. Numeric literals, predicates, sums,
   averages, minima, and maxima remain exact for int64 and precise decimals.
+- **Checks you can gate on.** Keep the questions you ask of every file as
+  checks — a query and the count it should come to — and one press judges them
+  all, naming the first paths behind each failure. A count it could not finish
+  is *inconclusive*, never a pass it has not earned. The same playbook file
+  gates CI through `jsonloupe check` and an agent through MCP's `run_checks`.
 
 ## Quick start
 
 ```sh
-npm install
+git clone https://github.com/priyanshuN/jsonloupe && cd jsonloupe
+npm ci
 npm run dev        # http://localhost:5199
 ```
 
@@ -109,15 +123,10 @@ flagged, with the original bytes preserved.
 - **Playbook — your checks and functions on one sheet** — a check is a query
   and the count it should come to (none, at most 3 groups, between 1 and 10);
   `run all` judges every one over the open document and points at the first
-  nodes behind each failure. A function is JavaScript for the questions
-  no query language should have to answer, kept under a name and pressed over
-  tomorrow's file. Scripts run in an ephemeral sandbox worker with `fetch`,
-  storage and the network removed, and the result opens as a document of its
-  own. A function can keep JavaScript-number behavior or receive unsafe numeric
-  literals as exact digit strings; safe numbers stay numbers in either mode.
-  Tick several and one press answers all of them as a single report, honoring
-  each function's number contract. The same checks gate CI through
-  `jsonloupe check`.
+  nodes behind each failure. A function is JavaScript for the questions no
+  query language should have to answer, run in a sandbox with the network
+  removed; tick several and one press answers all of them as a single report.
+  The same checks gate CI through `jsonloupe check`.
   ([below](#playbooks-your-functions-and-checks-as-a-file).)
 - **JSON → Excel / CSV converter** — rename and reorder columns, choose source
   fields, add constants, set date and coordinate handling, take the column names
@@ -222,10 +231,12 @@ cannot read are reported or refused, never quietly written wrong.
 ## Playbooks: your functions and checks as a file
 
 The document changes daily; the handful of questions you ask of it does not. So
-**playbook** in the toolbar opens them beside the document, as one sheet: your
+**playbook** in the toolbar (the **functions** view before 1.8; `⌘K` still finds
+it by that word) opens them beside the document, as one sheet: your
 **checks** — a query and the count it should come to — and your **functions**,
-each list in name order. `run all` (`⌘⇧↵`) measures every check over whatever
-is open and paints each row's verdict in place, then runs the ticked functions.
+each list in name order. `run all` (`⌘⇧↵` / `Ctrl ⇧↵` while the playbook is
+open; press it again to stop) measures every check over whatever is open and
+paints each row's verdict in place, then runs the ticked functions.
 The first row that did not pass opens by itself, showing the first nodes it
 matched; press a path and the tree beside the sheet selects that node, while
 the sheet stays where it is.
@@ -252,16 +263,22 @@ not run instead of judging a number it was never meant to count.
 
 Every check comes back as **✓ pass**, **✕ fail**, **? inconclusive**, or **✗
 could not run**. Inconclusive is the honest third answer: `| group` and
-`| distinct` stop counting at 100,000 values (the cardinality cap), and past
-that point the count is only a lower bound. A lower bound passes only when it
-proves the expectation by itself (*at least one*, or *at least N* already
-reached), fails when it is already over the limit, and is inconclusive
-otherwise — it is never reported as a pass it has not earned. Narrowing the
-query decides it.
+`| distinct` keep at most 100,000 groups or values (the cardinality cap). Past
+that, the count is only a lower bound: at least 100,001. A lower bound passes
+only when it proves the expectation by itself (*at least one*, or *at least N*
+already reached), fails when it is already over the limit (*none*, or *at most
+100,000*), and is inconclusive otherwise — it is never reported as a pass it
+has not earned. Narrowing the query decides it.
 
-A saved check keeps its last verdict for the document it ran on, with up to
-five matched paths and a short preview of each. Reopen that document and the
-verdicts are still there; edit it and they fade, marked "document edited",
+A check whose query names a field the open document does not have says so on
+its row, and its panel adds "this reads `status` — this document has none of
+that, so a pass here may prove nothing". A *no matches* check passes just as
+well on a file whose field was renamed.
+
+A saved check keeps one last verdict, with up to five matched paths and a short
+preview of each. It belongs to the document the check last ran on: run it on
+another document and that run replaces it. Reopen the document it ran on and
+the verdicts are still there; edit it and they fade, marked "document edited",
 until you run again. That record stays in this browser: it is never written
 into an exported playbook, and removing the document removes it.
 
@@ -275,16 +292,18 @@ with it. That is what lets the sheet say
 
 *before* you press run, instead of leaving you to read an empty result as "none
 today". It is always a remark and never a gate: the reading knows only the branch
-that last run took, so the run button still works. Tick several functions and
-one press answers all of them, as a single object keyed by function name:
-today's report, which downloads and reopens as a document like any other. A
-function's result lasts for the session; after a reload its row says it has
-not run.
+that run took, so the run button still works. Tick several functions and
+`run all` answers all of them, as a single object keyed by function name.
+**open report** in the functions head shows it: today's report, which
+downloads and reopens as a document like any other. A function's result lasts
+while that document stays open. Open another document, or reload, and its row
+says it has not run. Which functions are ticked is remembered in this browser.
 
 Scripts run in an ephemeral worker with `fetch`, `XMLHttpRequest`, WebSockets,
 IndexedDB, `importScripts` and nested workers removed before any user code, terminated on its
-result or after ten seconds — a pasted script cannot reach the network or the
-documents you have opened. `JavaScript` number mode preserves the behavior of
+result or after ten seconds (a ticked batch shares those ten seconds, and one
+that runs past them is stopped whole) — a pasted script cannot reach the
+network or the documents you have opened. `JavaScript` number mode preserves the behavior of
 existing functions and says when a document contains values it will round.
 `exact text` mode instead hands those unsafe literals to the function as their
 original digit strings (`"9007199254740993"`); ordinary values such as `3` and
@@ -328,12 +347,12 @@ never the data:
 }
 ```
 
-Export writes one, at the lowest version that can hold what is in it: a library
-with no `at-most`, `at-least` or `between` check still exports as version 3,
-which jsonloupe 1.7 reads. Dropping one on the window installs it. Import
-**merges and never replaces** — a name you already use keeps yours and the
-incoming one lands as `slow orders 2`, because a duplicate is one `×` away and
-an overwrite is not. Unknown fields are refused by name rather than dropped, so
+**export** in the playbook bar writes one, as version 3 unless a check needs
+version 4: a library with no `at-most`, `at-least` or `between` check exports
+as version 3, which jsonloupe 1.4 to 1.7 read. **import**, or dropping the file
+on the window, adds what it holds. Import **merges and never replaces** — a
+name you already use keeps yours and the incoming one lands as `slow orders 2`,
+because a duplicate is one **forget** away and an overwrite is not. Unknown fields are refused by name rather than dropped, so
 a file from a newer jsonloupe cannot import as a subset of itself and look like
 it worked. The library keeps 100 functions and 100 checks: saving a 101st is
 refused with a message saying so, and a playbook that would not fit is refused
@@ -361,9 +380,10 @@ out/orders.json · 3 checks · 4 ms
 ✕ 1 failed · ✓ 2 passed
 ```
 
-Pin the version. jsonloupe before 1.8 has no `check` verb: it starts the viewer
-instead and waits for a browser that a CI runner never opens. From 1.8 on, a
-word jsonloupe does not know exits 1 rather than starting anything.
+Keep the `@^1.8.0`. jsonloupe before 1.8 has no `check` verb: it starts the
+viewer's local server instead, which never exits, so the job hangs until the
+runner times it out. From 1.8 on, a word jsonloupe does not know exits 1 rather
+than starting anything.
 
 The playbook comes first, then any number of files: `.json`, `.jsonl`/`.ndjson`,
 raw Zstd, or a Base64-Zstd / bytea payload, detected as they are in the
@@ -372,16 +392,18 @@ behind your back; `--allow-repair` checks the repaired document instead. Every
 query is checked before any file is read, so a typo in the last check costs no
 parsing. Functions are JavaScript and never run outside the browser's sandbox,
 so `check` counts them and says it did not run them. The text report prints
-matched paths and never values, since CI logs are often public; `--format json`
-writes one object with short previews for a program to read, and
-`--max-evidence N` (0–100, default 3) or `--no-evidence` sets how many paths a
-check that did not pass names.
+matched paths and never values, since CI logs are often public. A path still
+names the keys it passes through, so on a document keyed by e-mail address or
+account id, pass `--no-evidence`. `--format json` writes one object, with a
+short preview of each matched node, for a program to read; `--max-evidence N`
+(0–100, default 3) or `--no-evidence` sets how many paths a check that did not
+pass names.
 
 | Exit status | Meaning |
 |---|---|
 | 0 | every check passed on every file |
-| 1 | usage, read or parse error — including a file that would need repairing |
-| 2 | the playbook is invalid, has no checks or more than 100 (what a library holds), or has a query no check can count; nothing was checked |
+| 1 | usage error, a file or playbook that could not be read, or a file that is not valid JSON — including one that would need repairing |
+| 2 | the playbook is not valid JSON or not a playbook, has no checks or more than 100 (what a library holds), or has a query no check can count; nothing was checked |
 | 3 | at least one check failed |
 | 4 | nothing failed, but a check was inconclusive or could not run |
 
@@ -389,8 +411,10 @@ With several files the most actionable status wins: 3, then 1, then 4. Undecided
 has its own status so a pipeline can tolerate it on purpose
 (`… || test $? -eq 4`).
 
-In GitHub Actions, `--format github` adds an annotation on the playbook for each
-check that did not pass — a warning when it was inconclusive, an error otherwise:
+In GitHub Actions, `--format github` adds annotations after the text report: one
+on the playbook for each check that did not pass — a warning when it was
+inconclusive, an error otherwise — and an error on each file it could not check,
+or on the playbook when it is invalid:
 
 ```yaml
 jobs:
@@ -401,6 +425,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # … the steps that write out/orders.json
       - run: npx -y jsonloupe@^1.8.0 check carrier-dumps.playbook.json out/orders.json --format github
 ```
 
@@ -424,14 +449,18 @@ have to be decoded first, int64 and decimal digits that must survive the whole
 pipeline exactly, identity-keyed semantic diff between two documents, and MCP
 hosts that have no shell to run jq in.
 
-Twelve tools: `load_doc`, `get_schema`, `run_query`, `profile`, `sample`,
-`diff_docs`, `export_csv`, `export_result`, plus `inspect`, `draft_spec`, and
-`convert` for the spreadsheet path above, and `run_checks`, which gates a
-document on a [playbook](#playbooks-your-functions-and-checks-as-a-file)'s
-checks and never runs its functions. For one question, pass `filePath`
-straight to a tool; it opens the document and returns a reusable `docId` in the
-same call. For a sequence of questions, call `load_doc` once and reuse that
-`docId`. Query details default to 10 rows (use `limit=0` for summary only, or
+Twelve tools (`run_checks` from 1.8): `load_doc`, `get_schema`, `run_query`,
+`profile`, `sample`, `diff_docs`, `export_csv`, `export_result`, plus `inspect`,
+`draft_spec`, and `convert` for the spreadsheet path above, and `run_checks`,
+which gates a document on a
+[playbook](#playbooks-your-functions-and-checks-as-a-file)'s checks and never
+runs its functions. For one question, pass `filePath` straight to `get_schema`,
+`run_query`, `profile`, `sample`, `export_csv`, `export_result` or
+`run_checks`; it opens the document and returns a reusable `docId` in the same
+call. For a sequence of questions, and for `diff_docs` and the converter tools,
+which take a `docId`, call `load_doc` once and reuse that `docId`. Up to eight
+documents stay open; past that the least recently used is closed, and the next
+response says so. Query details default to 10 rows (use `limit=0` for summary only, or
 `offset` + `limit` to page), and text and structured MCP results are both
 bounded. A typical run over a 37 MB routing payload:
 
@@ -445,7 +474,7 @@ run_query d1 "$.tasks[?(@.status == 'FAILED')] | group(@.region, @.failureReason
 run_query d1 "$.tasks[*] | top(@.delayMinutes, @.id, @.status)" limit=5
                                   → only the five highest rows; the full array never enters context
 sample d1 "$.tasks[0]"           → the whole element, id 9007199254740993 intact
-export_result d1 "…| pluck(@.id, @.failureReason)" format=csv out=failed.csv
+export_result d1 "…| pluck(@.id, @.failureReason)" format=csv outPath=failed.csv
                                   → complete, atomic, rows + UTF-8 bytes only
 inspect d1                       → candidate tables, fields, types, deterministic suggestions
 draft_spec d1 outPath=tasks.spec.json
@@ -453,8 +482,9 @@ draft_spec d1 outPath=tasks.spec.json
 convert d1 specPath=tasks.spec.json outPath=tasks.xlsx
                                   → workbook path + row/skipped/warning counts, never its rows
 run_checks d1 playbookPath=tasks.playbook.json
-                                  → pass, fail or inconclusive per check; a failure names its
-                                    first paths ($.tasks[3]); functions counted, never run
+                                  → pass, fail or inconclusive per check (or could not run);
+                                    a failed or inconclusive check names its first paths
+                                    ($.tasks[3]); functions counted, never run
 ```
 
 The common schema → profile → query loop is deliberately cheaper than loading
@@ -482,15 +512,16 @@ this routing rule in its project instructions (for example `AGENTS.md` or
 ### In the browser: WebMCP
 
 Where the browser exposes [WebMCP](https://webmachinelearning.github.io/webmcp/)
-(`document.modelContext` — Chrome 149–156 origin trial, on by default in
-ChatGPT's in-app browser), [jsonloupe.dev](https://jsonloupe.dev) registers the
-same bounded verbs pointed at the document already on screen, so a browser agent
-and the person watching share one document instead of mailing copies back and
-forth. Alongside `run_query`, `get_schema`, `profile` and `sample`, three verbs
-no headless server can offer: `load_doc` pushes a document into the open viewer,
-`reveal_path` scrolls the tree to a row and flashes it, and
-`highlight_matches`/`clear_highlights` drive the toolbar's own filter state —
-visible, counted, and reversible by the human's own button. Every tool that
+(`document.modelContext` — a Chrome origin trial from Chrome 149, and the
+ChatGPT desktop app's built-in browser), [jsonloupe.dev](https://jsonloupe.dev)
+registers the same bounded verbs pointed at the document already on screen, so a
+browser agent and the person watching share one document instead of mailing
+copies back and forth. Eight tools: `run_query`, `get_schema`, `profile` and
+`sample` work as they do over stdio, and four act on the viewer itself, which no
+headless server can do: `load_doc` opens a document in it, `reveal_path` scrolls
+the tree to a row and flashes it, and `highlight_matches`/`clear_highlights`
+drive the toolbar's own filter state — visible, counted, and reversible by the
+human's own button. Every tool that
 returns document content is annotated `untrustedContentHint`: values are data,
 never instructions. Browsers without the API fetch nothing and run the same app
 they always did. Details, testing instructions, and provenance in
@@ -513,22 +544,29 @@ npm run build      # dist/
 ```
 
 Serve `dist/` from any static host (GitHub Pages, Cloudflare Pages, Netlify…).
-There is nothing to configure server-side; the local `/__api-key` convenience
-endpoint (dev mode, or `npx jsonloupe --key-file`) simply doesn't exist in a
-static deploy, and English translation activates only when a visitor adds their
-own key.
+The app needs nothing server-side to work. To match jsonloupe.dev's
+protection, set the response headers in [SECURITY-HEADERS.md](SECURITY-HEADERS.md)
+at the host — above all the Run sandbox's own CSP on `/assets/run-sandbox-*.js`,
+without which a pasted script's `import()` can reach any host. The local
+`/__api-key` convenience endpoint (dev mode, or `npx jsonloupe --key-file`)
+simply doesn't exist in a static deploy, and English translation activates only
+when a visitor connects their own model account or key.
 
 ## Development
 
 ```sh
-npm test           # vitest — query engine, worker, MCP dispatch, NL translation suites
+npm run dev        # Vite on :5199, with the loopback-only /__api-key endpoint
+npm test           # vitest — engine, worker, converter, playbook, CLI, MCP, WebMCP, NL and DOM suites
 npm run lint:security  # FLOSS security analysis + checked TypeScript style
+npm run lint:contract  # the UI contract in src/style.css: tokens, contrast, motion, type ramp
+npm run lint:headers   # every source file carries the MIT SPDX and copyright notice
 npm run coverage   # same suite with enforced 90% statement / 80% branch floors
-npm run build      # tsc --noEmit + vite build + the MCP bundle
-npm run test:a11y  # real Chromium axe + keyboard/focus checks (run after build)
+npm run build      # type checks + vite build + the MCP and CLI bundles
+npm run build:mcp  # or build:cli — one target's type check and bundle only
+npm run test:a11y  # real Chromium: axe, keyboard/focus, playbook and WebMCP journeys (run after build)
 npm run check:site-headers # verify the live OpenSSF hardening headers
 npm run check:reproducible-build  # clean locked installs must produce identical bytes
-npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture
+npm run smoke:mcp  # drives the built MCP server over real stdio against a 37 MB fixture (run after build)
 npm run eval:agent -- --help  # black-box MCP-vs-Python agent-choice benchmark
 npm run eval:ask -- --dry-run  # Ask correctness/injection suite; --dry-run costs nothing
 ```
@@ -538,7 +576,8 @@ documented in [ARCHITECTURE.md](ARCHITECTURE.md) and [SPEC.md](SPEC.md); the
 converter has its own [SPEC-converter.md](SPEC-converter.md), including what it
 deliberately refuses to do. Project decisions and the next twelve months are in
 [GOVERNANCE.md](GOVERNANCE.md) and [ROADMAP.md](ROADMAP.md). Official publishing
-and consumer verification are documented in [RELEASING.md](RELEASING.md).
+and consumer verification are documented in [RELEASING.md](RELEASING.md). What
+changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
@@ -546,5 +585,5 @@ and consumer verification are documented in [RELEASING.md](RELEASING.md).
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 Software is provided "as is", without warranty of any kind — see the license
-text. If you enable the Ask feature, your use of the configured LLM provider is
-governed by that provider's terms.
+text. If you connect a model for English queries, your use of the configured
+LLM provider is governed by that provider's terms.
