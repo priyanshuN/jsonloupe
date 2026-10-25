@@ -6,7 +6,7 @@
 import type { ConvertSpec } from './convert/spec';
 import { sameExpectation, validExpectation, type CheckExpectation } from './check';
 import type { CheckOutcome } from './playbook-run';
-import { deriveScriptName } from './run-script';
+import { deriveScriptName, uniqueScriptName } from './run-script';
 import { runNumberMode, type RunNumberMode } from './run-number-mode';
 
 export interface DocMeta {
@@ -659,6 +659,12 @@ export async function touchSaved(id: string): Promise<void> {
   await done(t);
 }
 
+/** One kept record exactly as stored, with no name derived — what a forget keeps for its undo. */
+export async function getSaved(id: string): Promise<SavedRecord | undefined> {
+  const t = (await db()).transaction('queries');
+  return req(t.objectStore('queries').get(id) as IDBRequest<SavedRecord | undefined>);
+}
+
 export async function removeSaved(id: string): Promise<void> {
   const t = (await db()).transaction('queries', 'readwrite');
   t.objectStore('queries').delete(id);
@@ -666,12 +672,47 @@ export async function removeSaved(id: string): Promise<void> {
 }
 
 // Undo of a forget: the identical record goes back — same id, createdAt and
-// last run — so nothing that pointed at it has to learn a new one. A plain put
-// with no cull and no cap: it restores what was there, it does not add.
-export async function restoreSaved(rec: SavedRecord): Promise<void> {
-  const t = (await db()).transaction('queries', 'readwrite');
-  t.objectStore('queries').put(rec);
-  await done(t);
+// last run — so nothing that pointed at it has to learn a new one. But the
+// library may have moved while the toast was up (another tab, an import), so
+// the rules a save keeps are kept here too, in the one transaction that writes:
+// - a kind that is full again refuses it (LibraryFullError), rather than
+//   holding 101 — an export of which no jsonloupe would import;
+// - a name taken meanwhile is restored under the next free one, since a name
+//   is a check's identity in a playbook file;
+// - a last run whose document is gone stays gone: its paths and previews may
+//   not outlive the document (removeDoc), which may have been removed while
+//   this record was out of the store and so out of reach of its sweep.
+// Answers the record as it went back.
+export async function restoreSaved(rec: SavedRecord): Promise<SavedRecord> {
+  const t = (await db()).transaction(['meta', 'queries'], 'readwrite');
+  const completion = done(t);
+  const store = t.objectStore('queries');
+  const run = isCheck(rec) ? rec.lastRun : undefined;
+  // Both reads queued before the first await (the saveDoc pattern).
+  const [all, doc] = await Promise.all([
+    req(store.getAll() as IDBRequest<SavedRecord[]>),
+    run ? req(t.objectStore('meta').get(run.docId) as IDBRequest<DocMeta | undefined>) : undefined,
+  ]);
+  const kind = isCheck(rec) ? 'check' : isScript(rec) ? 'function' : null;
+  let restored = rec;
+  if (kind) {
+    const siblings = all.filter((other) => other.id !== rec.id && (isCheck(other) ? 'check' : isScript(other) ? 'function' : null) === kind);
+    if (siblings.length >= KEEP_SAVED) {
+      t.abort();
+      await completion.catch(() => undefined);
+      throw new LibraryFullError(kind);
+    }
+    const nameOf = (r: SavedRecord): string => (isScript(r) ? r.name || deriveScriptName(r.script) : (r as SavedCheck).name);
+    const name = uniqueScriptName(nameOf(rec), siblings.map(nameOf));
+    if (name !== nameOf(rec)) restored = { ...restored, name } as SavedRecord;
+  }
+  if (run && !doc) {
+    const { lastRun: _gone, ...rest } = restored as SavedCheck;
+    restored = rest;
+  }
+  store.put(restored);
+  await completion;
+  return restored;
 }
 
 // ---------- a check's last run ----------

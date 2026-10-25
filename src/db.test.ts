@@ -1084,7 +1084,8 @@ describe('restoreSaved', () => {
     expect(await db.listScripts()).toEqual([script]);
   });
 
-  it('restores into a full library rather than culling or refusing', async () => {
+  it('refuses to restore into a library that filled up meanwhile, rather than holding 101', async () => {
+    // 101 checks would export as a playbook no jsonloupe imports.
     const forgotten = await db.saveCheck('forgotten', '$.f', { type: 'no-matches' });
     for (let i = 0; i < 99; i++) {
       tick();
@@ -1093,9 +1094,48 @@ describe('restoreSaved', () => {
     await db.removeSaved(forgotten.id);
     await db.saveCheck('took its place', '$.t', { type: 'no-matches' });
 
-    await db.restoreSaved(forgotten);
-    expect(await db.listChecks()).toHaveLength(101);
-    expect(await stored(forgotten.id)).toEqual(forgotten);
+    await expect(db.restoreSaved(forgotten)).rejects.toBeInstanceOf(db.LibraryFullError);
+    expect(await db.listChecks()).toHaveLength(100);
+    expect(await stored(forgotten.id)).toBeUndefined();
+    // A function is its own kind: a full set of checks does not refuse one.
+    const script = await db.saveScript('s', 'data.s');
+    await db.removeSaved(script.id);
+    await db.restoreSaved(script);
+    expect(await db.listScripts()).toEqual([script]);
+  });
+
+  it('restores under the next free name when its own was taken meanwhile', async () => {
+    const forgotten = await db.saveCheck('no orphans', '$.f', { type: 'no-matches' });
+    await db.removeSaved(forgotten.id);
+    await db.saveCheck('No Orphans', '$.g', { type: 'no-matches' });
+    const restored = await db.restoreSaved(forgotten);
+    expect(restored).toEqual({ ...forgotten, name: 'no orphans 2' });
+    expect(await stored(forgotten.id)).toEqual(restored);
+  });
+
+  it('leaves behind the last run of a document removed while the check was forgotten', async () => {
+    // Forget, delete the document from Recents while the undo toast is up, then
+    // undo: removeDoc swept a store the check was not in.
+    const meta = await db.saveDoc('{"password":"hunter2"}', 'secret.json');
+    const check = await db.saveCheck('a', '$.password', { type: 'no-matches' });
+    await db.recordCheckRuns([{ id: check.id, lastRun: runOf(check, meta, { evidence: [{ path: ['password'], pathText: '$.password', preview: '"hunter2"' }] }) }]);
+    const before = (await stored(check.id))!;
+    expect(before.lastRun?.docId).toBe(meta.id);
+    await db.removeSaved(check.id);
+    await db.removeDoc(meta.id);
+
+    const restored = await db.restoreSaved(before);
+    expect(restored).not.toHaveProperty('lastRun');
+    expect(await stored(check.id)).toEqual(restored);
+    expect(JSON.stringify(await db.listChecks())).not.toContain('hunter2');
+  });
+});
+
+describe('getSaved', () => {
+  it('reads one record as stored, without deriving a name', async () => {
+    const check = await db.saveCheck('a', '$.a', { type: 'no-matches' });
+    expect(await db.getSaved(check.id)).toEqual(check);
+    expect(await db.getSaved('gone')).toBeUndefined();
   });
 });
 

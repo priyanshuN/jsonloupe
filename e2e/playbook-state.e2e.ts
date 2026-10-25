@@ -77,6 +77,29 @@ async function editValue(page: Page, from: string, to: string): Promise<void> {
   await expect(page.locator('#tree-pane .val', { hasText: `"${to}"` }).first()).toBeVisible();
 }
 
+test('a forget undone after switching documents puts no verdict on the new one', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');
+  await page.locator('#parse-btn').click();
+  await expect(page.getByRole('tree', { name: 'JSON document' })).toBeVisible();
+  await page.locator('#new-btn').click();
+  await page.getByRole('button', { name: 'try a sample' }).click();
+  await expect(page.locator('#recents .doc-row-open', { hasText: 'sample-orders.json' })).toBeVisible();
+  await openPlaybook(page);
+  await importPlaybook(page, [PACKING]);
+  await page.locator('#pb-run-all').click();
+  await expect(page.locator('#pb-checks-status')).toContainText('1 failed');
+
+  await itemOf(page, PACKING.name).locator('[data-act="forget"]').click();
+  await expect(page.locator('#toast')).toContainText('forgot');
+  await page.locator('#recents .doc-row-open', { hasText: 'note' }).click();
+  await expect(page.locator('#tree-pane')).toContainText('note');
+  await page.locator('#toast').getByRole('button', { name: 'undo' }).click();
+  await openPlaybook(page);
+  await expect(checkRow(page, PACKING.name)).toHaveAccessibleName(/check: not run on this document$/);
+  await expect(page.locator('#pb-checks-status')).not.toContainText('failed');
+});
+
 /** Hold every check measure back by `ms`, in order, so a run all lasts long enough to work during. */
 async function slowMeasures(page: Page, ms: number): Promise<void> {
   await page.addInitScript((delay) => {

@@ -7632,6 +7632,13 @@ async function forgetItem(id: string, kind: string | undefined): Promise<void> {
   const ticked = runPicked.has(id);
   const kept = checkRuns.get(id);
   const fnRun = functionRuns.get(id);
+  // The verdicts above are about this document; the toast outlives a switch.
+  const documentToken = currentDocumentToken;
+  const documentRevision = currentDocumentRevision;
+  // The undo puts back the record as STORED, not the sheet's copy of it: a row
+  // run since the last listing wrote a newer last run, and a document removed
+  // since swept one away.
+  const live = await store.getSaved(id) ?? rec;
   await store.removeSaved(id);
   runPicked.delete(id);
   saveTicks();
@@ -7647,16 +7654,32 @@ async function forgetItem(id: string, kind: string | undefined): Promise<void> {
   if (nextId) focusItem(nextId);
   else (check ? pbNewCheckBtn : runNewBtn).focus();
   showToastAction(`forgot ${rec.name}`, 'undo', () => void (async () => {
-    await store.restoreSaved(rec);
+    let restored: store.SavedRecord;
+    try {
+      restored = await store.restoreSaved(live);
+    } catch (err) {
+      // Filled up while the toast was up — another tab, or an import.
+      if (!(err instanceof store.LibraryFullError)) throw err;
+      showToast(err.message, 'bad');
+      return;
+    }
     if (ticked) {
       runPicked.add(id);
       saveTicks();
     }
-    if (kept) checkRuns.set(id, kept);
-    if (fnRun) functionRuns.set(id, fnRun);
+    // A verdict goes back only onto the document it was measured on; on any
+    // other, the restored record's stored run is read the usual way.
+    if (documentToken === currentDocumentToken) {
+      if (kept) checkRuns.set(id, kept);
+      if (fnRun && documentRevision === currentDocumentRevision) functionRuns.set(id, fnRun);
+    } else {
+      void hydrateCheckRuns();
+    }
     await renderSheet();
     void renderSavedChecks();
     focusItem(id);
+    const name = 'name' in restored ? restored.name : rec.name;
+    if (name !== rec.name) showToast(`restored as \`${name}\` — \`${rec.name}\` was taken`);
   })());
 }
 
