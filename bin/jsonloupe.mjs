@@ -29,6 +29,12 @@ if (CONVERT.has(args[0])) {
   const { run } = await import('../dist-cli/commands.js');
   process.exit(await run(args));
 }
+// The CI gate: a playbook's checks against files, with an exit status a
+// pipeline can read. Its own bundle, since it carries the whole query engine.
+if (args[0] === 'check') {
+  const { run } = await import('../dist-cli/check.js');
+  process.exit(await run(args));
+}
 if (args[0] === 'serve') args.shift();
 
 if (args.includes('--help') || args.includes('-h')) {
@@ -38,6 +44,7 @@ usage: jsonloupe [serve] [--port <n>] [--no-open] [--key-file <path>]
        jsonloupe inspect <file>
        jsonloupe draft   <file> [-o spec.json]
        jsonloupe convert <file> --spec <spec.json> [-o out] [--to xlsx|csv]
+       jsonloupe check   <playbook.json> <file> [more files…] [--format text|json|github]
 
   --port, -p   port to listen on (default 5199; next free port if taken)
   --no-open    don't open the browser
@@ -48,11 +55,14 @@ usage: jsonloupe [serve] [--port <n>] [--no-open] [--key-file <path>]
 With no arguments jsonloupe serves the viewer. The three converter verbs turn
 nested JSON into flat tables: \`inspect\` reports what is in a document,
 \`draft\` writes a mapping spec you can read and edit, \`convert\` runs one.
+\`check\` runs a playbook's checks against files and exits non-zero when one
+fails, for CI (\`jsonloupe check --help\` lists its options and exit codes).
 
 Nothing leaves your machine: the server binds 127.0.0.1 and serves only the
 app's own files (plus, with --key-file, the one key file you name — to
 loopback requests only). Documents you open stay in your browser's IndexedDB,
-and the converter reads and writes only the paths you name.`);
+the converter reads and writes only the paths you name, and check only reads
+them.`);
   process.exit(0);
 }
 const keyFlag = args.findIndex((a) => a === '--key-file');
