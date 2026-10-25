@@ -522,7 +522,16 @@ function message(error: unknown): string {
 
 function processIo(): CheckIo {
   let pending: Promise<void> = Promise.resolve();
+  // A reader that went away (`| head`) makes the next write fail with EPIPE.
+  // Unheard, that error kills the process with exit 1, and the verdict's exit
+  // status is lost; heard, it reaches the write callback below, and the run
+  // still ends with the code it computed.
+  const closed = new Set<NodeJS.WriteStream>();
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', () => closed.add(stream));
+  }
   const write = (stream: NodeJS.WriteStream, text: string): Promise<void> => {
+    if (closed.has(stream)) return Promise.resolve();
     // Resolves on error too: a reader that went away must not hang the gate.
     const done = new Promise<void>((resolve) => {
       stream.write(text, () => resolve());

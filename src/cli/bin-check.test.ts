@@ -134,6 +134,28 @@ describe.skipIf(!built)('bin/jsonloupe.mjs check (skipped unless dist-cli/ is bu
     expect(report.documents[0].checks[39].evidence).toHaveLength(100);
   });
 
+  it('keeps its exit status when the reader closes the pipe early, as `| head` does', async () => {
+    // An unheard EPIPE killed the process with exit 1, so under `set -o
+    // pipefail` a passing gate failed, and a 3 or 4 read as 1.
+    const files = Array.from({ length: 200 }, () => doc);
+    const r = await new Promise<{ code: number | null; err: string }>((resolve) => {
+      const child = spawn(process.execPath, [bin, 'check', pb, ...files], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let err = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (c: string) => {
+        err += c;
+      });
+      child.stdout.once('data', () => child.stdout.destroy());
+      const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ code, err });
+      });
+    });
+    expect(r.err).not.toContain('EPIPE');
+    expect(r.code).toBe(3);
+  });
+
   it('ships a bundle that can evaluate no code', async () => {
     // Playbook functions are never run outside the browser sandbox; a bundle
     // with no evaluator in it cannot run one by accident.
