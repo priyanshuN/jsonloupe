@@ -331,6 +331,21 @@ for (const [name, glass] of Object.entries(glassThemes)) {
   check('glass-lens', onTrack, ['text']);
 }
 
+// Rule 15 tier 3: the error block's words sit on its own soft fill, over the
+// canvas, so the floor is measured on that composite. --danger on it measured
+// 4.33:1 in light and 4.39 in dark, which no hex pair above could see.
+for (const [name, glass] of Object.entries(glassThemes)) {
+  const hex = themes[name];
+  const soft = glass['danger-soft'];
+  if (!hex || !soft || !hex['danger-ink'] || !hex['bg-canvas']) {
+    errors.push(`contrast(${name}): --danger-ink or --danger-soft missing — the tier-3 block cannot be measured (rule 15)`);
+    continue;
+  }
+  const ground = rgbHex(over(soft, hexRgb(hex['bg-canvas'])));
+  const r = ratio(hex['danger-ink'], ground);
+  if (r < 4.5) errors.push(`contrast(${name}): --danger-ink on --danger-soft over --bg-canvas = ${r.toFixed(2)}:1, floor 4.5:1 (rule 15)`);
+}
+
 // The selection tint is translucent, so its inks are measured on the
 // composite — over chrome (the active document in Recents) and over the canvas
 // (a selected tree row). Axe caught a scheme's captions at 4.29:1 there that no

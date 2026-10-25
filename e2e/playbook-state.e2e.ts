@@ -111,6 +111,36 @@ test.describe('a verdict that could not run', () => {
     expect(margins).toEqual(['0px', '0px']);
   });
 
+  test('says why at WCAG contrast in every scheme', async ({ page }) => {
+    await openSample(page);
+    await openPlaybook(page);
+    await importPlaybook(page, [SUM], [{ name: 'broken', script: 'data.nope.x' }]);
+    await page.locator('#pb-tick-all').check();
+    await page.locator('#pb-run-all').click();
+    await expect(page.locator('#pb-fns-status')).toContainText('failed');
+    // Both panels open on their tier-3 sentence, and the dock shows a third.
+    for (const name of ['total spent', 'broken']) {
+      const row = itemOf(page, name).locator('.pb-open');
+      if ((await row.getAttribute('aria-expanded')) !== 'true') await row.click();
+      await expect(itemOf(page, name).locator('.pb-detail > .ask-error')).toBeVisible();
+    }
+    await page.getByRole('button', { name: 'New check' }).click();
+    await page.locator('#pb-check-query').fill('$.orders[*].total | sum');
+    await expect(page.locator('#pb-check-error')).toBeVisible();
+
+    const scan = async (): Promise<void> => {
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+      const results = await new AxeBuilder({ page }).withTags(wcagTags).include('#run-pane').analyze();
+      expect(results.violations.map((v) => ({ id: v.id, targets: v.nodes.map((n) => n.target.join(' ')) }))).toEqual([]);
+    };
+    await scan();
+    const schemes = await page.locator('.scheme-opt').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.scheme!));
+    for (const id of schemes) {
+      await page.locator('#scheme-btn').click();
+      await page.getByRole('menu', { name: 'Colour scheme' }).locator(`[data-scheme="${id}"]`).click();
+      await scan();
+    }
+  });
 });
 
 test('a forget undone after switching documents puts no verdict on the new one', async ({ page }) => {

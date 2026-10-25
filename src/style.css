@@ -439,9 +439,13 @@
   /* Rule 15's three tiers. The -soft pair is the tier-3 FILL, so it only ever
      appears on a state you must respond to — --warn-soft has no user today
      because nothing warn-coloured is currently blocking, and it stays declared
-     so the next one does not invent a fill of its own. */
+     so the next one does not invent a fill of its own. --danger-ink is the
+     words ON that fill: --danger on its own soft fill measured 4.39:1 here and
+     4.33 in light, under the 4.5 floor, so the two defaults lift it a step
+     (lint-checked on the composite); every named scheme already cleared it. */
   --danger: #e06c75;
   --danger-soft: rgba(224, 108, 117, 0.14);
+  --danger-ink: #e8808a;
   --ok: #a3be8c;
   --warn: #e6b35c;
 
@@ -537,6 +541,7 @@
 
   --danger: #cf3450;
   --danger-soft: rgba(207, 52, 80, 0.09);
+  --danger-ink: #bf2a45;
   --ok: #227a4b;
   --warn: #a56a00;
 
@@ -622,6 +627,7 @@
   --accent-fill-hover: #11709b;
   --danger: #fe869b;
   --danger-soft: rgba(254, 134, 155, 0.14);
+  --danger-ink: #fe869b;
   --ok: #9ece6a;
   --warn: #e0af68;
   --c-key: #82aafe;
@@ -681,6 +687,7 @@
   --accent-fill-hover: #7d53b4;
   --danger: #ff8982;
   --danger-soft: rgba(255, 137, 130, 0.14);
+  --danger-ink: #ff8982;
   --ok: #50fa7b;
   --warn: #f1fa8c;
   --c-key: #8be9fd;
@@ -740,6 +747,7 @@
   --accent-fill-hover: #7d59a4;
   --danger: #f38ba8;
   --danger-soft: rgba(243, 139, 168, 0.14);
+  --danger-ink: #f38ba8;
   --ok: #a6e3a1;
   --warn: #f9e2af;
   --c-key: #89b4fa;
@@ -800,6 +808,7 @@
   --accent-fill-hover: #886301;
   --danger: #fe9281;
   --danger-soft: rgba(254, 146, 129, 0.14);
+  --danger-ink: #fe9281;
   --ok: #b8bb26;
   --warn: #fabd2f;
   --c-key: #94b7a9;
@@ -860,6 +869,7 @@
   --accent-fill-hover: #1167c8;
   --danger: #ff6258;
   --danger-soft: rgba(255, 98, 88, 0.14);
+  --danger-ink: #ff6258;
   --ok: #3fb950;
   --warn: #d29922;
   --c-key: #7ee787;
@@ -919,6 +929,7 @@
   --accent-fill-hover: #036ead;
   --danger: #bd0112;
   --danger-soft: rgba(189, 1, 18, 0.09);
+  --danger-ink: #bd0112;
   --ok: #566304;
   --warn: #765800;
   --c-key: #00619a;
@@ -978,6 +989,7 @@
   --accent-fill-hover: #7d27e1;
   --danger: #b7022f;
   --danger-soft: rgba(183, 2, 47, 0.09);
+  --danger-ink: #b7022f;
   --ok: #196800;
   --warn: #814f02;
   --c-key: #014cd7;
@@ -1037,6 +1049,7 @@
   --accent-fill-hover: #76608e;
   --danger: #93465d;
   --danger-soft: rgba(147, 70, 93, 0.09);
+  --danger-ink: #93465d;
   --ok: #23647e;
   --warn: #855305;
   --c-key: #23647e;
@@ -1096,6 +1109,7 @@
   --accent-fill-hover: #015ec7;
   --danger: #c51125;
   --danger-soft: rgba(197, 17, 37, 0.09);
+  --danger-ink: #c51125;
   --ok: #00732b;
   --warn: #865a03;
   --c-key: #116329;
@@ -3985,7 +3999,7 @@ button.ask-meta {
 .ask-error,
 #run-error {
   padding: var(--gap-2) 10px;
-  color: var(--danger);
+  color: var(--danger-ink);
   background: var(--danger-soft);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
   border-radius: var(--r-sm);
