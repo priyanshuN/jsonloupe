@@ -809,6 +809,21 @@ async function stored(id: string): Promise<SavedCheck | undefined> {
   return (await db.listChecks()).find((check) => check.id === id);
 }
 
+/** A kept document under a fixed id, so a run on DOC_A or DOC_B is a run on a document the store holds. */
+function keepDoc(doc: { id: string; hash: string }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('json-workbench', 3);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const conn = open.result;
+      const t = conn.transaction('meta', 'readwrite');
+      t.objectStore('meta').put({ id: doc.id, title: `${doc.id}.json`, size: 2, createdAt: clock, updatedAt: clock, pinned: false, hash: doc.hash });
+      t.oncomplete = () => { conn.close(); resolve(); };
+      t.onerror = () => { conn.close(); reject(t.error); };
+    };
+  });
+}
+
 describe('lastRunOf', () => {
   it('keeps the verdict and the document it ran on, and never the check\'s name or id', () => {
     const run = db.lastRunOf(outcome({ note: 'a note' }), DOC_A, 1234);
@@ -910,6 +925,11 @@ describe('currentLastRun against a stored document', () => {
 });
 
 describe('recordCheckRuns', () => {
+  beforeEach(async () => {
+    await db.listChecks(); // opens (and so creates) the database first
+    await keepDoc(DOC_A);
+  });
+
   it('stores each run on its check without moving the order or counting a use', async () => {
     const a = await db.saveCheck('a', '$.a', { type: 'no-matches' });
     tick();
@@ -950,9 +970,35 @@ describe('recordCheckRuns', () => {
     expect(await db.listScripts()).toEqual([script]);
     await db.recordCheckRuns([]);
   });
+
+  it('never writes an old definition\'s run over the check as it is now, and says which runs are current', async () => {
+    // Run all measured Q1; the check was edited to Q2 and run again meanwhile.
+    const check = await db.saveCheck('a', '$.q1', { type: 'no-matches' });
+    const q1 = runOf(check);
+    const edited = (await db.updateCheck(check.id, { query: '$.q2' }))!;
+    const q2 = runOf(edited, DOC_A, { verdict: 'pass', observed: 0 });
+    expect([...await db.recordCheckRuns([{ id: check.id, lastRun: q2 }])]).toEqual([check.id]);
+
+    expect([...await db.recordCheckRuns([{ id: check.id, lastRun: q1 }])]).toEqual([]);
+    expect((await stored(check.id))?.lastRun).toEqual(q2);
+    expect(db.currentLastRun((await stored(check.id))!, DOC_A)).toEqual(q2);
+  });
+
+  it('keeps no run for a document the store no longer holds, but still calls it current', async () => {
+    // Removed in another tab while this one still had it open.
+    const check = await db.saveCheck('a', '$.a', { type: 'no-matches' });
+    const current = await db.recordCheckRuns([{ id: check.id, lastRun: runOf(check, DOC_B) }]);
+    expect([...current]).toEqual([check.id]);
+    expect(await stored(check.id)).not.toHaveProperty('lastRun');
+  });
 });
 
 describe('a check\'s last run follows its definition', () => {
+  beforeEach(async () => {
+    await db.listChecks();
+    await keepDoc(DOC_A);
+  });
+
   it('keeps the run through a rename, and drops it when the query or expectation changes', async () => {
     const first = await db.saveCheck('No failed orders', '$.failed', { type: 'no-matches' });
     const run = runOf(first);
@@ -1015,6 +1061,11 @@ describe('a check\'s last run follows its definition', () => {
 });
 
 describe('restoreSaved', () => {
+  beforeEach(async () => {
+    await db.listChecks();
+    await keepDoc(DOC_A);
+  });
+
   it('puts a forgotten record back exactly — id, createdAt and last run', async () => {
     const check = await db.saveCheck('a', '$.a', { type: 'no-matches' });
     const run = runOf(check);

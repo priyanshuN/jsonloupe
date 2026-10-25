@@ -787,7 +787,8 @@ describe('the playbook view', () => {
     }
     const now = fn(/async function runChecksNow\([\s\S]*?\n\}/);
     expect(now).toContain('keepGoing: () => documentToken === currentDocumentToken &&');
-    expect(now).toContain('if (!report.aborted) await keepCheckRuns(');
+    expect(now).toContain('if (report.aborted) return report;');
+    expect(now).toContain('const kept = await keepCheckRuns(');
   });
 
   it('labels a one-function report in the singular', () => {

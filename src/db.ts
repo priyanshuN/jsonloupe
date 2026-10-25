@@ -747,21 +747,42 @@ export function currentLastRun(
  * the record moves: `updatedAt` and `uses` are what order the chips and decide
  * nothing is culled, and running a check is not using it the way saving is
  * (contrast touchSaved). An id that is gone, or is not a check, is skipped.
+ *
+ * So is a check no longer defined as the run measured it: edited while the run
+ * was going, here or in another tab, it has dropped that verdict and may have
+ * earned its own, which an old run must not overwrite. And a run is written
+ * only while its document is still kept — removed in another tab, its paths and
+ * previews may not outlive it (removeDoc).
+ *
+ * Answers the ids whose check is still as the run measured it, written or not:
+ * the verdicts the caller may show.
  */
-export async function recordCheckRuns(runs: readonly { id: string; lastRun: CheckLastRun }[]): Promise<void> {
-  if (!runs.length) return;
-  const t = (await db()).transaction('queries', 'readwrite');
+export async function recordCheckRuns(runs: readonly { id: string; lastRun: CheckLastRun }[]): Promise<Set<string>> {
+  const current = new Set<string>();
+  if (!runs.length) return current;
+  const t = (await db()).transaction(['meta', 'queries'], 'readwrite');
   const completion = done(t);
   const store = t.objectStore('queries');
+  const metaStore = t.objectStore('meta');
+  const docIds = [...new Set(runs.map(({ lastRun }) => lastRun.docId))];
   // Every read is queued before the first await, so the transaction stays
   // active until the writes below are queued too (the saveDoc pattern).
-  const recs = await Promise.all(runs.map(({ id }) => req(store.get(id) as IDBRequest<SavedRecord | undefined>)));
+  const [recs, docs] = await Promise.all([
+    Promise.all(runs.map(({ id }) => req(store.get(id) as IDBRequest<SavedRecord | undefined>))),
+    Promise.all(docIds.map((id) => req(metaStore.get(id) as IDBRequest<DocMeta | undefined>))),
+  ]);
+  const kept = new Set(docIds.filter((_, index) => docs[index] !== undefined));
   recs.forEach((rec, index) => {
+    const { id, lastRun } = runs[index];
     if (!rec || !isCheck(rec)) return;
-    rec.lastRun = runs[index].lastRun;
+    if (rec.query !== lastRun.query || !sameExpectation(rec.expectation, lastRun.expectation)) return;
+    current.add(id);
+    if (!kept.has(lastRun.docId)) return;
+    rec.lastRun = lastRun;
     store.put(rec);
   });
   await completion;
+  return current;
 }
 
 // ---------- reusable converter mappings ----------

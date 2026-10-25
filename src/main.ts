@@ -6499,11 +6499,17 @@ function setRunFace(face: 'functions' | 'result'): void {
 
 /** A stored or live run of this check, if it is a run of what the check is NOW. */
 function checkRunFor(check: SavedCheck): store.CheckLastRun | CheckOutcome | null {
+  // A live outcome too is a run of the check as the run found it: saved with a
+  // new query since, the row is not that outcome's.
   const live = pbLive.get(check.id);
-  if (live && typeof live === 'object') return live;
+  if (live && typeof live === 'object' && measuresAsDefined(live, check)) return live;
   const run = checkRuns.get(check.id);
-  if (!run || run.query !== check.query || !sameExpectation(run.expectation, check.expectation)) return null;
+  if (!run || !measuresAsDefined(run, check)) return null;
   return run;
+}
+
+function measuresAsDefined(run: Pick<CheckOutcome, 'query' | 'expectation'>, check: SavedCheck): boolean {
+  return run.query === check.query && sameExpectation(run.expectation, check.expectation);
 }
 
 /** The last run of this check on this document, for anyone outside the sheet. */
@@ -7391,6 +7397,8 @@ async function saveDockCheck(asNew: boolean): Promise<void> {
   else showToast(editing ? `saved · ${name}` : 'check saved');
   if (changed) {
     checkRuns.delete(rec.id);
+    // Run all may be waiting to measure the old definition; the row is not waiting on that.
+    pbLive.delete(rec.id);
     // The preview already measured exactly this query on exactly this document:
     // that IS the check's first run, so it is kept rather than measured twice.
     if (draft && draft.query === rec.query && draft.documentToken === currentDocumentToken && draft.edits === pbEdits) {
@@ -7921,15 +7929,24 @@ async function runChecksNow(
       onOutcome: opts.onOutcome,
     },
   );
-  if (!report.aborted) await keepCheckRuns(report.outcomes, documentToken);
-  return report;
+  if (report.aborted) return report;
+  const kept = await keepCheckRuns(report.outcomes, documentToken);
+  // Nothing kept is a run the document outlived; what is kept is every outcome
+  // of a check still defined as it was measured, and the report says only those.
+  if (!kept) return { ...report, aborted: true };
+  return { ...report, outcomes: report.outcomes.filter((outcome) => !outcome.id || kept.has(outcome.id)) };
 }
 
 // Each verdict is kept with its check, with up to five matched paths, keyed to
 // this document by id and sampled hash. Running a check is not saving it: the
 // write never touches `updatedAt` or `uses` (recordCheckRuns), so a monthly
 // run reorders nothing and culls nothing.
-async function keepCheckRuns(outcomes: readonly CheckOutcome[], documentToken: number): Promise<void> {
+//
+// Answers the ids it kept, or null when it kept nothing because the document
+// moved on while the verdicts waited.
+async function keepCheckRuns(outcomes: readonly CheckOutcome[], documentToken: number): Promise<ReadonlySet<string> | null> {
+  // Both callers have just checked pbEdits against what was measured.
+  const edits = pbEdits;
   let docId = currentDocId;
   const pending = pendingInitialSave?.documentToken === documentToken ? pendingInitialSave.promise : null;
   if (!docId && pending) {
@@ -7939,7 +7956,10 @@ async function keepCheckRuns(outcomes: readonly CheckOutcome[], documentToken: n
       docId = null; // not stored, so the verdicts last as long as the tab
     }
   }
-  if (documentToken !== currentDocumentToken) return;
+  // The first save of a large text can take seconds. An edit made while it
+  // ran is newer than these verdicts, and stamped after it they would read as
+  // current rather than faint.
+  if (documentToken !== currentDocumentToken || edits !== pbEdits) return null;
   const hash = store.sampleHash(currentText);
   // Stamped after the document's own save, so a reload's `at >= updatedAt`
   // guard keeps it.
@@ -7947,13 +7967,20 @@ async function keepCheckRuns(outcomes: readonly CheckOutcome[], documentToken: n
   const runs = outcomes.flatMap((outcome) => (
     outcome.id ? [{ id: outcome.id, lastRun: store.lastRunOf(outcome, { id: docId ?? '', hash }, at) }] : []
   ));
-  for (const run of runs) checkRuns.set(run.id, run.lastRun);
-  if (!docId) return;
+  // Only onto checks still defined as they were measured: one saved with a new
+  // query while run all went on has its own verdict now, which an outcome of
+  // the old query must not replace. (A document never stored is not written,
+  // but its verdicts still last as long as the tab.)
+  let current: ReadonlySet<string>;
   try {
-    await store.recordCheckRuns(runs);
+    current = await store.recordCheckRuns(runs);
   } catch (error) {
     showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
+    current = new Set(runs.map((run) => run.id));
   }
+  if (documentToken !== currentDocumentToken) return null;
+  for (const run of runs) if (current.has(run.id)) checkRuns.set(run.id, run.lastRun);
+  return current;
 }
 
 /**
@@ -7974,6 +8001,9 @@ async function runAllChecks(opts: { onOutcome?: RunOptions['onOutcome']; stop?()
   try {
     const report = await runChecksNow(checks, {
       onStart: (check) => {
+        // A check saved with a new definition mid-run is not the one measured now.
+        const now = pbChecks.find((c) => c.id === check.id);
+        if (now && !measuresAsDefined(check, now)) return;
         pbLive.set(check.id, 'running');
         paintRow(check.id);
       },
