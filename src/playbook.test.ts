@@ -140,8 +140,8 @@ describe('playbookRoomError', () => {
     expect(playbookRoomError(book(0), { functions: 100, checks: 100 }, 100)).toBeNull();
   });
 
-  // Saving past the cap culls the oldest entries, so a playbook that does not
-  // fit would delete functions its new owner wrote while reporting a full import.
+  // Saving past the cap is refused (it used to cull the oldest entries), so a
+  // playbook that does not fit would stop halfway, imported in part.
   it('refuses a playbook that would push the oldest functions out', () => {
     expect(playbookRoomError(book(10), { functions: 95, checks: 0 }, 100))
       .toBe('10 functions, and your library has room for 5 more — remove some of yours first');

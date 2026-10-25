@@ -3,7 +3,8 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { useRecency, type DocProvenance } from './db';
+import { useRecency, type CheckLastRun, type DocProvenance, type SavedCheck } from './db';
+import type { CheckOutcome } from './playbook-run';
 
 // The IndexedDB-backed paths run against fake-indexeddb. `db.ts` memoises its
 // open request in a module-level promise, so a test only gets a clean database
@@ -695,15 +696,30 @@ describe('saved scripts', () => {
     expect((await db.listScripts()).map((s) => s.id)).toEqual([second.id]);
   });
 
-  it('caps scripts without touching the questions saved beside them', async () => {
+  // A function someone wrote is never deleted to make room: the 101st is
+  // refused with a sentence the page can show, and nothing already kept moves.
+  it('refuses the 101st function instead of culling the oldest, leaving the questions alone', async () => {
     const question = await db.saveQuery('kept', '$.kept');
-    for (let i = 0; i < 105; i++) {
+    const first = await db.saveScript('s0', 'data.s0');
+    for (let i = 1; i < 100; i++) {
       tick();
       await db.saveScript(`s${i}`, `data.s${i}`);
     }
 
-    expect(await db.listScripts()).toHaveLength(100);
+    tick();
+    const refused = db.saveScript('s100', 'data.s100');
+    await expect(refused).rejects.toBeInstanceOf(db.LibraryFullError);
+    await expect(refused).rejects.toThrow('your library holds 100 functions, the most it keeps — forget one to save another');
+    const kept = await db.listScripts();
+    expect(kept).toHaveLength(100);
+    expect(kept.map((s) => s.id)).toContain(first.id);
     expect((await db.listQueries()).map((q) => q.id)).toEqual([question.id]);
+
+    // A full library still saves over a name it holds, and edits in place.
+    tick();
+    expect((await db.saveScript('s0', 'data.s0 + 1')).id).toBe(first.id);
+    expect(await db.updateScript(first.id, { script: 'data.s0 + 2' })).not.toBeNull();
+    expect(await db.listScripts()).toHaveLength(100);
   });
 
   it('reads a record written before scripts shared the store as a question', async () => {
@@ -740,6 +756,344 @@ describe('saved checks', () => {
     expect(second.query).toBe('$.failed[*]');
     expect(second.expectation).toEqual({ type: 'exact-count', count: 2 });
     expect(await db.listChecks()).toHaveLength(1);
+  });
+});
+
+describe('saved checks at the cap', () => {
+  it('refuses the 101st check, and its error says what to do', async () => {
+    for (let i = 0; i < 100; i++) {
+      tick();
+      await db.saveCheck(`check ${i}`, `$.c${i}`, { type: 'no-matches' });
+    }
+    const refused = db.saveCheck('one more', '$.more', { type: 'no-matches' });
+    await expect(refused).rejects.toMatchObject({ name: 'LibraryFullError', kind: 'check' });
+    await expect(refused).rejects.toThrow('your library holds 100 checks, the most it keeps — forget one to save another');
+    expect(await db.listChecks()).toHaveLength(100);
+    // A question still has room of its own, and questions still cull.
+    for (let i = 0; i < 101; i++) {
+      tick();
+      await db.saveQuery(`question ${i}`, `$.q${i}`);
+    }
+    expect(await db.listQueries()).toHaveLength(100);
+    expect(await db.listChecks()).toHaveLength(100);
+  });
+});
+
+// ---------- a check's last run ----------
+
+function outcome(overrides: Partial<CheckOutcome> = {}): CheckOutcome {
+  return {
+    id: 'ignored',
+    name: 'ignored too',
+    query: '$.orders[?(!@.customerId)]',
+    expectation: { type: 'no-matches' },
+    verdict: 'fail',
+    observed: 37,
+    exact: true,
+    unit: 'match',
+    evidence: [{ path: ['orders', 1203], pathText: '$.orders[1203]', preview: '{ id, total } · 2 keys' }],
+    summary: 'Fail — 37 matches; expected no matches',
+    ms: 31,
+    ...overrides,
+  };
+}
+
+const DOC_A = { id: 'doc-a', hash: 'hash-a' };
+const DOC_B = { id: 'doc-b', hash: 'hash-b' };
+
+function runOf(check: SavedCheck, doc = DOC_A, overrides: Partial<CheckOutcome> = {}): CheckLastRun {
+  return db.lastRunOf(outcome({ query: check.query, expectation: check.expectation, ...overrides }), doc, clock);
+}
+
+async function stored(id: string): Promise<SavedCheck | undefined> {
+  return (await db.listChecks()).find((check) => check.id === id);
+}
+
+describe('lastRunOf', () => {
+  it('keeps the verdict and the document it ran on, and never the check\'s name or id', () => {
+    const run = db.lastRunOf(outcome({ note: 'a note' }), DOC_A, 1234);
+    expect(run).toEqual({
+      query: '$.orders[?(!@.customerId)]',
+      expectation: { type: 'no-matches' },
+      verdict: 'fail',
+      observed: 37,
+      exact: true,
+      unit: 'match',
+      evidence: [{ path: ['orders', 1203], pathText: '$.orders[1203]', preview: '{ id, total } · 2 keys' }],
+      summary: 'Fail — 37 matches; expected no matches',
+      note: 'a note',
+      ms: 31,
+      docId: 'doc-a',
+      docHash: 'hash-a',
+      at: 1234,
+    });
+    expect(db.lastRunOf(outcome({ verdict: 'error', observed: null, error: 'no count' }), DOC_A, 1)).toMatchObject({
+      verdict: 'error',
+      observed: null,
+      error: 'no count',
+    });
+  });
+
+  it('keeps five matched nodes at most, clips their text, and drops a path too long to keep whole', () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      path: ['rows', i],
+      pathText: `$.rows[${i}]`,
+      preview: 'x'.repeat(300),
+    }));
+    const longKey = 'k'.repeat(600);
+    const evidence = [
+      { path: [longKey], pathText: `$.${longKey}`, preview: 'dropped' },
+      { path: ['a'], pathText: `$.${'p'.repeat(700)}`, preview: '😀'.repeat(150) },
+      ...many,
+    ];
+    const run = db.lastRunOf(outcome({ evidence }), DOC_A, 1);
+    expect(run.evidence).toHaveLength(db.STORED_EVIDENCE);
+    expect(run.evidence.map((e) => e.path)).toEqual([['a'], ['rows', 0], ['rows', 1], ['rows', 2], ['rows', 3]]);
+    expect(run.evidence[0].pathText).toHaveLength(500);
+    expect(run.evidence[0].pathText.endsWith('…')).toBe(true);
+    // A clip never leaves half a surrogate pair behind.
+    expect(run.evidence[0].preview.length).toBeLessThanOrEqual(200);
+    expect(run.evidence[0].preview).toMatch(/^(😀)+…$/u);
+    expect(run.evidence[1].preview).toHaveLength(200);
+    // The outcome itself is left alone.
+    expect(evidence).toHaveLength(10);
+  });
+});
+
+describe('currentLastRun', () => {
+  it('answers only for this check, on this document, as both are now', async () => {
+    const check = await db.saveCheck('none missing', '$.orders[?(!@.customerId)]', { type: 'no-matches' });
+    expect(db.currentLastRun(check, DOC_A)).toBeNull();
+    const run = runOf(check);
+    const withRun: SavedCheck = { ...check, lastRun: run };
+    expect(db.currentLastRun(withRun, DOC_A)).toBe(run);
+    expect(db.currentLastRun(withRun, DOC_B)).toBeNull();
+    expect(db.currentLastRun(withRun, { id: DOC_A.id, hash: 'edited' })).toBeNull();
+    expect(db.currentLastRun(withRun, { id: 'other', hash: DOC_A.hash })).toBeNull();
+    // Edited by something that did not know the field exists: another tab, an older build.
+    expect(db.currentLastRun({ ...withRun, query: '$.orders[*]' }, DOC_A)).toBeNull();
+    expect(db.currentLastRun({ ...withRun, expectation: { type: 'at-most', count: 3 } }, DOC_A)).toBeNull();
+    // Key order is not a different expectation.
+    const reordered: SavedCheck = {
+      ...check,
+      expectation: JSON.parse('{"max":8,"type":"between","min":3}'),
+      lastRun: { ...run, expectation: { type: 'between', min: 3, max: 8 } },
+    };
+    expect(db.currentLastRun(reordered, DOC_A)).toBe(reordered.lastRun);
+    // A run older than the document's last real edit is past, even when the
+    // sampled hash could not see the edit.
+    expect(db.currentLastRun(withRun, { ...DOC_A, updatedAt: run.at })).toBe(run);
+    expect(db.currentLastRun(withRun, { ...DOC_A, updatedAt: run.at - 1 })).toBe(run);
+    expect(db.currentLastRun(withRun, { ...DOC_A, updatedAt: run.at + 1 })).toBeNull();
+    // A stored run that is not one at all reads as none.
+    expect(db.currentLastRun({ ...check, lastRun: { ...run, expectation: { type: 'nope' } } as unknown as CheckLastRun }, DOC_A)).toBeNull();
+  });
+});
+
+describe('currentLastRun against a stored document', () => {
+  it('retires a run when the document is edited where the hash cannot see', async () => {
+    const pad = 'x'.repeat(40_000);
+    const before = `{"head":"${pad}","mid":"AAAA","tail":"${pad}"}`;
+    const meta = await db.saveDoc(before, 'big.json');
+    const check = await db.saveCheck('a', '$.mid', { type: 'at-least-one' });
+    tick();
+    const run = db.lastRunOf(outcome({ query: check.query, expectation: check.expectation }), meta, clock);
+    const withRun: SavedCheck = { ...check, lastRun: run };
+    expect(db.currentLastRun(withRun, meta)).toBe(run);
+
+    tick();
+    const edited = (await db.updateDoc(meta.id, before.replace('AAAA', 'BBBB')))!;
+    // Same length, same first and last 32 KB: the sampled hash is unchanged.
+    expect(edited.hash).toBe(meta.hash);
+    expect(db.currentLastRun(withRun, edited)).toBeNull();
+  });
+});
+
+describe('recordCheckRuns', () => {
+  it('stores each run on its check without moving the order or counting a use', async () => {
+    const a = await db.saveCheck('a', '$.a', { type: 'no-matches' });
+    tick();
+    const b = await db.saveCheck('b', '$.b', { type: 'at-least-one' });
+    const order = (await db.listChecks()).map((check) => check.id);
+    expect(order).toEqual([b.id, a.id]);
+
+    tick();
+    await db.recordCheckRuns([
+      { id: a.id, lastRun: runOf(a) },
+      { id: b.id, lastRun: runOf(b, DOC_A, { verdict: 'pass', observed: 3 }) },
+    ]);
+
+    const after = await db.listChecks();
+    expect(after.map((check) => check.id)).toEqual(order);
+    const storedA = after.find((check) => check.id === a.id)!;
+    expect(storedA.updatedAt).toBe(a.updatedAt);
+    expect(storedA.uses).toBe(a.uses);
+    expect(storedA.lastRun).toEqual(runOf(a));
+    expect(after.find((check) => check.id === b.id)?.lastRun?.verdict).toBe('pass');
+  });
+
+  it('skips ids that are gone or are not checks', async () => {
+    const check = await db.saveCheck('a', '$.a', { type: 'no-matches' });
+    const question = await db.saveQuery('q', '$.q');
+    const script = await db.saveScript('s', 'data.s');
+    const run = runOf(check);
+
+    await db.recordCheckRuns([
+      { id: 'gone', lastRun: run },
+      { id: question.id, lastRun: run },
+      { id: script.id, lastRun: run },
+      { id: check.id, lastRun: run },
+    ]);
+
+    expect((await stored(check.id))?.lastRun).toEqual(run);
+    expect(await db.listQueries()).toEqual([question]);
+    expect(await db.listScripts()).toEqual([script]);
+    await db.recordCheckRuns([]);
+  });
+});
+
+describe('a check\'s last run follows its definition', () => {
+  it('keeps the run through a rename, and drops it when the query or expectation changes', async () => {
+    const first = await db.saveCheck('No failed orders', '$.failed', { type: 'no-matches' });
+    const run = runOf(first);
+    await db.recordCheckRuns([{ id: first.id, lastRun: run }]);
+
+    tick();
+    const renamed = await db.saveCheck('no FAILED orders', '$.failed', { type: 'no-matches' });
+    expect(renamed.name).toBe('no FAILED orders');
+    expect(renamed.lastRun).toEqual(run);
+
+    tick();
+    const newQuery = await db.saveCheck('No failed orders', '$.failed[*]', { type: 'no-matches' });
+    expect(newQuery.id).toBe(first.id);
+    expect(newQuery).not.toHaveProperty('lastRun');
+    expect(await stored(first.id)).not.toHaveProperty('lastRun');
+
+    await db.recordCheckRuns([{ id: first.id, lastRun: runOf(newQuery) }]);
+    tick();
+    const newExpectation = await db.saveCheck('No failed orders', '$.failed[*]', { type: 'at-most', count: 2 });
+    expect(newExpectation).not.toHaveProperty('lastRun');
+  });
+
+  it('updates a check in place by id, with the same rule', async () => {
+    const check = await db.saveCheck('few currencies', '$.c | group(@.cur)', { type: 'at-most', count: 3 });
+    const other = await db.saveCheck('other', '$.o', { type: 'no-matches' });
+    const run = runOf(check);
+    await db.recordCheckRuns([{ id: check.id, lastRun: run }]);
+
+    tick();
+    // A rename onto another check's name still edits THIS record, never that one.
+    const renamed = await db.updateCheck(check.id, { name: '  other  ' });
+    expect(renamed).toMatchObject({ id: check.id, name: 'other', createdAt: check.createdAt, updatedAt: clock, uses: check.uses });
+    expect(renamed?.lastRun).toEqual(run);
+    expect(await stored(other.id)).toEqual(other);
+
+    tick();
+    const reordered = await db.updateCheck(check.id, { expectation: JSON.parse('{"count":3,"type":"at-most"}') });
+    expect(reordered?.lastRun).toEqual(run);
+
+    tick();
+    const widened = await db.updateCheck(check.id, { expectation: { type: 'between', min: 1, max: 5 } });
+    expect(widened?.expectation).toEqual({ type: 'between', min: 1, max: 5 });
+    expect(widened).not.toHaveProperty('lastRun');
+    expect(await stored(check.id)).not.toHaveProperty('lastRun');
+
+    await db.recordCheckRuns([{ id: check.id, lastRun: runOf(widened!) }]);
+    const requeried = await db.updateCheck(check.id, { query: '$.c[*] | group(@.cur)', name: '' });
+    expect(requeried?.name).toBe('other');
+    expect(requeried).not.toHaveProperty('lastRun');
+    expect(await db.listChecks()).toHaveLength(2);
+  });
+
+  it('answers null for a check that is gone, and refuses what saveCheck refuses', async () => {
+    expect(await db.updateCheck('gone', { name: 'x' })).toBeNull();
+    const check = await db.saveCheck('a', '$.a', { type: 'no-matches' });
+    await expect(db.updateCheck(check.id, { query: '  ' })).rejects.toThrow('check query is required');
+    await expect(db.updateCheck(check.id, { expectation: { type: 'at-least', count: 0 } })).rejects.toThrow('check expectation is invalid');
+    expect(await stored(check.id)).toEqual(check);
+  });
+});
+
+describe('restoreSaved', () => {
+  it('puts a forgotten record back exactly — id, createdAt and last run', async () => {
+    const check = await db.saveCheck('a', '$.a', { type: 'no-matches' });
+    const run = runOf(check);
+    await db.recordCheckRuns([{ id: check.id, lastRun: run }]);
+    const before = (await stored(check.id))!;
+    const script = await db.saveScript('s', 'data.s', ['orders'], 'exact-text');
+
+    await db.removeSaved(check.id);
+    await db.removeSaved(script.id);
+    tick();
+    await db.restoreSaved(before);
+    await db.restoreSaved(script);
+
+    expect(await stored(check.id)).toEqual(before);
+    expect(before.lastRun).toEqual(run);
+    expect(await db.listScripts()).toEqual([script]);
+  });
+
+  it('restores into a full library rather than culling or refusing', async () => {
+    const forgotten = await db.saveCheck('forgotten', '$.f', { type: 'no-matches' });
+    for (let i = 0; i < 99; i++) {
+      tick();
+      await db.saveCheck(`check ${i}`, `$.c${i}`, { type: 'no-matches' });
+    }
+    await db.removeSaved(forgotten.id);
+    await db.saveCheck('took its place', '$.t', { type: 'no-matches' });
+
+    await db.restoreSaved(forgotten);
+    expect(await db.listChecks()).toHaveLength(101);
+    expect(await stored(forgotten.id)).toEqual(forgotten);
+  });
+});
+
+describe('removeDoc sweeps what was learned from the document', () => {
+  it('clears only that document\'s runs, and leaves everything else as it was', async () => {
+    const doc = await db.saveDoc('{"orders":[]}', 'orders.json');
+    const kept = await db.saveDoc('{"other":[]}', 'other.json');
+    const onDoc = await db.saveCheck('on doc', '$.orders', { type: 'no-matches' });
+    const onKept = await db.saveCheck('on kept', '$.other', { type: 'no-matches' });
+    const neverRun = await db.saveCheck('never run', '$.x', { type: 'no-matches' });
+    const question = await db.saveQuery('q', '$.q');
+    await db.recordCheckRuns([
+      { id: onDoc.id, lastRun: runOf(onDoc, { id: doc.id, hash: doc.hash }) },
+      { id: onKept.id, lastRun: runOf(onKept, { id: kept.id, hash: kept.hash }) },
+    ]);
+
+    await db.removeDoc(doc.id);
+
+    expect((await db.listDocs()).map((meta) => meta.id)).toEqual([kept.id]);
+    expect(await stored(onDoc.id)).toEqual(onDoc);
+    expect((await stored(onKept.id))?.lastRun?.docId).toBe(kept.id);
+    expect(await stored(neverRun.id)).toEqual(neverRun);
+    expect(await db.listQueries()).toEqual([question]);
+  });
+
+  it('sweeps a document that pruning culls', async () => {
+    const first = await db.saveDoc('{"n":0}', 'doc-0.json');
+    const check = await db.saveCheck('a', '$.n', { type: 'no-matches' });
+    await db.recordCheckRuns([{ id: check.id, lastRun: runOf(check, { id: first.id, hash: first.hash }) }]);
+    for (let i = 1; i <= 50; i++) {
+      tick();
+      await db.saveDoc(`{"n":${i}}`, `doc-${i}.json`);
+    }
+    expect((await db.listDocs()).map((meta) => meta.id)).not.toContain(first.id);
+    expect(await stored(check.id)).not.toHaveProperty('lastRun');
+  });
+
+  it('still opens the database at version 3', async () => {
+    await db.listChecks();
+    const version = await new Promise<number>((resolve, reject) => {
+      const open = indexedDB.open('json-workbench');
+      open.onsuccess = () => {
+        const v = open.result.version;
+        open.result.close();
+        resolve(v);
+      };
+      open.onerror = () => reject(open.error);
+    });
+    expect(version).toBe(3);
   });
 });
 

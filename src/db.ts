@@ -4,7 +4,8 @@
 // so listing recents never loads document bodies.
 
 import type { ConvertSpec } from './convert/spec';
-import { validExpectation, type CheckExpectation } from './check';
+import { sameExpectation, validExpectation, type CheckExpectation } from './check';
+import type { CheckOutcome } from './playbook-run';
 import { deriveScriptName } from './run-script';
 import { runNumberMode, type RunNumberMode } from './run-number-mode';
 
@@ -311,11 +312,27 @@ export async function renameDoc(id: string, title: string): Promise<void> {
   });
 }
 
+// Removing a document removes what was learned from it too: a saved check's
+// last run holds paths and short previews of the document it ran on, and none
+// of that may outlive the document. Pruning goes through here, so a culled
+// document is swept the same way.
 export async function removeDoc(id: string): Promise<void> {
-  const t = (await db()).transaction(['meta', 'text'], 'readwrite');
+  const t = (await db()).transaction(['meta', 'text', 'queries'], 'readwrite');
+  const completion = done(t);
   t.objectStore('meta').delete(id);
   t.objectStore('text').delete(id);
-  await done(t);
+  const cursor = t.objectStore('queries').openCursor();
+  cursor.onsuccess = () => {
+    const at = cursor.result;
+    if (!at) return;
+    const rec = at.value as SavedRecord;
+    if (isCheck(rec) && rec.lastRun?.docId === id) {
+      delete rec.lastRun;
+      at.update(rec);
+    }
+    at.continue();
+  };
+  await completion;
 }
 
 // Recency of USE, which is what pruning must respect: a document opened every
@@ -386,11 +403,50 @@ export interface SavedCheck {
   createdAt: number;
   updatedAt: number;
   uses: number;
+  /**
+   * The verdict of the last run, on the document it ran on. ABSENT means never
+   * run since this field existed. Local only: it is never exported, because a
+   * playbook never carries the document (exportPlaybook lists its fields).
+   */
+  lastRun?: CheckLastRun;
 }
 
-type SavedRecord = SavedQuery | SavedScript | SavedCheck;
+/**
+ * One check's last run, kept with the check. It names the document by id and
+ * by sampled hash, so a later edit makes it a past result rather than a
+ * current one, and it carries the query and expectation it judged, so an
+ * edited check — in this tab, another tab, or an older build — never wears a
+ * verdict its new definition did not earn.
+ */
+export interface CheckLastRun extends Omit<CheckOutcome, 'id' | 'name'> {
+  /** DocMeta.id of the document the check ran on. */
+  docId: string;
+  /** sampleHash of that document's text at run time. */
+  docHash: string;
+  at: number;
+}
+
+/** Matched paths kept per stored run; the run itself may have measured more. */
+export const STORED_EVIDENCE = 5;
+const STORED_PREVIEW_CHARS = 200;
+const STORED_PATH_CHARS = 500;
+
+export type SavedRecord = SavedQuery | SavedScript | SavedCheck;
 
 export const KEEP_SAVED = 100;
+
+/**
+ * A save the library refused because it already holds KEEP_SAVED of that kind.
+ * Checks and functions are things someone wrote, so a full library says no
+ * rather than deleting the oldest one to make room; the message is meant to be
+ * shown as it is.
+ */
+export class LibraryFullError extends Error {
+  constructor(public readonly kind: 'check' | 'function') {
+    super(`your library holds ${KEEP_SAVED} ${kind}s, the most it keeps — forget one to save another`);
+    this.name = 'LibraryFullError';
+  }
+}
 
 function isScript(rec: SavedRecord): rec is SavedScript {
   return (rec as SavedScript).kind === 'script';
@@ -427,19 +483,28 @@ export async function listChecks(): Promise<SavedCheck[]> {
   return (await listSaved()).filter(isCheck);
 }
 
-// The one put + cull, for all three kinds. `siblings` predates the put: a new record
-// grows its kind's list by one, so cull from KEEP_SAVED - 1; a replacement
-// replaces in place. Never cull the record just put.
+// The one put, for all three kinds. `siblings` predates the put: a new record
+// grows its kind's list by one, a replacement replaces in place.
+//
+// Only saved QUESTIONS are culled to make room — they are cheap to ask again,
+// and the oldest by use is the one to lose. A check or a function is refused
+// instead once its kind is full: the one nobody re-saved lately can be the one
+// a gate depends on, since a run never bumps `updatedAt`. Never cull the
+// record just put.
 async function putSaved(
   rec: SavedRecord,
   siblings: SavedRecord[],
   replaced: boolean,
 ): Promise<void> {
+  const written = isCheck(rec) ? 'check' : isScript(rec) ? 'function' : null;
+  if (written && !replaced && siblings.length >= KEEP_SAVED) throw new LibraryFullError(written);
   const t = (await db()).transaction('queries', 'readwrite');
   const store = t.objectStore('queries');
   store.put(rec);
-  for (const old of siblings.slice(replaced ? KEEP_SAVED : KEEP_SAVED - 1)) {
-    if (old.id !== rec.id) store.delete(old.id);
+  if (!written) {
+    for (const old of siblings.slice(replaced ? KEEP_SAVED : KEEP_SAVED - 1)) {
+      if (old.id !== rec.id) store.delete(old.id);
+    }
   }
   await done(t);
 }
@@ -468,7 +533,7 @@ export async function saveCheck(
   if (!validExpectation(expectation)) throw new Error('check expectation is invalid');
   const dup = all.find((check) => check.name.trim().toLowerCase() === label.toLowerCase());
   const rec: SavedCheck = dup
-    ? { ...dup, name: label, query, expectation, updatedAt: now, uses: dup.uses + 1 }
+    ? withoutStaleRun(dup, { ...dup, name: label, query, expectation, updatedAt: now, uses: dup.uses + 1 })
     : {
       id: crypto.randomUUID(),
       kind: 'check',
@@ -480,6 +545,40 @@ export async function saveCheck(
       uses: 1,
     };
   await putSaved(rec, all, !!dup);
+  return rec;
+}
+
+// A check's last run belongs to its definition. A rename keeps it — the same
+// question under a new name earned the same verdict — but a new query or a new
+// expectation was never run, and the `{...dup}` spread would otherwise carry
+// the old verdict onto it.
+function withoutStaleRun(before: SavedCheck, after: SavedCheck): SavedCheck {
+  if (after.query !== before.query || !sameExpectation(after.expectation, before.expectation)) delete after.lastRun;
+  return after;
+}
+
+// `save` on a check you are editing: the record with this id, updated in place,
+// so an edit can never land on another check that happens to share the new
+// name. Null when that record is gone (deleted in another tab).
+export async function updateCheck(
+  id: string,
+  patch: { name?: string; query?: string; expectation?: CheckExpectation },
+): Promise<SavedCheck | null> {
+  const all = await listChecks();
+  const current = all.find((check) => check.id === id);
+  if (!current) return null;
+  const query = patch.query ?? current.query;
+  const expectation = patch.expectation ?? current.expectation;
+  if (!query.trim()) throw new Error('check query is required');
+  if (!validExpectation(expectation)) throw new Error('check expectation is invalid');
+  const rec = withoutStaleRun(current, {
+    ...current,
+    name: patch.name?.trim() || current.name,
+    query,
+    expectation,
+    updatedAt: Date.now(),
+  });
+  await putSaved(rec, all, true);
   return rec;
 }
 
@@ -564,6 +663,105 @@ export async function removeSaved(id: string): Promise<void> {
   const t = (await db()).transaction('queries', 'readwrite');
   t.objectStore('queries').delete(id);
   await done(t);
+}
+
+// Undo of a forget: the identical record goes back — same id, createdAt and
+// last run — so nothing that pointed at it has to learn a new one. A plain put
+// with no cull and no cap: it restores what was there, it does not add.
+export async function restoreSaved(rec: SavedRecord): Promise<void> {
+  const t = (await db()).transaction('queries', 'readwrite');
+  t.objectStore('queries').put(rec);
+  await done(t);
+}
+
+// ---------- a check's last run ----------
+
+function clipText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let end = max - 1;
+  // Never split a surrogate pair: half an emoji is not a character.
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${text.slice(0, end)}…`;
+}
+
+/**
+ * An outcome, shaped for storage: at most STORED_EVIDENCE matched nodes, each
+ * preview and path text clipped, and a node whose path alone is too long to
+ * keep dropped rather than kept cut short — a clipped path would reveal the
+ * wrong node. About 600 KB at the very worst for a full library of checks.
+ */
+export function lastRunOf(outcome: CheckOutcome, doc: { id: string; hash: string }, at: number): CheckLastRun {
+  return {
+    query: outcome.query,
+    expectation: outcome.expectation,
+    verdict: outcome.verdict,
+    observed: outcome.observed,
+    exact: outcome.exact,
+    unit: outcome.unit,
+    evidence: outcome.evidence
+      .filter((item) => JSON.stringify(item.path).length <= STORED_PATH_CHARS)
+      .slice(0, STORED_EVIDENCE)
+      .map((item) => ({
+        path: [...item.path],
+        pathText: clipText(item.pathText, STORED_PATH_CHARS),
+        preview: clipText(item.preview, STORED_PREVIEW_CHARS),
+      })),
+    summary: outcome.summary,
+    ...(outcome.note !== undefined ? { note: outcome.note } : {}),
+    ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+    ms: outcome.ms,
+    docId: doc.id,
+    docHash: doc.hash,
+    at,
+  };
+}
+
+/**
+ * The check's stored run, if it is a run of THIS check on THIS document: the
+ * same document id and hash, and the same query and expectation. Asked of the
+ * stored record rather than trusted, because another tab or an older build may
+ * have edited the check without knowing the field exists.
+ *
+ * Pass the document's `updatedAt` (a DocMeta fits as it is) and a run older
+ * than its last real edit is not current either: the hash samples only the
+ * first and last 32 KB, so an edit of the same length in the middle keeps it.
+ */
+export function currentLastRun(
+  check: SavedCheck,
+  doc: { id: string; hash: string; updatedAt?: number },
+): CheckLastRun | null {
+  const run = check.lastRun;
+  if (!run || typeof run !== 'object' || !validExpectation(run.expectation)) return null;
+  return run.docId === doc.id
+    && run.docHash === doc.hash
+    && (doc.updatedAt === undefined || run.at >= doc.updatedAt)
+    && run.query === check.query
+    && sameExpectation(run.expectation, check.expectation)
+    ? run
+    : null;
+}
+
+/**
+ * Store a run's verdicts on their checks, in one transaction. Nothing else on
+ * the record moves: `updatedAt` and `uses` are what order the chips and decide
+ * nothing is culled, and running a check is not using it the way saving is
+ * (contrast touchSaved). An id that is gone, or is not a check, is skipped.
+ */
+export async function recordCheckRuns(runs: readonly { id: string; lastRun: CheckLastRun }[]): Promise<void> {
+  if (!runs.length) return;
+  const t = (await db()).transaction('queries', 'readwrite');
+  const completion = done(t);
+  const store = t.objectStore('queries');
+  // Every read is queued before the first await, so the transaction stays
+  // active until the writes below are queued too (the saveDoc pattern).
+  const recs = await Promise.all(runs.map(({ id }) => req(store.get(id) as IDBRequest<SavedRecord | undefined>)));
+  recs.forEach((rec, index) => {
+    if (!rec || !isCheck(rec)) return;
+    rec.lastRun = runs[index].lastRun;
+    store.put(rec);
+  });
+  await completion;
 }
 
 // ---------- reusable converter mappings ----------

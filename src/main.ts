@@ -5912,7 +5912,14 @@ checkName.addEventListener('input', paintCheckPreview);
 checkCancel.addEventListener('click', () => { checkEditor.hidden = true; });
 checkSave.addEventListener('click', async () => {
   if (!lastCommittedQuery || !checkName.value.trim()) return;
-  await store.saveCheck(checkName.value, lastCommittedQuery, selectedCheckExpectation());
+  try {
+    await store.saveCheck(checkName.value, lastCommittedQuery, selectedCheckExpectation());
+  } catch (err) {
+    // A full library refuses rather than culling a check someone relies on.
+    if (!(err instanceof store.LibraryFullError)) throw err;
+    showToast(err.message, 'bad');
+    return;
+  }
   checkEditor.hidden = true;
   await renderSavedChecks();
   showToast('check saved');
@@ -6571,7 +6578,14 @@ async function saveCurrentScript(asNew: boolean): Promise<void> {
     // A fork never overwrites what it was forked from, so it takes the first
     // free name rather than asking for one.
     const name = asNew ? uniqueScriptName(base, existing.map((s) => s.name)) : base;
-    rec = await store.saveScript(name, code, undefined, runNumberMode);
+    try {
+      rec = await store.saveScript(name, code, undefined, runNumberMode);
+    } catch (err) {
+      // A full library refuses rather than culling a function someone wrote.
+      if (!(err instanceof store.LibraryFullError)) throw err;
+      showToast(err.message, 'bad');
+      return;
+    }
   }
   adoptScript(rec);
   await renderLibrary();
@@ -6676,7 +6690,8 @@ async function importPlaybookText(
   }
   const scripts = await store.listScripts();
   const checks = await store.listChecks();
-  // Past the library's cap, saving culls the oldest — refused before any write.
+  // Past the library's cap, saving refuses the next one, which would leave the
+  // playbook half imported — so the whole playbook is refused before any write.
   const full = playbookRoomError(res.playbook, { functions: scripts.length, checks: checks.length }, store.KEEP_SAVED);
   if (full) {
     showToast(`${fileName}: ${full}`, 'bad');

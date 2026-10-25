@@ -518,6 +518,15 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toContain('more.textContent = `… +${fmtNumber(res.total - 50)} more groups`');
   });
 
+  it('says so when a full library refuses a new check or function', () => {
+    // Saving the 101st used to cull the oldest silently; db.ts now refuses,
+    // and the page has to show that refusal rather than drop it.
+    const save = mainSource.match(/checkSave\.addEventListener\('click', async \(\) => \{[\s\S]*?^\}\);/m)?.[0] ?? '';
+    expect(save).toMatch(/err instanceof store\.LibraryFullError[\s\S]*?showToast\(err\.message, 'bad'\)/);
+    const script = mainSource.match(/async function saveCurrentScript\([\s\S]*?^\}/m)?.[0] ?? '';
+    expect(script).toMatch(/err instanceof store\.LibraryFullError[\s\S]*?showToast\(err\.message, 'bad'\)/);
+  });
+
   it('gives the unknown-field warning a home inside the pipeline card', () => {
     // This is a safety feature, not decoration: a generated query that names a
     // field the document lacks runs, matches nothing, and reports a plausible
