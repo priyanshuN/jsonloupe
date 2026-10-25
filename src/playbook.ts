@@ -20,10 +20,18 @@
 // and everything decidable about the format is decided and tested here.
 
 import { runNumberMode, type RunNumberMode } from './run-number-mode';
-import { validExpectation, type CheckExpectation } from './check';
+import { V3_EXPECTATION_TYPES, validExpectation, type CheckExpectation } from './check';
 
-/** v2 added function number contracts; v3 adds deterministic saved Checks. */
-export const PLAYBOOK_VERSION = 3;
+/**
+ * v2 added function number contracts; v3 added deterministic saved Checks; v4
+ * adds the at-most, at-least and between expectations. Export writes the LOWEST
+ * version that can say what it holds (playbookVersionFor), so a library without
+ * the new kinds stays readable by a jsonloupe that predates them.
+ */
+export const PLAYBOOK_VERSION = 4;
+
+/** The largest playbook the CLI and MCP server will read — a playbook is a short list, not a document. */
+export const MAX_PLAYBOOK_BYTES = 1_048_576;
 
 export interface PlaybookFunction {
   name: string;
@@ -48,7 +56,7 @@ export interface PlaybookCheck {
 }
 
 const TOP_KEYS_V1_V2 = new Set(['playbookVersion', 'name', 'functions']);
-const TOP_KEYS_V3 = new Set(['playbookVersion', 'name', 'functions', 'checks']);
+const TOP_KEYS_V3_V4 = new Set(['playbookVersion', 'name', 'functions', 'checks']);
 const FUNCTION_KEYS_V1 = new Set(['name', 'script', 'reads']);
 const FUNCTION_KEYS_V2 = new Set(['name', 'script', 'reads', 'numberMode']);
 const CHECK_KEYS = new Set(['name', 'query', 'expectation']);
@@ -79,15 +87,19 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   }
   if (!isObject(raw)) return { ok: false, error: 'a playbook is an object, and this is not' };
 
-  if (raw.playbookVersion !== 1 && raw.playbookVersion !== 2 && raw.playbookVersion !== PLAYBOOK_VERSION) {
+  const version = raw.playbookVersion;
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
     return {
       ok: false,
-      error: typeof raw.playbookVersion === 'number'
-        ? `playbook version ${raw.playbookVersion}, and this jsonloupe reads versions 1–${PLAYBOOK_VERSION}`
+      error: typeof version === 'number'
+        ? `playbook version ${version}, and this jsonloupe reads versions 1–${PLAYBOOK_VERSION}`
         : 'no `playbookVersion` — this file is not a playbook',
     };
   }
-  const topKeys = raw.playbookVersion === PLAYBOOK_VERSION ? TOP_KEYS_V3 : TOP_KEYS_V1_V2;
+  // Checks arrived in v3, and v4 only widened what an expectation may say, so
+  // both read the same top-level keys. `>= 3`, never `=== PLAYBOOK_VERSION`:
+  // that spelling would refuse every v3 file with checks the day v4 shipped.
+  const topKeys = version >= 3 ? TOP_KEYS_V3_V4 : TOP_KEYS_V1_V2;
   const stray = unknownKey(raw, topKeys);
   if (stray) return { ok: false, error: `unknown field \`${stray}\` — this file is not a playbook, or was written by a newer jsonloupe` };
   if (raw.name !== undefined && typeof raw.name !== 'string') {
@@ -96,7 +108,7 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
   if (!Array.isArray(raw.functions)) return { ok: false, error: '`functions` must be a list' };
 
   const functions: PlaybookFunction[] = [];
-  const functionKeys = raw.playbookVersion === 1 ? FUNCTION_KEYS_V1 : FUNCTION_KEYS_V2;
+  const functionKeys = version === 1 ? FUNCTION_KEYS_V1 : FUNCTION_KEYS_V2;
   for (const [i, entry] of raw.functions.entries()) {
     const at = `function ${i + 1}`;
     if (!isObject(entry)) return { ok: false, error: `${at} is not an object` };
@@ -112,7 +124,7 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
       && (!Array.isArray(entry.reads) || entry.reads.some((p) => typeof p !== 'string'))) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has a \`reads\` that is not a list of paths` };
     }
-    if (raw.playbookVersion !== 1 && entry.numberMode === undefined) {
+    if (version !== 1 && entry.numberMode === undefined) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has no \`numberMode\`` };
     }
     if (entry.numberMode !== undefined && entry.numberMode !== 'js' && entry.numberMode !== 'exact-text') {
@@ -126,7 +138,7 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
     });
   }
   const checks: PlaybookCheck[] = [];
-  const rawChecks = raw.playbookVersion === PLAYBOOK_VERSION ? raw.checks ?? [] : [];
+  const rawChecks = version >= 3 ? raw.checks ?? [] : [];
   if (!Array.isArray(rawChecks)) return { ok: false, error: '`checks` must be a list' };
   for (const [i, entry] of rawChecks.entries()) {
     const at = `check ${i + 1}`;
@@ -139,6 +151,15 @@ export function parsePlaybook(text: string): { ok: true; playbook: Playbook } | 
     }
     if (!validExpectation(entry.expectation)) {
       return { ok: false, error: `${at} (\`${entry.name}\`) has an invalid \`expectation\`` };
+    }
+    // A v3 file that says `at-most` was written by hand or by something that
+    // got the version wrong; a jsonloupe that reads only v3 would refuse it, so
+    // this one does too, and says which version would carry it.
+    if (version === 3 && !V3_EXPECTATION_TYPES.has(entry.expectation.type)) {
+      return {
+        ok: false,
+        error: `${at} (\`${entry.name}\`) uses \`${entry.expectation.type}\`, which needs playbookVersion 4`,
+      };
     }
     checks.push({ name: entry.name.trim(), query: entry.query, expectation: entry.expectation });
   }
@@ -180,6 +201,15 @@ export function playbookRoomError(
     }
   }
   return null;
+}
+
+/**
+ * The lowest version that can carry these checks: 4 only when one of them uses
+ * an expectation v3 does not have. A coworker on an older jsonloupe can then
+ * still import everything that does not need the new kinds.
+ */
+export function playbookVersionFor(playbook: { checks: readonly { expectation: CheckExpectation }[] }): 3 | 4 {
+  return playbook.checks.some((check) => !V3_EXPECTATION_TYPES.has(check.expectation.type)) ? 4 : 3;
 }
 
 /** The file, pretty-printed — a playbook is meant to be read and diffed. */

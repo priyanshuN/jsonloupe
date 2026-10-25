@@ -97,7 +97,7 @@ import type { SavedCheck, SavedScript } from './db';
 import { evaluateCheck, expectationText, type CheckExpectation } from './check';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
-import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, PLAYBOOK_VERSION } from './playbook';
+import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, playbookVersionFor } from './playbook';
 import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 import { CommandPalette, type PaletteCommand } from './palette';
@@ -6653,19 +6653,24 @@ runNewBtn.addEventListener('click', () => {
 async function exportPlaybook(): Promise<void> {
   const [all, checks] = await Promise.all([store.listScripts(), store.listChecks()]);
   if (all.length === 0 && checks.length === 0) return;
+  // Explicit fields only: a check's stored last run holds paths and previews
+  // of a document, and a playbook never carries the document.
+  const pbChecks = checks.map((check) => ({
+    name: check.name,
+    query: check.query,
+    expectation: check.expectation,
+  }));
   const text = serializePlaybook({
-    playbookVersion: PLAYBOOK_VERSION,
+    // The lowest version that can say it, so an older jsonloupe still reads a
+    // library that does not use the v4 expectations.
+    playbookVersion: playbookVersionFor({ checks: pbChecks }),
     functions: all.map((s) => ({
       name: s.name,
       script: s.script,
       ...(s.reads ? { reads: s.reads } : {}),
       numberMode: s.numberMode,
     })),
-    checks: checks.map((check) => ({
-      name: check.name,
-      query: check.query,
-      expectation: check.expectation,
-    })),
+    checks: pbChecks,
   });
   downloadText(text, 'jsonloupe-playbook.json', 'application/json');
   showToast(`exported ${fmtNumber(all.length + checks.length)} playbook item${all.length + checks.length === 1 ? '' : 's'}`);

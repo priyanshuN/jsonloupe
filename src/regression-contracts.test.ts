@@ -518,6 +518,22 @@ describe('interactive UI regression contracts', () => {
     expect(mainSource).toContain('more.textContent = `… +${fmtNumber(res.total - 50)} more groups`');
   });
 
+  it('exports a playbook\'s checks by name, query and expectation alone, at the lowest version that holds them', () => {
+    const exporter = mainSource.match(/async function exportPlaybook\([\s\S]*?^\}/m)?.[0] ?? '';
+    // A check's lastRun holds paths and previews of a document; a playbook
+    // never carries the document.
+    const map = exporter.match(/const pbChecks = checks\.map\(\(check\) => \(\{([\s\S]*?)\}\)\);/)?.[1] ?? '';
+    expect(map.split(',').map((field) => field.trim()).filter(Boolean)).toEqual([
+      'name: check.name',
+      'query: check.query',
+      'expectation: check.expectation',
+    ]);
+    expect(exporter).not.toContain('lastRun');
+    expect(exporter).not.toContain('...check');
+    expect(exporter).toContain('playbookVersion: playbookVersionFor({ checks: pbChecks })');
+    expect(exporter).not.toContain('PLAYBOOK_VERSION');
+  });
+
   it('says so when a full library refuses a new check or function', () => {
     // Saving the 101st used to cull the oldest silently; db.ts now refuses,
     // and the page has to show that refusal rather than drop it.
