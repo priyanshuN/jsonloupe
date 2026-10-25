@@ -6325,8 +6325,12 @@ const pbFnLive = new Set<string>();
 let pbFunctionsRunning = false;
 /** The last batch, for the FUNCTIONS head. */
 let pbFnBatch: { failed: number; total: number; at: number } | null = null;
-/** Run all's last report, kept for `open report` after something else took the result face. */
-let pbReport: { text: string; kind: string } | null = null;
+/**
+ * Run all's last report, kept for `open report` after something else took the
+ * result face — with the edit count it was made at, so a report rebuilt after
+ * an edit still says the source changed.
+ */
+let pbReport: { text: string; kind: string; edits: number } | null = null;
 /** What the result worker holds now: one function's output, or run all's report. */
 let runResultFrom: { kind: 'function'; id: string | null } | { kind: 'report' } | null = null;
 /** The row to focus when `← playbook` comes back from a result it opened. */
@@ -7777,9 +7781,12 @@ async function openReport(fromId: string | null): Promise<void> {
   if (!pbReport) return;
   pbReturnFocusId = fromId;
   if (runResultFrom?.kind !== 'report' || !runResultText) {
+    const { edits } = pbReport;
     runResultKind = pbReport.kind;
     await showResultDocument(pbReport.text);
     runResultFrom = { kind: 'report' };
+    // Rebuilt from the kept text, which knows nothing of an edit made since.
+    if (edits !== pbEdits) markRunResultStale();
   } else {
     setRunFace('result');
   }
@@ -8796,7 +8803,7 @@ async function runPickedScripts(): Promise<void> {
   const failed = res.entries.filter((e) => !e.ok).length;
   pbFnBatch = { failed, total: res.entries.length, at };
   runResultKind = `report · ${plural(res.entries.length, 'function', 'functions')}`;
-  pbReport = { text: res.resultText, kind: runResultKind };
+  pbReport = { text: res.resultText, kind: runResultKind, edits: pbEdits };
   await showResultDocument(res.resultText, { keepFace: true });
   runResultFrom = { kind: 'report' };
   paintSheet();

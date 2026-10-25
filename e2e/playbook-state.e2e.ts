@@ -256,6 +256,28 @@ test('pressing a Query check chip from the keyboard keeps focus on that chip', a
   await expect(page.locator('#ask-checks .check-chip', { hasText: PACKING.name }).locator('.check-chip-run')).toBeFocused();
 });
 
+test.describe('functions and the result face', () => {
+  test.beforeEach(async ({ page }) => {
+    await openSample(page);
+    await openPlaybook(page);
+    await importPlaybook(page, [], [{ name: 'order count', script: 'data.orders.length' }]);
+  });
+
+  test('open report after an edit says the source changed', async ({ page }) => {
+    await page.locator('#pb-tick-all').check();
+    await page.locator('#pb-run-all').click();
+    await expect(page.locator('#pb-open-report')).toBeEnabled();
+    // Leaving the view lets the report go from the result worker.
+    await page.locator('#mode-switch button[data-mode="tree"]').click();
+    await editValue(page, 'packing', 'shipped');
+    await openPlaybook(page);
+    await page.locator('#pb-open-report').click();
+    await expect(page.locator('#run-library')).toBeHidden();
+    await expect(page.locator('#run-stale')).toBeVisible();
+  });
+
+});
+
 test('a function batch outlived by a document switch opens no row on the next document', async ({ page }) => {
   await page.goto('/');
   await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');
