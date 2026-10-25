@@ -12,6 +12,8 @@ import type {
   DiffResult,
   CompareOk,
   CompareError,
+  CheckEvidence,
+  CheckMeasureReply,
 } from './protocol';
 import { SemanticCompareView, type CompareRow } from './compare-view';
 // Type only — the converter is fetched the first time it opens (loadConverter).
@@ -94,8 +96,39 @@ import {
   functionActionState,
 } from './run-script';
 import type { SavedCheck, SavedScript } from './db';
-import { evaluateCheck, expectationText, type CheckExpectation, type CheckUnit } from './check';
-import { judgeCheck, VERDICT_MARK, type RunVerdict } from './playbook-run';
+import { evaluateCheck, expectationText, sameExpectation, type CheckUnit } from './check';
+import {
+  checkQueryProblem,
+  judgeCheck,
+  runCheckSet,
+  VERDICT_MARK,
+  type CheckOutcome,
+  type CheckRunReport,
+  type RunOptions,
+  type RunVerdict,
+} from './playbook-run';
+import {
+  checkHeadParts,
+  checkHeadTitle,
+  expectationFromFields,
+  expectationTakesCount,
+  fieldsFromExpectation,
+  functionHeadParts,
+  functionOutcome,
+  matchedLine,
+  moreLine,
+  outcomeShort,
+  pendingWords,
+  previewSentence,
+  rowLabel,
+  sortItems,
+  stateMark,
+  type CheckHeadState,
+  type CheckTally,
+  type FunctionHeadState,
+  type HeadPart,
+  type RowState,
+} from './playbook-sheet';
 import type { RunResult, BatchResult } from './run-exec';
 import { runNumberMode as normalizeRunNumberMode, type RunNumberMode } from './run-number-mode';
 import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError, playbookVersionFor } from './playbook';
@@ -672,7 +705,7 @@ const PASTE_ECHO_MAX = 2_000_000;
 // (every name here has a symbol, every symbol has a user), which is how
 // `theme` was caught still sitting in this union after the moon left the theme
 // switch and nothing drew it any more.
-type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'search' | 'filter' | 'warn';
+type IconName = 'back' | 'compare' | 'reload' | 'copy' | 'download' | 'arrow-left' | 'arrow-right' | 'search' | 'filter' | 'warn' | 'run';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function icon(name: IconName): SVGSVGElement {
@@ -1385,6 +1418,7 @@ function markCurrentContentEdited(): void {
   currentDocumentRevision++;
   resetAskPanel();
   markRunResultStale();
+  markPlaybookStale();
   // An Apply or inline edit can change the top-level shape just as completely
   // as opening another file. Keep an empty Run editor's example honest too.
   runPlaceholderRevision = -1;
@@ -2378,6 +2412,10 @@ async function openText(
   const documentToken = ++currentDocumentToken;
   currentDocumentRevision++;
   pendingInitialSave = null;
+  // Last document's verdicts are not this one's; hydrateCheckRuns below puts
+  // back only runs of this document as it is.
+  checkRuns.clear();
+  pbEdits = 0;
 
   // Persist in the background — the tree must never wait on a disk write.
   if (existingId) {
@@ -2399,6 +2437,8 @@ async function openText(
       documentToken,
     );
   }
+
+  void hydrateCheckRuns();
 
   reloadBtn.hidden = !handle;
   setDocTitle(currentTitle);
@@ -3464,6 +3504,8 @@ function setCodeStatus(kind: StatusTone, msg: string): void {
   // place the two halves of the fact can be kept in step.
   codeApplyBtn.disabled = !codeDirty;
   if (codeOnScreen()) setStatusNote(msg, kind);
+  // `apply` holding edits beside the playbook outranks its `run all` (rule 6).
+  if (activePane === 'run') paintPlaybookAccent();
 }
 
 function showCodeTooBig(): void {
@@ -4815,6 +4857,7 @@ const checkEditor = $('#check-editor');
 const checkName = $<HTMLInputElement>('#check-name');
 const checkExpectation = $<HTMLSelectElement>('#check-expectation');
 const checkCount = $<HTMLInputElement>('#check-count');
+const checkCountMax = $<HTMLInputElement>('#check-count-max');
 const checkPreview = $('#check-preview');
 const checkSave = $<HTMLButtonElement>('#check-save');
 const checkCancel = $<HTMLButtonElement>('#check-cancel');
@@ -4848,11 +4891,13 @@ let modelKeySource: ApiKeySource | null = null;
 let modelKeyEntry: 'paste' | 'file' = 'paste';
 let lastCommittedQuery = '';
 let lastCommittedResult: QueryResp | null = null;
-let runningCheck: SavedCheck | null = null;
 // The kept rail is one row holding two lists; it stands down only when BOTH are
 // empty, so each renderer records its own count rather than its own wrapper.
 let keptQueryCount = 0;
 let keptCheckCount = 0;
+// Each check's last run on the open document — the playbook's rows, the
+// Query rail's chips and its verdict line all read this one map. Emptied on
+// every open, then filled from storage for runs of this document as it is.
 const checkRuns = new Map<string, store.CheckLastRun>();
 const OPENROUTER_MODEL_STORAGE = 'wb-openrouter-model';
 let openRouterModelMemory: OpenRouterModel = OPENROUTER_FREE_MODEL;
@@ -5101,7 +5146,6 @@ function resetAskPanel(): void {
   checkEditor.hidden = true;
   lastCommittedQuery = '';
   lastCommittedResult = null;
-  runningCheck = null;
   setAskNotice(null);
   setAskFail(null);
   paintQueryMode();
@@ -5124,6 +5168,8 @@ function setAskMode(mode: AskMode): void {
 $('#ask-btn').addEventListener('click', () => {
   askPanel.hidden = !askPanel.hidden;
   $('#ask-btn').classList.toggle('on', !askPanel.hidden);
+  // Open over the playbook, Query owns the one accent (rule 6).
+  if (activePane === 'run') paintPlaybookAccent();
   if (!askPanel.hidden) {
     void renderSavedChips();
     void refreshModelConnection();
@@ -5134,6 +5180,7 @@ $('#ask-btn').addEventListener('click', () => {
 askCloseBtn.addEventListener('click', () => {
   askPanel.hidden = true;
   $('#ask-btn').classList.remove('on');
+  if (activePane === 'run') paintPlaybookAccent();
 });
 
 askModeSwitch.addEventListener('click', (event) => {
@@ -5371,24 +5418,30 @@ function queryResultCount(res: QueryResp | null): number | null {
 function paintCheckPreview(): void {
   const observed = lastCommittedResult ? queryResultCount(lastCommittedResult) : null;
   const counted = lastCommittedResult?.ok ? lastCommittedResult.check : null;
-  const exact = Number.parseInt(checkCount.value, 10);
-  const expectation: CheckExpectation = checkExpectation.value === 'at-least-one'
-    ? { type: 'at-least-one' }
-    : checkExpectation.value === 'exact-count'
-      ? { type: 'exact-count', count: Number.isSafeInteger(exact) && exact >= 0 ? exact : 0 }
-      : { type: 'no-matches' };
-  checkCount.hidden = expectation.type !== 'exact-count';
-  checkSave.disabled = observed === null || !checkName.value.trim();
-  checkPreview.classList.remove('pass', 'fail');
+  const type = checkExpectation.value;
+  checkCount.hidden = !expectationTakesCount(type);
+  checkCountMax.hidden = type !== 'between';
+  checkCount.setAttribute('aria-label', type === 'between' ? 'Lowest passing count' : 'Expected match count');
+  // Read strictly, never coerced: a count the box cannot hold exactly is said,
+  // and `save check` waits for one it can.
+  const fields = expectationFromFields(type, checkCount.value, checkCountMax.value);
+  checkCount.toggleAttribute('aria-invalid', !fields.ok && fields.field === 'count');
+  checkCountMax.toggleAttribute('aria-invalid', !fields.ok && fields.field === 'max');
+  checkSave.disabled = observed === null || !checkName.value.trim() || !fields.ok;
+  checkPreview.classList.remove('pass', 'fail', 'inconclusive', 'invalid');
+  if (!fields.ok) {
+    checkPreview.textContent = fields.error;
+    checkPreview.classList.add('invalid');
+    return;
+  }
   if (observed === null) {
     checkPreview.textContent = 'Run a query that returns a countable result first.';
     return;
   }
+  const expectation = fields.expectation;
   const evaluation = evaluateCheck(expectation, observed, { exact: counted?.exact, unit: counted?.unit });
-  checkPreview.textContent = evaluation.verdict === 'inconclusive'
-    ? `Would be ${evaluation.summary.toLowerCase()}`
-    : `Would ${evaluation.summary.toLowerCase()}`;
-  checkPreview.classList.add(evaluation.pass ? 'pass' : 'fail');
+  checkPreview.textContent = previewSentence(evaluation.verdict, evaluation.summary);
+  checkPreview.classList.add(evaluation.verdict);
 }
 
 function commitQueryResult(query: string, res: QueryResp): void {
@@ -5397,20 +5450,14 @@ function commitQueryResult(query: string, res: QueryResp): void {
   renderAskResult(res, false);
   const observed = queryResultCount(res);
   askSaveCheck.disabled = observed === null;
-  const counted = res.ok ? res.check : null;
-  if (runningCheck && counted) {
-    // Judged by the runner, so a capped count reads inconclusive here exactly
-    // as it does in a run of every check. The hits on screen carry no path
-    // segments, so this in-memory run keeps no evidence.
-    const outcome = judgeCheck(runningCheck, { ok: true, ...counted, evidence: [] }, 0);
-    checkRuns.set(
-      runningCheck.id,
-      store.lastRunOf(outcome, { id: currentDocId ?? '', hash: store.sampleHash(currentText) }, Date.now()),
-    );
-    setAskVerdict(`${runningCheck.name}: ${outcome.summary}`, outcome.verdict);
-  } else {
-    setAskVerdict(null);
-  }
+  // Disabled says THAT; the title says why — the engine's own sentence, so a
+  // `| sum` query is told what a check would need instead.
+  askSaveCheck.title = observed === null
+    ? checkQueryProblem(query) ?? 'Run a query that returns a countable result first'
+    : 'Keep this query as a check with a pass condition';
+  // A saved check's verdict is the chip's to say (it runs through the same
+  // path as the playbook's run all); a plain query has none.
+  setAskVerdict(null);
   // The review notice (a warning about a field the document lacks) belongs to
   // the query BEFORE it runs. The result now answers it, and leaving it up
   // tells the reader to check something they have already acted on.
@@ -5595,7 +5642,9 @@ askResult.addEventListener('click', async (e) => {
   const hit = (e.target as HTMLElement).closest('.hit') as HTMLElement | null;
   if (!hit?.dataset.qi) return;
   const r = await call<{ rowIndex: number; totalRows: number }>({ type: 'queryReveal', i: Number(hit.dataset.qi) });
-  showPane('tree');
+  // Over the playbook, the tree comes up beside the sheet; anywhere else the
+  // hit takes the tree view, as it always has.
+  if (!(await showRunTree())) showPane('tree');
   tree.setTotal(r.totalRows);
   if (r.rowIndex >= 0) tree.scrollToIndex(r.rowIndex);
 });
@@ -5840,6 +5889,9 @@ askQueryCopy.addEventListener('click', () =>
   void copyText(askQueryEdit.value).then(() => showToast('query copied')),
 );
 
+/** The Query rail's room for checks; the rest are one press away in the playbook. */
+const CHECK_CHIPS_MAX = 12;
+
 async function renderSavedChips(): Promise<void> {
   const saved = await store.listQueries();
   askSaved.replaceChildren();
@@ -5863,39 +5915,46 @@ async function renderSavedChips(): Promise<void> {
 async function renderSavedChecks(): Promise<void> {
   const checks = await store.listChecks();
   askChecks.replaceChildren();
-  for (const check of checks.slice(0, 12)) {
+  for (const check of checks.slice(0, CHECK_CHIPS_MAX)) {
     const chip = document.createElement('span');
     chip.className = 'ask-chip check-chip';
     chip.dataset.id = check.id;
-    chip.title = `${check.query} · expected ${expectationText(check.expectation)}`;
     const latest = checkRuns.get(check.id);
-    if (latest) chip.classList.add(latest.verdict);
+    const current = latest && latest.query === check.query && sameExpectation(latest.expectation, check.expectation)
+      ? latest
+      : undefined;
+    if (current) chip.classList.add(current.verdict);
     const mark = document.createElement('span');
     mark.className = 'check-mark';
-    mark.textContent = latest ? VERDICT_MARK[latest.verdict] : '◇';
-    const label = document.createElement('span');
-    label.textContent = check.name.length > 38 ? `${check.name.slice(0, 38)}…` : check.name;
+    mark.textContent = current ? VERDICT_MARK[current.verdict] : '◇';
+    // A real button, so a chip is reachable without a pointer; the span around
+    // it keeps rule 16's chip shape and its `×`.
+    const run = document.createElement('button');
+    run.type = 'button';
+    run.className = 'check-chip-run';
+    run.textContent = check.name.length > 38 ? `${check.name.slice(0, 38)}…` : check.name;
+    run.title = `${check.query} · expected ${expectationText(check.expectation)} · in your playbook`;
     const del = document.createElement('button');
     del.className = 'chip-del';
     del.textContent = '×';
     del.setAttribute('aria-label', `Forget ${check.name}`);
-    chip.append(mark, label, del);
+    chip.append(mark, run, del);
     askChecks.appendChild(chip);
+  }
+  // Past the rail's room, the rest are in the playbook — which is one press.
+  if (checks.length > CHECK_CHIPS_MAX) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'ask-chip chip-add';
+    more.textContent = `all ${fmtNumber(checks.length)} in playbook`;
+    more.setAttribute('aria-label', `Show all ${fmtNumber(checks.length)} checks in the playbook`);
+    askChecks.appendChild(more);
   }
   keptCheckCount = checks.length;
   // One rail, one hidden flag: the two lists were two labelled sections at the
   // panel's foot, stranded under an empty result area at rest and pushed below
   // the scroll fold after a run.
   askKept.hidden = keptQueryCount === 0 && keptCheckCount === 0;
-}
-
-function selectedCheckExpectation(): CheckExpectation {
-  if (checkExpectation.value === 'at-least-one') return { type: 'at-least-one' };
-  if (checkExpectation.value === 'exact-count') {
-    const count = Number.parseInt(checkCount.value, 10);
-    return { type: 'exact-count', count: Number.isSafeInteger(count) && count >= 0 ? count : 0 };
-  }
-  return { type: 'no-matches' };
 }
 
 askSaveQuery.addEventListener('click', async () => {
@@ -5912,6 +5971,7 @@ askSaveCheck.addEventListener('click', () => {
   checkExpectation.value = 'no-matches';
   const observed = queryResultCount(lastCommittedResult) ?? 0;
   checkCount.value = String(observed);
+  checkCountMax.value = String(observed);
   checkEditor.hidden = false;
   paintCheckPreview();
   checkName.focus();
@@ -5920,12 +5980,20 @@ askSaveCheck.addEventListener('click', () => {
 
 checkExpectation.addEventListener('change', paintCheckPreview);
 checkCount.addEventListener('input', paintCheckPreview);
+checkCountMax.addEventListener('input', paintCheckPreview);
 checkName.addEventListener('input', paintCheckPreview);
 checkCancel.addEventListener('click', () => { checkEditor.hidden = true; });
 checkSave.addEventListener('click', async () => {
   if (!lastCommittedQuery || !checkName.value.trim()) return;
+  const fields = expectationFromFields(checkExpectation.value, checkCount.value, checkCountMax.value);
+  if (!fields.ok) return;
+  const base = checkName.value.trim();
+  // A new check never lands on top of one with the same name: it is `x 2`,
+  // and the toast says so.
+  const name = uniqueScriptName(base, (await store.listChecks()).map((check) => check.name));
+  let saved: SavedCheck;
   try {
-    await store.saveCheck(checkName.value, lastCommittedQuery, selectedCheckExpectation());
+    saved = await store.saveCheck(name, lastCommittedQuery, fields.expectation);
   } catch (err) {
     // A full library refuses rather than culling a check someone relies on.
     if (!(err instanceof store.LibraryFullError)) throw err;
@@ -5934,17 +6002,41 @@ checkSave.addEventListener('click', async () => {
   }
   checkEditor.hidden = true;
   await renderSavedChecks();
-  showToast('check saved');
+  void renderSheet();
+  if (name !== base) showToast(`saved as \`${name}\` — \`${base}\` was taken`);
+  else if (activePane === 'run') showToast('check saved');
+  else showToastAction('check saved', 'open playbook', () => void openRun());
+  // Its first verdict, through the one path every check runs by.
+  const outcome = await runOneCheck(saved);
+  if (outcome) showCheckVerdict(saved, outcome);
 });
 
+// A check's verdict in the Query panel: tier 2 under the answer, or tier 3 in
+// the card when the check could not run at all.
+function showCheckVerdict(check: SavedCheck, outcome: CheckOutcome): void {
+  if (outcome.verdict === 'error') {
+    setAskVerdict(null);
+    setAskFail(`✗ ${check.name}: ${outcome.summary}`);
+  } else {
+    setAskVerdict(`${check.name}: ${outcome.summary}`, outcome.verdict);
+  }
+}
+
 askChecks.addEventListener('click', async (event) => {
-  const chip = (event.target as HTMLElement).closest<HTMLElement>('.check-chip');
+  const target = event.target as HTMLElement;
+  if (target.closest('.chip-add')) {
+    await openRun();
+    return;
+  }
+  const chip = target.closest<HTMLElement>('.check-chip');
   if (!chip) return;
   const id = chip.dataset.id!;
-  if ((event.target as HTMLElement).closest('.chip-del')) {
+  if (target.closest('.chip-del')) {
     await store.removeSaved(id);
     checkRuns.delete(id);
     await renderSavedChecks();
+    // The playbook lists the same checks; a no-op unless it is on screen.
+    void renderSheet();
     return;
   }
   const check = (await store.listChecks()).find((item) => item.id === id);
@@ -5953,13 +6045,14 @@ askChecks.addEventListener('click', async (event) => {
   // — the field that will actually run it — rather than in the English box.
   askQueryEdit.value = check.query;
   setAskMode('query');
-  runningCheck = check;
-  try {
-    await runAsk(check.query);
-    await store.touchSaved(check.id);
-  } finally {
-    runningCheck = null;
-  }
+  // The hits, for reading; the verdict comes from the same measurement the
+  // playbook's run all makes, so the two can never disagree.
+  await runAsk(check.query);
+  const outcome = await runOneCheck(check);
+  if (!outcome) return;
+  showCheckVerdict(check, outcome);
+  // Used, so it rises in the rail — but only once it has actually answered.
+  await store.touchSaved(check.id);
   await renderSavedChecks();
 });
 
@@ -5980,28 +6073,33 @@ askSaved.addEventListener('click', async (e) => {
   await runAsk(saved.query); // engine-only re-run: no API call
 });
 
-// ---------- run mode: source | result ----------
+// ---------- the playbook view: source | playbook ----------
 
-// The ask panel answers questions in the query language; this view answers the
-// ones no query language should have to — a filter with a regex in it, a sum
-// over a computed field, a reshape. It is the fourth LAYOUT of the document
-// rather than a panel over it: source pane on the left, the script's result on
-// the right, both real document surfaces.
+// The ask panel answers questions in the query language; this view keeps the
+// ones you ask of every document. It is the fourth LAYOUT of the document
+// rather than a panel over it: the source pane on the left, and on the right
+// the PLAYBOOK — the checks and functions you keep — run over it. A check is a
+// query with a pass condition, measured by the document's own worker; a
+// function is JavaScript for what no query language should have to answer — a
+// filter with a regex in it, a sum over a computed field, a reshape.
 //
-// Two workers, and neither of them is the document's. The script runs in an
-// ephemeral sandbox (run-sandbox.ts) holding nothing but a copy of the text,
+// Two more workers, and neither of them is the document's. A function runs in
+// an ephemeral sandbox (run-sandbox.ts) holding nothing but a copy of the text,
 // terminated on the result or on the timeout — which is what keeps
-// `while (true) {}` from taking the app with it. The RESULT then goes into a
+// `while (true) {}` from taking the app with it. Its RESULT then goes into a
 // second doc-worker instance, which owns it exactly as the first owns the
 // document, so a 40 MB result scrolls the way a 40 MB file does. That worker
-// dies on the way out of run mode: results are large and two documents in
+// dies on the way out of the view: results are large and two documents in
 // memory when only one is on screen is a cost with nothing to show for it.
 
 const RUN_TIMEOUT_MS = 10_000;
 const RUN_SCRIPT_KEY = 'jsonloupe.run.last';
 const RUN_PLACEHOLDER_FALLBACK = scriptEditorPlaceholder('data');
+/** Which functions `run all` includes — a per-browser convenience, so a UI key. */
+const PLAYBOOK_TICKED_KEY = 'wb-playbook-ticked';
 
 const runPane = $('#run-pane');
+const runProducer = $('#run-producer');
 const runNumberSetting = $('#run-number-setting');
 const runNumberSwitch = $('#run-number-switch');
 const runNumberWarn = $('#run-number-warn');
@@ -6013,22 +6111,12 @@ const runErrorEl = $('#run-error');
 const runConsole = $<HTMLDetailsElement>('#run-console');
 const runConsoleBody = $('#run-console-body');
 const runFitEl = $('#run-fit');
-const runBatchEl = $('#run-batch');
-const runPickedBtn = $<HTMLButtonElement>('#run-picked');
-// The count only — the ▶ beside it is markup and must survive a repaint, which
-// setting textContent on the button itself would have wiped.
-const runPickedCount = $('#run-picked-n');
-const runHead = $('.run-head');
-const runNameEl = $('#run-name');
 const runNameInput = $<HTMLInputElement>('#run-name-input');
 const runDirtyEl = $('#run-dirty');
-const runEditBtn = $<HTMLButtonElement>('#run-edit');
 const runSaveBtn = $<HTMLButtonElement>('#run-save');
 const runSaveAsBtn = $<HTMLButtonElement>('#run-save-as');
-const runFaceSwitch = $('#run-face-switch');
 const runLibrary = $('#run-library');
 const runLibList = $('#run-lib-list');
-const runLibCount = $('#run-lib-count');
 const runLibSearch = $<HTMLInputElement>('#run-lib-search');
 const runNewBtn = $<HTMLButtonElement>('#run-new');
 const runExportBtn = $<HTMLButtonElement>('#run-export');
@@ -6043,6 +6131,29 @@ const runEmpty = $('#run-empty');
 const runCopyBtn = $<HTMLButtonElement>('#run-copy');
 const runDownloadBtn = $<HTMLButtonElement>('#run-dl');
 const runOpenBtn = $<HTMLButtonElement>('#run-open');
+const pbHeading = $('#pb-heading');
+const pbFind = $('#pb-find');
+const pbBackBtn = $<HTMLButtonElement>('#pb-back');
+const pbRunAllBtn = $<HTMLButtonElement>('#pb-run-all');
+const pbRunAllLabel = $('#pb-run-all-label');
+const pbKind = $('#pb-kind');
+const pbCancelBtn = $<HTMLButtonElement>('#pb-cancel');
+const pbCheckBody = $('#pb-check-body');
+const pbFnBody = $('#pb-fn-body');
+const pbCheckQuery = $<HTMLInputElement>('#pb-check-query');
+const pbCheckExpectation = $<HTMLSelectElement>('#pb-check-expectation');
+const pbCheckCount = $<HTMLInputElement>('#pb-check-count');
+const pbCheckCountMax = $<HTMLInputElement>('#pb-check-count-max');
+const pbCheckPreview = $('#pb-check-preview');
+const pbCheckError = $('#pb-check-error');
+const pbCheckRows = $('#pb-check-rows');
+const pbFnRows = $('#pb-fn-rows');
+const pbChecksStatus = $('#pb-checks-status');
+const pbFnsStatus = $('#pb-fns-status');
+const pbNotPassingBtn = $<HTMLButtonElement>('#pb-not-passing');
+const pbNewCheckBtn = $<HTMLButtonElement>('#pb-new-check');
+const pbTickAll = $<HTMLInputElement>('#pb-tick-all');
+const pbOpenReportBtn = $<HTMLButtonElement>('#pb-open-report');
 
 let runEditor: ScriptEditor | null = null;
 let runPlaceholder = RUN_PLACEHOLDER_FALLBACK;
@@ -6054,12 +6165,14 @@ let runResultText = '';
 let runResultChannel: WorkerChannel | null = null;
 /** Which pane the left half is showing. Whatever the user arrived from. */
 let runSource: 'tree' | 'code' = 'tree';
-/** Which full-width Run group owns the phone viewport; independent of both the
- * source's tree/code state and the workspace's functions/result face. */
+/** Which full-width group owns the phone viewport; independent of both the
+ * source's tree/code state and the playbook's two faces. */
 let mobileRunSurface: 'source' | 'workspace' = 'workspace';
-/** Which face the right column is showing: the library, or the last result. */
+/** Which face the right column is showing. `functions` is the PLAYBOOK face —
+ * the sheet of checks and functions, named before checks moved in beside the
+ * functions — and `result` is what a function returned. */
 let runFace: 'functions' | 'result' = 'result';
-/** True while the editor is open. Picking a function needs no editor at all. */
+/** True while the dock holds a function form. */
 let runAuthoring = false;
 /** The library record the editor is bound to — what `save` writes back to. */
 let runLoadedId: string | null = null;
@@ -6079,16 +6192,18 @@ let runHasUnsafeNumbers = false;
  * work is never lost by a stray click, and no dialog stands in the way either.
  */
 let runPendingLoadId: string | null = null;
-/** Two-press guard for replacing the current unsaved draft with a blank one. */
-let runPendingNew = false;
+/**
+ * The same two-press guard for every other way out of a dirty dock — `cancel`,
+ * `+ check`, `+ function`, `edit` on another item — keyed by which press it is
+ * waiting for, so only pressing the SAME thing again obeys.
+ */
+let pbPending: string | null = null;
 /**
  * Whether the result on screen has been outlived by its document. It is state
- * rather than a `hidden` flag now that the library can cover the result bar:
+ * rather than a `hidden` flag now that the sheet can cover the result bar:
  * flipping back to the result must restore the badge, not clear the fact.
  */
 let runStaleWanted = false;
-/** Whether the library is long enough to be worth a search field (see below). */
-let runLibSearchWanted = false;
 /**
  * The paths the loaded function was seen to read. `undefined` means it has
  * never been traced — which is not "reads nothing", so the fit line stays quiet
@@ -6096,9 +6211,9 @@ let runLibSearchWanted = false;
  */
 let runLoadedReads: string[] | undefined;
 /**
- * The functions ticked for a batch. Empty is the ordinary state and the whole
- * point of it: with nothing ticked, a row press is still the entire interaction
- * — one function, one answer. Ticking is what turns the library into a report.
+ * The functions ticked into `run all`. Kept per browser (a UI key, like the
+ * sidebar's): they say which of your functions belong in the monthly pass,
+ * which is a fact about you rather than about any one document.
  */
 const runPicked = new Set<string>();
 /**
@@ -6107,11 +6222,109 @@ const runPicked = new Set<string>();
  * single run, which lets the label describe the value itself.
  */
 let runResultKind = '';
-/** How many functions the library holds, so the bar can hide what is moot. */
-let runLibraryCount = 0;
-let runCheckCount = 0;
-/** What the bar's count says when nothing is ticked — restored on the last untick. */
-let runLibCountResting = 'functions';
+/** The code that last ran from the dock: `save` takes the accent once what is written has run. */
+let runLastRanCode: string | null = null;
+/**
+ * The dock's last run, whatever it ran — so a function written, run and then
+ * saved lands on the sheet with the outcome you just watched, not `not run`.
+ */
+let runDraftRun: { code: string; numberMode: RunNumberMode; revision: number; run: FunctionRun } | null = null;
+/** Set by a run started from the sheet, which keeps the sheet up rather than flipping to the result. */
+let runKeepFace = false;
+
+// ---- the sheet's own state ----
+
+/** What the dock is writing, or null while it is closed. A function form is runAuthoring's too. */
+let pbDock: 'check' | 'function' | null = null;
+/** The saved check the dock is editing; null for a new one. */
+let pbCheckId: string | null = null;
+/** What the check form held when it opened, so `unsaved` means something here too. */
+let pbCheckSnapshot = { name: '', query: '', type: 'no-matches', count: '', max: '' };
+/**
+ * The dock's last measurement. Changing the pass condition re-judges this
+ * rather than measuring again, and `save` records it when it measured exactly
+ * the query being saved, on exactly this document.
+ */
+let pbDraft: { query: string; documentToken: number; edits: number; reply: CheckMeasureReply; ms: number } | null = null;
+let pbDraftTimer = 0;
+let pbDraftSeq = 0;
+/** Has a count been typed since the dock opened? Until then the counts follow the draft's measure. */
+let pbCountsTouched = false;
+/** The items as last listed, in sheet order. */
+let pbChecks: SavedCheck[] = [];
+let pbScripts: SavedScript[] = [];
+/** Paths some function reads that this document lacks; one question for the whole sheet. */
+let pbMissing = new Set<string>();
+/** The document's shape, which a check's misfit remark reads. Per content revision. */
+let pbSchema: { revision: number; text: string } | null = null;
+/** Rows whose details are open, and the ones the last run opened by itself. */
+const pbOpen = new Set<string>();
+const pbAutoOpened = new Set<string>();
+/** The evidence entry revealed last: rule 18's bar marks it. */
+let pbRevealed: { id: string; index: number } | null = null;
+/** A check run in flight: rows not yet measured wait, the one being measured runs. */
+const pbLive = new Map<string, CheckOutcome | 'waiting' | 'running'>();
+/** Run all's check phase, while it lasts. */
+let pbChecksRun: { done: number; total: number } | null = null;
+/** Set by `stop`, read by the run's keepGoing before the next check. */
+let runAllStop = false;
+/** What the CHECKS head says after a run that did not finish, until the next one. */
+let pbCheckNotice: CheckHeadState | null = null;
+/** How long the last whole run of the checks took, this session. */
+let pbLastRunMs: number | null = null;
+/** Content edits to this document; a run measured across one is stopped. */
+let pbEdits = 0;
+/** When this document's content was last edited here: a stored run older than it is from before. */
+let pbEditedAt = 0;
+/** "last run on orders-sep.json" — where a library never run on this document last ran. */
+let pbElsewhere: { title: string; at: number } | null = null;
+/** Only the checks that did not pass, while the head's chip is on. */
+let pbNotPassingOnly = false;
+/** Whether the library is long enough to be worth a find field. */
+let pbFindWanted = false;
+/** One function's outcome, this session only (step 1 keeps no function result past a reload). */
+interface FunctionRun {
+  ok: boolean;
+  ms: number;
+  at: number;
+  shape?: string;
+  error?: string;
+  /** The result's size; a batch entry's own size is not known. */
+  bytes?: number;
+  logs: string[];
+  batch: boolean;
+}
+const functionRuns = new Map<string, FunctionRun>();
+/** Functions being run right now. */
+const pbFnLive = new Set<string>();
+let pbFunctionsRunning = false;
+/** The last batch, for the FUNCTIONS head. */
+let pbFnBatch: { failed: number; total: number; at: number } | null = null;
+/** Run all's last report, kept for `open report` after something else took the result face. */
+let pbReport: { text: string; kind: string } | null = null;
+/** What the result worker holds now: one function's output, or run all's report. */
+let runResultFrom: { kind: 'function'; id: string | null } | { kind: 'report' } | null = null;
+/** The row to focus when `← playbook` comes back from a result it opened. */
+let pbReturnFocusId: string | null = null;
+let pbRenderToken = 0;
+
+function loadTicks(): void {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(PLAYBOOK_TICKED_KEY) ?? '[]');
+    if (Array.isArray(stored)) for (const id of stored) if (typeof id === 'string') runPicked.add(id);
+  } catch {
+    // private mode, or a value this build did not write: nothing ticked
+  }
+}
+
+function saveTicks(): void {
+  try {
+    localStorage.setItem(PLAYBOOK_TICKED_KEY, JSON.stringify([...runPicked]));
+  } catch {
+    // private mode: the ticks last as long as the tab
+  }
+}
+loadTicks();
 
 function paintMobileRunSurface(): void {
   viewer.dataset.mobileRun = mobileRunSurface;
@@ -6129,19 +6342,19 @@ function setMobileRunSurface(surface: 'source' | 'workspace'): void {
   scheduleResponsiveRefresh();
 }
 
-// The empty pane has two honest things to say and must never say the wrong
+// The empty result has two honest things to say and must never say the wrong
 // one: before any run it is an invitation, and after a failed run it is the
 // outcome — "nothing run yet" under a visible error would be a lie.
 function paintRunEmpty(failed: boolean): void {
   runEmpty.replaceChildren(
     failed
       ? emptyState(
-        'the run failed — nothing to show',
-        'The error is above. Fix the script and run again.',
+        'The run failed — nothing to show',
+        'The error says why. Fix the function and run it again.',
         { pane: true },
       )
       : emptyState(
-        'run a script — the result renders here',
+        'Run a function to see its result here',
         'The result is a document: it expands, scrolls and downloads like one.',
         { pane: true },
       ),
@@ -6247,178 +6460,632 @@ function setRunStatus(msg: string): void {
   runStatus.textContent = msg;
 }
 
-// ---------- the library: functions you keep, and the column's two faces ----------
-//
-// The document is what changes daily; the handful of functions you run over it
-// is what holds still. So the library — not an empty editor — is what run mode
-// opens on, and a function is a NAMED thing you own rather than the first line
-// of some code: named, so five of them are told apart at a glance; bound to its
-// record, so editing one corrects it instead of minting a near-duplicate beside
-// it. Pressing one loads it AND runs it, which is the only reason it was kept.
-//
-// The library and the result share the column and are never both on screen:
-// before a run there is no result, and after one the result wants the height.
+// A guard's sentence goes where the eye already is: the dock's own status line
+// while it is open, a toast over the sheet while it is not.
+function pbSay(msg: string): void {
+  if (pbDock) setRunStatus(msg);
+  else showToast(msg);
+}
 
-/** Below this the list is short enough to read whole; a search field is noise. */
+// ---------- the playbook face: the sheet ----------
+//
+// The document is what changes monthly; the handful of checks and functions you
+// run over it is what holds still. So the sheet — every item, in name order,
+// with its last verdict on THIS document — is what the view opens on, and
+// `run all` is its one accent. A row opens in place to show why: the verdict
+// sentence, the query, and the first matched paths, each one press from the
+// tree. Writing happens in the dock above, never inside a row.
+
+/** Below this the sheet is short enough to read whole; a find field is noise. */
 const LIBRARY_SEARCH_MIN = 8;
+/** From this many checks the head offers to show only the ones that did not pass. */
+const NOT_PASSING_MIN = 8;
 
 function setRunFace(face: 'functions' | 'result'): void {
   runFace = face;
-  const showing = face === 'functions';
-  runLibrary.hidden = !showing;
-  runViewport.hidden = showing || !runResultText;
-  runEmpty.hidden = showing || !!runResultText;
+  const sheet = face === 'functions';
+  runLibrary.hidden = !sheet;
+  runViewport.hidden = sheet || !runResultText;
+  runEmpty.hidden = sheet || !!runResultText;
   // One bar, serving whichever face is up: the result's ops act on a document
-  // that is not on screen while the library is, and the library's controls mean
+  // that is not on screen while the sheet is, and the sheet's controls mean
   // nothing while it is not.
-  for (const el of [runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = showing;
-  runLibCount.hidden = !showing;
-  paintRunNewButton();
-  runImportBtn.hidden = !showing;
-  // Nothing to export until there is something in the library.
-  runExportBtn.hidden = !showing || (runLibraryCount === 0 && runCheckCount === 0);
-  runPickedBtn.hidden = !showing || runPicked.size === 0;
-  runLibSearch.hidden = !showing || runLibSearchWanted === false;
-  if (showing) runStaleBadge.hidden = true;
-  else runStaleBadge.hidden = !runResultText || !runStaleWanted;
-  for (const b of runFaceSwitch.querySelectorAll<HTMLButtonElement>('button')) {
-    b.classList.toggle('on', b.dataset.face === face);
+  for (const el of [pbHeading, runImportBtn, runExportBtn, pbRunAllBtn]) el.hidden = !sheet;
+  pbFind.hidden = !sheet || !pbFindWanted;
+  for (const el of [pbBackBtn, runResultLabel, runCopyBtn, runDownloadBtn, runOpenBtn]) el.hidden = sheet;
+  runStaleBadge.hidden = sheet || !runResultText || !runStaleWanted;
+  if (!sheet) scheduleResponsiveRefresh();
+}
+
+/** A stored or live run of this check, if it is a run of what the check is NOW. */
+function checkRunFor(check: SavedCheck): store.CheckLastRun | CheckOutcome | null {
+  const live = pbLive.get(check.id);
+  if (live && typeof live === 'object') return live;
+  const run = checkRuns.get(check.id);
+  if (!run || run.query !== check.query || !sameExpectation(run.expectation, check.expectation)) return null;
+  return run;
+}
+
+/** The last run of this check on this document, for anyone outside the sheet. */
+function lastRunFor(id: string): store.CheckLastRun | undefined {
+  return checkRuns.get(id);
+}
+
+/** A stored run made before this document's last edit here: a past result, drawn faint. */
+function runIsStale(run: store.CheckLastRun | CheckOutcome): boolean {
+  return 'at' in run && run.at < pbEditedAt;
+}
+
+function checkRowState(check: SavedCheck): RowState {
+  const live = pbLive.get(check.id);
+  if (live === 'waiting' || live === 'running') return live;
+  return checkRunFor(check)?.verdict ?? 'not-run';
+}
+
+function didNotPass(check: SavedCheck): boolean {
+  const state = checkRowState(check);
+  return state === 'fail' || state === 'error' || state === 'inconclusive';
+}
+
+/** The fields this check's query names that the document has none of — a pass may prove nothing. */
+function checkMisfits(check: SavedCheck): string[] {
+  if (!pbSchema) return [];
+  return unknownQueryFields(check.query, pbSchema.text).unknown.map((field) => field.name);
+}
+
+async function sheetSchema(): Promise<void> {
+  if (pbSchema?.revision === currentDocumentRevision || !currentText) return;
+  const revision = currentDocumentRevision;
+  try {
+    const schema = await call<{ text: string }>({ type: 'schema' });
+    if (revision === currentDocumentRevision) pbSchema = { revision, text: schema.text };
+  } catch {
+    // No shape, no remark: a misfit note is advice, never a reason the sheet fails.
   }
 }
 
-function paintRunNewButton(): void {
-  const alreadyEditingUntouchedNew = runAuthoring && runLoadedId === null && !runIsDirty();
-  runNewBtn.hidden = runFace !== 'functions' || alreadyEditingUntouchedNew;
+function sheetEl<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tag);
+  el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
 }
 
-// Rule 18's left edge: the row whose function is loaded is the selected one.
-function renderLibraryRow(rec: SavedScript, missing: Set<string>): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'run-lib-row';
-  row.classList.toggle('selected', rec.id === runLoadedId);
-  // Only a function that has been traced can be said to fit or not; one that
-  // never ran here says nothing either way.
-  const misfit = (rec.reads ?? []).filter((p) => missing.has(p));
-  row.classList.toggle('misfit', misfit.length > 0);
-  row.dataset.id = rec.id;
+function sheetButton(className: string, text: string, focusKey: string, title?: string): HTMLButtonElement {
+  const button = sheetEl('button', className, text);
+  button.type = 'button';
+  button.dataset.focus = focusKey;
+  if (title) button.title = title;
+  return button;
+}
 
-  // Rule 7's one checkbox. It is always drawn rather than revealed on hover:
-  // a tick that hides when the pointer leaves cannot be counted by eye.
-  //
-  // And it stands in a COLUMN that is entirely its own, full row height: the
-  // box itself is 14px, so every near-miss around it used to land on the row
-  // and RUN the function — the most expensive possible outcome for a slip
-  // aimed at the cheapest possible act. The zone is the target; the box is
-  // just what the zone draws.
-  const zone = document.createElement('span');
-  zone.className = 'run-lib-pickzone';
-  const pick = document.createElement('input');
-  pick.type = 'checkbox';
-  pick.className = 'chk run-lib-pick';
-  pick.checked = runPicked.has(rec.id);
-  pick.title = `Include ${rec.name} in a batch`;
-  pick.setAttribute('aria-label', `Include ${rec.name} in a batch`);
-  zone.appendChild(pick);
+/** A panel's quiet actions: ▶ run, edit, forget — one row, the same for both kinds. */
+function panelActions(name: string, kind: 'check' | 'function', extra: HTMLElement[] = []): HTMLElement {
+  const actions = sheetEl('div', 'pb-actions');
+  const run = sheetButton('btn-mini btn-quiet', '', 'act-run');
+  run.dataset.act = 'run';
+  run.append(icon('run'), 'run');
+  run.title = kind === 'check'
+    ? `Run this check over the document (${MAC_KEYS ? '⌘↵' : 'Ctrl ↵'})`
+    : `Run this function over the document (${MAC_KEYS ? '⌘↵' : 'Ctrl ↵'})`;
+  const edit = sheetButton('btn-mini btn-quiet', 'edit', 'act-edit', `Edit ${name}`);
+  edit.dataset.act = 'edit';
+  const forget = sheetButton('btn-mini btn-quiet', 'forget', 'act-forget', `Forget ${name}`);
+  forget.dataset.act = 'forget';
+  actions.append(...extra, run, edit, forget);
+  return actions;
+}
 
-  const open = document.createElement('button');
-  open.type = 'button';
-  open.className = 'run-lib-open';
-  open.title = rec.script;
-  const name = document.createElement('span');
-  name.className = 'run-lib-name';
-  name.textContent = rec.name;
-  // No note field yet: the script's first line is what the function has to say
-  // about itself, and it is already the best one-liner available. Unless the
-  // NAME already is that first line (never named, so it was derived from the
-  // script) — then the note would print the same string twice on one row, and
-  // it stands down to whatever else it carries.
-  const note = document.createElement('span');
-  note.className = 'run-lib-note';
-  const chip = deriveScriptName(rec.script) === rec.name ? '' : scriptChipLabel(rec.script);
-  const exact = rec.numberMode === 'exact-text' ? 'exact text' : '';
-  note.textContent = [exact, chip].filter(Boolean).join(' · ');
-  note.hidden = note.textContent === '';
-  open.append(name, note);
+function renderCheckItem(check: SavedCheck): HTMLElement {
+  const state = checkRowState(check);
+  // A row waiting its turn in a run says so, rather than last month's figure.
+  const run = state === 'waiting' || state === 'running' ? null : checkRunFor(check);
+  const stale = !!run && runIsStale(run);
+  const open = pbOpen.has(check.id);
+  const misfits = checkMisfits(check);
+  const ranElsewhere = !run && !!check.lastRun;
 
-  const meta = document.createElement('span');
-  meta.className = 'run-lib-meta';
-  // What the row's time slot is for is the more useful fact when there is one:
-  // that this function reads something the open document does not have.
-  if (misfit.length > 0) {
-    meta.classList.add('misfit-note');
-    meta.textContent = `reads ${fmtPaths(misfit)}`;
-    meta.title = `This document has no ${misfit.join(', ')}`;
+  const item = sheetEl('div', 'pb-item');
+  item.dataset.id = check.id;
+  item.dataset.kind = 'check';
+  const row = sheetEl('div', 'run-lib-row is-check');
+  row.classList.toggle('selected', pbDock === 'check' && pbCheckId === check.id);
+  row.classList.toggle('stale', stale);
+
+  // Rule 15's rule for this view: verdict ink sits only on a canvas ground that
+  // never changes. The mark is its own lead cell, outside the button, so a
+  // hovered row tints the button and the ✕ stays on canvas.
+  const mark = sheetEl('span', `run-lib-mark ${state}`, stateMark(state));
+  mark.setAttribute('aria-hidden', 'true');
+
+  const button = sheetButton('run-lib-open pb-open', '', 'open');
+  button.setAttribute('aria-expanded', String(open));
+  button.setAttribute('aria-controls', `pb-detail-${check.id}`);
+  const names = sheetEl('span', 'pb-names');
+  names.append(sheetEl('span', 'run-lib-name', check.name));
+  // Collapsed, a row that did not pass still says where to look first.
+  const first = run && run.verdict !== 'pass' ? run.evidence[0] : undefined;
+  if (!open && first) names.append(sheetEl('span', 'pb-first', `first: ${first.pathText}`));
+
+  const outcome = sheetEl('span', 'pb-outcome');
+  let sentence: string;
+  if (run) {
+    const short = outcomeShort(run.verdict, run.observed, run.exact, run.unit, check.expectation);
+    outcome.append(sheetEl('span', 'pb-figure', short.figure));
+    if (short.expected) outcome.append(sheetEl('span', 'pb-expected', ` · ${short.expected}`));
+    sentence = run.summary;
   } else {
-    meta.textContent = relTime(rec.updatedAt);
+    const words = pendingWords(state === 'waiting' || state === 'running' ? state : 'not-run', ranElsewhere);
+    outcome.append(sheetEl('span', 'pb-pending', words));
+    sentence = words;
   }
-
-  const del = document.createElement('button');
-  del.type = 'button';
-  del.className = 'run-lib-del btn-icon btn-mini btn-quiet';
-  del.textContent = '×';
-  del.title = `Forget ${rec.name}`;
-  del.setAttribute('aria-label', `Forget ${rec.name}`);
-
-  row.append(zone, open, meta, del);
-  return row;
+  if (misfits.length) outcome.append(sheetEl('span', 'pb-misfit', ` · reads \`${misfits[0]}\``));
+  const caret = sheetEl('span', 'pb-caret', open ? '▾' : '▸');
+  caret.setAttribute('aria-hidden', 'true');
+  button.append(names, outcome, caret);
+  button.setAttribute('aria-label', rowLabel(check.name, 'check', sentence));
+  if (stale) button.title = 'From before you edited this document';
+  row.append(mark, button);
+  item.append(row, renderCheckDetail(check, state, run, stale, misfits, open));
+  return item;
 }
 
-// The bar says what the library is, or — once anything is ticked — what a press
-// is about to run. The button carries the count so the number and the act are
-// one control rather than a label beside a verb.
-function paintPickState(total: number): void {
-  const picked = runPicked.size;
-  runPickedBtn.hidden = picked === 0;
-  runPickedCount.textContent = fmtNumber(picked);
-  // Both, not just the tooltip: "▶ 3" announces as "3" on its own, so the
-  // accessible name has to carry the verb the glyph is standing in for.
-  const say = picked === 1
-    ? 'Run the ticked function over this document'
-    : `Run all ${fmtNumber(picked)} ticked functions over this document`;
-  runPickedBtn.title = say;
-  runPickedBtn.setAttribute('aria-label', say);
-  // Both directions: unticking the last one has to put the bar back to what it
-  // said before, or it keeps claiming a selection that is gone.
-  runLibCount.textContent = picked > 0
-    ? `${fmtNumber(picked)} of ${fmtNumber(total)} picked`
-    : runLibCountResting;
-}
+function renderCheckDetail(
+  check: SavedCheck,
+  state: RowState,
+  run: store.CheckLastRun | CheckOutcome | null,
+  stale: boolean,
+  misfits: string[],
+  open: boolean,
+): HTMLElement {
+  const panel = sheetEl('div', 'pb-detail');
+  panel.id = `pb-detail-${check.id}`;
+  panel.hidden = !open;
+  if (run?.verdict === 'error') {
+    // Rule 15 tier 3, and the failure mark the app prefixes every failure with.
+    panel.append(sheetEl('div', 'ask-error', `✗ ${run.summary}`));
+  } else if (run) {
+    panel.append(sheetEl('p', `ask-verdict ${run.verdict}`, run.summary));
+  } else {
+    panel.append(sheetEl('p', 'pb-note', state === 'waiting'
+      ? 'Waiting for its turn in this run.'
+      : state === 'running'
+        ? 'Running…'
+        : 'Not run on this document yet — run it to see what it finds.'));
+  }
+  if (run?.note) panel.append(sheetEl('div', 'run-remark', run.note));
 
-async function renderLibrary(): Promise<void> {
-  const [all, checks] = await Promise.all([store.listScripts(), store.listChecks()]);
-  const term = runLibSearch.value.trim().toLowerCase();
-  const shown = term
-    ? all.filter((s) => `${s.name}\n${s.script}`.toLowerCase().includes(term))
-    : all;
+  const queryLine = sheetEl('div', 'pb-line');
+  const copy = sheetButton('btn-icon btn-mini btn-quiet', '', 'act-copy', 'Copy this query');
+  copy.dataset.act = 'copy';
+  copy.setAttribute('aria-label', 'Copy this query');
+  copy.append(icon('copy'));
+  queryLine.append(sheetEl('span', 'standing-label', 'query'), sheetEl('code', 'pb-query', check.query), copy);
+  panel.append(queryLine);
 
-  runLibraryCount = all.length;
-  runCheckCount = checks.length;
-  runExportBtn.hidden = runFace !== 'functions' || (all.length === 0 && checks.length === 0);
-  runLibSearchWanted = all.length >= LIBRARY_SEARCH_MIN;
-  runLibSearch.hidden = !runLibSearchWanted || runFace !== 'functions';
-  if (all.length === 0) runLibCountResting = 'functions';
-  else if (term) runLibCountResting = `${fmtNumber(shown.length)} of ${fmtNumber(all.length)}`;
-  else runLibCountResting = `${fmtNumber(all.length)} function${all.length === 1 ? '' : 's'}`;
-  runLibCount.textContent = runLibCountResting;
-
-  if (shown.length === 0) {
-    runLibList.replaceChildren(
-      all.length === 0
-        ? emptyState('no functions yet', 'Write code above, then save it — it will be here for the next document.')
-        : emptyState('nothing matches', 'Clear the search to see the whole library.'),
+  if (run && run.verdict !== 'error' && run.observed !== null && run.evidence.length > 0) {
+    const shown = run.evidence.length;
+    const matched = sheetEl('div', 'pb-line');
+    matched.append(
+      sheetEl('span', 'standing-label', 'matched'),
+      sheetEl('span', 'pb-matched', matchedLine(run.observed, run.exact, run.unit, shown)),
     );
-    return;
+    const list = sheetEl('div', 'pb-evidence-list');
+    run.evidence.forEach((evidence, index) => {
+      // A path from before an edit may point at a different node now, or at
+      // none: shown, but not offered as a way into the tree.
+      const entry = stale
+        ? sheetEl('span', 'pb-evidence is-text')
+        : sheetButton('pb-evidence', '', `ev-${index}`, `Show ${evidence.pathText} in the tree`);
+      if (!stale) {
+        entry.dataset.ev = String(index);
+        entry.setAttribute('aria-label', `Show ${evidence.pathText} in the tree`);
+      }
+      entry.classList.toggle('on', pbRevealed?.id === check.id && pbRevealed.index === index);
+      entry.append(sheetEl('span', 'pb-ev-path', evidence.pathText), sheetEl('span', 'pb-ev-preview', evidence.preview));
+      list.append(entry);
+    });
+    panel.append(matched, list);
+    const more = moreLine(run.observed, run.exact, run.unit, shown);
+    if (more) {
+      const button = sheetButton('btn-mini btn-quiet pb-more', more, 'act-more');
+      button.dataset.act = 'more';
+      panel.append(button);
+    }
   }
-  // One question for the whole list rather than one per row: the union of every
-  // path any function reads, asked of the document once.
-  const union = [...new Set(shown.flatMap((s) => s.reads ?? []))];
-  const missing = new Set(await missingPaths(union));
-  runLibList.replaceChildren(...shown.map((s) => renderLibraryRow(s, missing)));
-  // A tick on a function that has since been deleted would keep a batch that
-  // cannot run: the picks are only ever what the library still holds.
-  for (const id of runPicked) if (!all.some((s) => s.id === id)) runPicked.delete(id);
-  paintPickState(all.length);
+  if (misfits.length) {
+    panel.append(sheetEl(
+      'div',
+      'run-remark',
+      `this reads \`${misfits[0]}\` — this document has none of that, so a pass here may prove nothing`,
+    ));
+  }
+  panel.append(panelActions(check.name, 'check'));
+  return panel;
 }
+
+function renderFunctionItem(rec: SavedScript): HTMLElement {
+  const run = functionRuns.get(rec.id) ?? null;
+  const running = pbFnLive.has(rec.id);
+  const open = pbOpen.has(rec.id);
+  const misfit = (rec.reads ?? []).filter((path) => pbMissing.has(path));
+
+  const item = sheetEl('div', 'pb-item');
+  item.dataset.id = rec.id;
+  item.dataset.kind = 'function';
+  const row = sheetEl('div', 'run-lib-row is-fn');
+  row.classList.toggle('selected', pbDock === 'function' && runLoadedId === rec.id);
+  row.classList.toggle('misfit', misfit.length > 0);
+
+  // Rule 7's one checkbox, in a column that is entirely its own, full row
+  // height: the box is 14px, so every near-miss around it used to land on the
+  // row and RUN the function — the most expensive outcome for a slip aimed at
+  // the cheapest act. The zone is the target; the box is what it draws.
+  const zone = sheetEl('span', 'run-lib-pickzone');
+  const pick = sheetEl('input', 'chk run-lib-pick');
+  pick.type = 'checkbox';
+  pick.checked = runPicked.has(rec.id);
+  pick.dataset.focus = 'tick';
+  pick.title = `Include ${rec.name} in run all`;
+  pick.setAttribute('aria-label', `Include ${rec.name} in run all`);
+  zone.append(pick);
+
+  const button = sheetButton('run-lib-open pb-open', '', 'open');
+  button.setAttribute('aria-expanded', String(open));
+  button.setAttribute('aria-controls', `pb-detail-${rec.id}`);
+  const names = sheetEl('span', 'pb-names');
+  const nameLine = sheetEl('span', 'pb-name-line');
+  nameLine.append(sheetEl('span', 'run-lib-name', rec.name));
+  // Rule 16's static tag: a fact about the function, with no affordance.
+  if (rec.numberMode === 'exact-text') nameLine.append(sheetEl('span', 'pb-tag', 'exact text'));
+  names.append(nameLine);
+
+  const outcome = sheetEl('span', 'pb-outcome');
+  let sentence: string;
+  if (running) {
+    outcome.append(sheetEl('span', 'pb-pending', 'running…'));
+    sentence = 'running…';
+  } else if (!run && misfit.length) {
+    const words = `reads ${fmtPaths(misfit)} · not run`;
+    const said = sheetEl('span', 'pb-pending', words);
+    said.title = `This document has no ${misfit.join(', ')}`;
+    outcome.append(said);
+    sentence = words;
+  } else {
+    const said = functionOutcome(run);
+    if (said.tone === 'error') {
+      // Only the ✗ takes the danger ink: the rest sits inside a button that hovers.
+      outcome.append(sheetEl('span', 'pb-fail-mark', '✗'), sheetEl('span', 'pb-figure', said.text.slice(1)));
+    } else {
+      outcome.append(sheetEl('span', said.tone === 'value' ? `pb-value c-${said.ink}` : 'pb-pending', said.text));
+    }
+    sentence = run && !run.ok ? `✗ ${run.error ?? 'failed'}` : said.text;
+  }
+  const caret = sheetEl('span', 'pb-caret', open ? '▾' : '▸');
+  caret.setAttribute('aria-hidden', 'true');
+  button.append(names, outcome, caret);
+  button.setAttribute('aria-label', rowLabel(rec.name, 'function', sentence));
+  row.append(zone, button);
+  item.append(row, renderFunctionDetail(rec, run, misfit, open));
+  return item;
+}
+
+function renderFunctionDetail(rec: SavedScript, run: FunctionRun | null, misfit: string[], open: boolean): HTMLElement {
+  const panel = sheetEl('div', 'pb-detail');
+  panel.id = `pb-detail-${rec.id}`;
+  panel.hidden = !open;
+  if (run?.ok) {
+    const parts = [
+      functionOutcome(run).text,
+      run.bytes !== undefined ? fmtBytes(run.bytes) : '',
+      `ran in ${fmtNumber(run.ms)} ms`,
+      relTime(run.at),
+    ].filter(Boolean);
+    panel.append(sheetEl('p', 'pb-summary', parts.join(' · ')));
+  } else if (!run) {
+    // What the function says about itself, when it has nothing else to say yet.
+    panel.append(sheetEl('code', 'pb-script', scriptChipLabel(rec.script)));
+  }
+  if (misfit.length) panel.append(sheetEl('div', 'run-remark', `this reads ${fmtPaths(misfit)} — this document has none of that`));
+  if (run && !run.ok) panel.append(sheetEl('div', 'ask-error', `✗ ${run.error ?? 'the function failed'}`));
+  if (run && run.logs.length) {
+    const details = sheetEl('details', 'pb-console');
+    details.append(sheetEl('summary', '', 'console'), sheetEl('pre', 'pb-console-body', run.logs.join('\n')));
+    panel.append(details);
+  }
+  const extra: HTMLElement[] = [];
+  if (run?.ok) {
+    const inMemory = runResultFrom?.kind === 'function' && runResultFrom.id === rec.id && !!runResultText;
+    if (inMemory) {
+      const openResult = sheetButton('btn-mini btn-quiet', 'open result', 'act-open-result', 'Show what this function returned');
+      openResult.dataset.act = 'open-result';
+      extra.push(openResult);
+    } else if (run.batch && pbReport) {
+      const openReport = sheetButton('btn-mini btn-quiet', 'open report', 'act-open-report', 'Open the last report from run all');
+      openReport.dataset.act = 'open-report';
+      extra.push(openReport);
+    } else {
+      extra.push(sheetEl('span', 'pb-hint', 'run it again to see the whole result'));
+    }
+  }
+  panel.append(panelActions(rec.name, 'function', extra));
+  return panel;
+}
+
+/** Which focusable thing in the sheet holds focus, so a repaint can give it back. */
+function sheetFocus(): { id: string; key: string } | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !runLibList.contains(active)) return null;
+  const id = active.closest<HTMLElement>('.pb-item')?.dataset.id;
+  const key = active.dataset.focus;
+  return id && key ? { id, key } : null;
+}
+
+function restoreSheetFocus(focus: { id: string; key: string } | null): void {
+  if (!focus) return;
+  const item = runLibList.querySelector<HTMLElement>(`.pb-item[data-id="${CSS.escape(focus.id)}"]`);
+  const target = item?.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focus.key)}"]`)
+    ?? item?.querySelector<HTMLElement>('[data-focus="open"]');
+  target?.focus({ preventScroll: true });
+}
+
+function focusItem(id: string | null): void {
+  if (!id) return;
+  const button = runLibList.querySelector<HTMLElement>(`.pb-item[data-id="${CSS.escape(id)}"] .pb-open`);
+  if (!button) return;
+  button.focus({ preventScroll: true });
+  button.closest('.pb-item')?.scrollIntoView({ block: 'nearest' });
+}
+
+/**
+ * One row, redrawn where it stands: a run paints each row as its answer
+ * arrives, and whatever had focus inside that row has it again afterwards.
+ */
+function paintRow(id: string): void {
+  if (activePane !== 'run') return;
+  const old = runLibList.querySelector<HTMLElement>(`.pb-item[data-id="${CSS.escape(id)}"]`);
+  if (!old) return;
+  const check = pbChecks.find((c) => c.id === id);
+  const script = check ? undefined : pbScripts.find((s) => s.id === id);
+  if (!check && !script) return;
+  const focus = sheetFocus();
+  old.replaceWith(check ? renderCheckItem(check) : renderFunctionItem(script!));
+  restoreSheetFocus(focus?.id === id ? focus : null);
+}
+
+function checkTally(): CheckTally | null {
+  const tally: CheckTally = { passed: 0, failed: 0, inconclusive: 0, errored: 0, notRun: 0 };
+  for (const check of pbChecks) {
+    const state = checkRunFor(check)?.verdict ?? 'not-run';
+    if (state === 'pass') tally.passed++;
+    else if (state === 'fail') tally.failed++;
+    else if (state === 'inconclusive') tally.inconclusive++;
+    else if (state === 'error') tally.errored++;
+    else tally.notRun++;
+  }
+  return tally.notRun === pbChecks.length ? null : tally;
+}
+
+function paintHeadStatus(el: HTMLElement, parts: HeadPart[], title: string): void {
+  el.replaceChildren();
+  parts.forEach((part, index) => {
+    const span = sheetEl('span', part.when ? 'pb-when' : part.warn ? 'pb-warn' : '');
+    if (index > 0) span.append(' · ');
+    if (part.mark) {
+      // The glyph takes the verdict's hue — this head is on canvas — and the
+      // words stay in the status line's own ink.
+      span.append(sheetEl('span', `pb-mark ${part.mark}`, part.text.charAt(0)), part.text.slice(1));
+    } else {
+      span.append(part.text);
+    }
+    el.append(span);
+  });
+  el.title = title || parts.map((part) => part.text).join(' · ');
+}
+
+function paintHeads(shownChecks: number, shownFns: number): void {
+  let state: CheckHeadState;
+  const tally = checkTally();
+  let title = '';
+  if (pbChecksRun) {
+    state = { kind: 'running', done: pbChecksRun.done, total: pbChecksRun.total };
+  } else if (pbCheckNotice) {
+    state = pbCheckNotice;
+  } else {
+    const runs = pbChecks.map((check) => checkRunFor(check)).filter((run): run is store.CheckLastRun => !!run && 'at' in run);
+    const latest = runs.reduce((at, run) => Math.max(at, run.at), 0);
+    const when = latest ? relTime(latest) : undefined;
+    state = {
+      kind: 'idle',
+      tally,
+      when,
+      elsewhere: pbElsewhere ? `last run on ${pbElsewhere.title}, ${relTime(pbElsewhere.at)}` : undefined,
+    };
+    if (tally && when) {
+      title = checkHeadTitle(tally, when, pbLastRunMs ?? runs.reduce((ms, run) => ms + run.ms, 0));
+    }
+  }
+  const edited = pbChecks.some((check) => {
+    const run = checkRunFor(check);
+    return !!run && runIsStale(run);
+  });
+  paintHeadStatus(pbChecksStatus, checkHeadParts(pbChecks.length, shownChecks, state, edited), title);
+  pbChecksStatus.setAttribute('aria-busy', String(!!pbChecksRun));
+
+  const ticked = pbScripts.filter((s) => runPicked.has(s.id)).length;
+  const fnState: FunctionHeadState = pbFunctionsRunning
+    ? { kind: 'running' }
+    : { kind: 'idle', last: pbFnBatch ? { failed: pbFnBatch.failed, total: pbFnBatch.total, when: relTime(pbFnBatch.at) } : undefined };
+  paintHeadStatus(pbFnsStatus, functionHeadParts(pbScripts.length, shownFns, ticked, fnState), '');
+  pbFnsStatus.setAttribute('aria-busy', String(pbFunctionsRunning));
+
+  // The tick-all box: two states only — checked when every function is in.
+  pbTickAll.hidden = pbScripts.length === 0;
+  pbTickAll.checked = pbScripts.length > 0 && ticked === pbScripts.length;
+  // Some ticked: the box says so, and a press still ticks the rest.
+  pbTickAll.indeterminate = ticked > 0 && !pbTickAll.checked;
+  pbTickAll.title = pbTickAll.checked ? 'Leave every function out of run all' : 'Include every function in run all';
+  pbTickAll.setAttribute('aria-label', pbTickAll.title);
+
+  pbOpenReportBtn.disabled = !pbReport;
+  pbOpenReportBtn.title = pbReport ? 'Open the last report from run all' : 'Run all with ticked functions to build a report';
+
+  const notPassing = pbChecks.filter(didNotPass).length;
+  const offerFilter = pbChecks.length >= NOT_PASSING_MIN && notPassing > 0;
+  if (!offerFilter) pbNotPassingOnly = false;
+  pbNotPassingBtn.hidden = !offerFilter;
+  pbNotPassingBtn.textContent = `not passing ${fmtNumber(notPassing)}`;
+  pbNotPassingBtn.classList.toggle('on', pbNotPassingOnly);
+  pbNotPassingBtn.setAttribute('aria-pressed', String(pbNotPassingOnly));
+}
+
+/** The whole sheet, from the items last listed. Synchronous, so a filter keystroke never waits. */
+function paintSheet(): void {
+  if (activePane !== 'run') return;
+  const focus = sheetFocus();
+  const total = pbChecks.length + pbScripts.length;
+  pbFindWanted = total >= LIBRARY_SEARCH_MIN;
+  pbFind.hidden = runFace !== 'functions' || !pbFindWanted;
+  const term = pbFindWanted ? runLibSearch.value.trim().toLowerCase() : '';
+  const has = (text: string): boolean => !term || text.toLowerCase().includes(term);
+  let checks = pbChecks.filter((check) => has(`${check.name}\n${check.query}`));
+  if (pbNotPassingOnly) checks = checks.filter(didNotPass);
+  const scripts = pbScripts.filter((script) => has(`${script.name}\n${script.script}`));
+
+  pbCheckRows.replaceChildren(
+    ...(checks.length
+      ? checks.map(renderCheckItem)
+      : [pbChecks.length
+        ? emptyState('Nothing matches', 'Clear the search to see the whole playbook.')
+        : emptyState('No checks yet', 'Press + check to write one, or save a query as a check from Query.')]),
+  );
+  pbFnRows.replaceChildren(
+    ...(scripts.length
+      ? scripts.map(renderFunctionItem)
+      : [pbScripts.length
+        ? emptyState('Nothing matches', 'Clear the search to see the whole playbook.')
+        : emptyState('No functions yet', 'Press + function to keep some JavaScript for the next document.')]),
+  );
+  paintHeads(checks.length, scripts.length);
+  paintRunAllState();
+  paintExportState();
+  restoreSheetFocus(focus);
+}
+
+/**
+ * List the library again and draw it. A no-op outside the view: the sheet's rows
+ * are emptied on the way out, so a check's name is in the page once — in the
+ * Query rail — and never twice.
+ */
+async function renderSheet(): Promise<void> {
+  if (activePane !== 'run') return;
+  const token = ++pbRenderToken;
+  const [scripts, checks] = await Promise.all([store.listScripts(), store.listChecks()]);
+  if (token !== pbRenderToken || activePane !== 'run') return;
+  pbScripts = sortItems(scripts);
+  pbChecks = sortItems(checks);
+  // A tick on a function that has since been forgotten would keep a batch that
+  // cannot run: the ticks are only ever what the library still holds.
+  let pruned = false;
+  for (const id of runPicked) {
+    if (!scripts.some((s) => s.id === id)) {
+      runPicked.delete(id);
+      pruned = true;
+    }
+  }
+  if (pruned) saveTicks();
+  for (const id of pbOpen) if (!scripts.some((s) => s.id === id) && !checks.some((c) => c.id === id)) pbOpen.delete(id);
+  // One question for the whole sheet rather than one per row: the union of every
+  // path any function reads, asked of the document once.
+  const union = [...new Set(pbScripts.flatMap((s) => s.reads ?? []))];
+  const [missing] = await Promise.all([missingPaths(union), pbChecks.length ? sheetSchema() : Promise.resolve()]);
+  if (token !== pbRenderToken || activePane !== 'run') return;
+  pbMissing = new Set(missing);
+  paintSheet();
+}
+
+function paintExportState(): void {
+  const empty = pbChecks.length + pbScripts.length === 0;
+  runExportBtn.disabled = empty;
+  runExportBtn.title = empty
+    ? 'Nothing to export yet'
+    : 'Save these checks and functions as a playbook file — never the document';
+}
+
+const plural = (n: number, one: string, many: string): string => `${fmtNumber(n)} ${n === 1 ? one : many}`;
+
+// `run all`'s states, each one the same element so the bar never reflows: the
+// idle verb, `stop` while checks are measured, `running` while the function
+// batch runs (it cannot be stopped — the sandbox stops itself), and disabled
+// with nothing to run.
+function paintRunAllState(): void {
+  const keys = MAC_KEYS ? '⌘⇧↵' : 'Ctrl⇧↵';
+  const ticked = pbScripts.filter((s) => runPicked.has(s.id)).length;
+  let label = 'run all';
+  let title: string;
+  let disabled = false;
+  let inert = false;
+  if (pbChecksRun) {
+    // Locked to its idle width, so the shorter word does not pull the bar in.
+    if (!pbRunAllBtn.style.minWidth) pbRunAllBtn.style.minWidth = `${pbRunAllBtn.offsetWidth}px`;
+    label = 'stop';
+    title = 'Stop after the check that is running';
+  } else if (pbFunctionsRunning) {
+    label = 'running';
+    title = 'Functions run as one batch and stop on their own after 10 s';
+    inert = true;
+  } else if (runInFlight) {
+    title = 'A function is still running';
+    inert = true;
+  } else if (pbChecks.length === 0 && ticked === 0) {
+    title = 'Nothing to run — add a check, or tick a function';
+    disabled = true;
+  } else {
+    const what = [
+      pbChecks.length ? plural(pbChecks.length, 'check', 'checks') : '',
+      ticked ? plural(ticked, 'ticked function', 'ticked functions') : '',
+    ].filter(Boolean).join(' and ');
+    title = `Run ${what} over this document (${keys})`;
+    if (dockDirty()) title += ' — runs the saved versions; save to include your edits';
+  }
+  if (!pbChecksRun && !pbFunctionsRunning) pbRunAllBtn.style.minWidth = '';
+  pbRunAllLabel.textContent = label;
+  pbRunAllBtn.title = title;
+  pbRunAllBtn.disabled = disabled;
+  // aria-disabled, not disabled, while a run owns it: focus stays on the button
+  // that was pressed, and it says why it is not answering.
+  if (inert) pbRunAllBtn.setAttribute('aria-disabled', 'true');
+  else pbRunAllBtn.removeAttribute('aria-disabled');
+  paintPlaybookAccent();
+}
+
+/**
+ * Rule 6's one accent control, for this view (modelled on paintAskAccent). In
+ * order: Query, while it is open over the view, owns the accent; then the code
+ * pane's `apply`, while it holds edits; then the dock's next step while you are
+ * writing; and otherwise `run all`. The swap is outline ↔ quiet — never a third
+ * tier.
+ */
+function paintPlaybookAccent(): void {
+  let owner: HTMLButtonElement | null = null;
+  if (!askPanel.hidden) owner = null;
+  else if (activePane === 'run' && runSource === 'code' && !codeApplyBtn.disabled) owner = null;
+  else if (pbDock === 'function') {
+    const code = runEditor?.getDoc().trim() ?? '';
+    const canSave = functionActionState(code, runIsDirty(), runInFlight).canSave;
+    owner = canSave && runLastRanCode === code ? runSaveBtn : runExecBtn;
+  } else if (pbDock === 'check') {
+    owner = runSaveBtn.disabled ? null : runSaveBtn;
+  } else {
+    owner = pbRunAllBtn;
+  }
+  for (const button of [pbRunAllBtn, runSaveBtn, runExecBtn]) {
+    button.classList.toggle('primary', button === owner);
+    button.classList.toggle('btn-quiet', button !== owner);
+  }
+}
+
+// ---------- the dock: writing a check or a function ----------
 
 /** Has the editor drifted from the record it was loaded from? */
 function runIsDirty(): boolean {
@@ -6429,6 +7096,33 @@ function runIsDirty(): boolean {
     || runNumberMode !== runLoadedSnapshot.numberMode;
 }
 
+function checkFormRaw(): typeof pbCheckSnapshot {
+  const type = pbCheckExpectation.value;
+  return {
+    name: runNameInput.value.trim(),
+    query: pbCheckQuery.value.trim(),
+    type,
+    count: expectationTakesCount(type) ? pbCheckCount.value.trim() : '',
+    max: type === 'between' ? pbCheckCountMax.value.trim() : '',
+  };
+}
+
+function checkDockDirty(): boolean {
+  if (pbDock !== 'check') return false;
+  const now = checkFormRaw();
+  const was = pbCheckSnapshot;
+  return now.name !== was.name || now.query !== was.query || now.type !== was.type
+    || now.count !== was.count || now.max !== was.max;
+}
+
+function dockDirty(): boolean {
+  return pbDock === 'check' ? checkDockDirty() : runIsDirty();
+}
+
+function dockItemName(): string {
+  return (pbDock === 'check' ? pbCheckSnapshot.name : runLoadedSnapshot.name) || runNameInput.value.trim() || 'this draft';
+}
+
 function paintRunNumberSetting(): void {
   for (const button of runNumberSwitch.querySelectorAll<HTMLButtonElement>('button[data-number-mode]')) {
     const on = button.dataset.numberMode === runNumberMode;
@@ -6436,7 +7130,10 @@ function paintRunNumberSetting(): void {
     button.setAttribute('aria-pressed', String(on));
     button.disabled = !runAuthoring;
   }
-  const wouldRound = runHasUnsafeNumbers && runNumberMode === 'js';
+  // A warning about code that does not exist yet was the loudest thing on an
+  // empty form. Until there is code, the same sentence is help, in help's ink.
+  const hasCode = (runEditor?.getDoc().trim() ?? '') !== '';
+  const wouldRound = runHasUnsafeNumbers && runNumberMode === 'js' && hasCode;
   runNumberSetting.classList.toggle('warn', wouldRound);
   runNumberWarn.toggleAttribute('hidden', !wouldRound);
   runNumberHelp.textContent = runNumberMode === 'exact-text'
@@ -6448,34 +7145,282 @@ function paintRunNumberSetting(): void {
       : 'ordinary numbers';
 }
 
-// The head bar: the constant. Which function is loaded, whether it has drifted,
-// and the one action that makes sense in the state you are in — `run` while you
-// are picking, `save` while you are writing.
+// The dock's one head serves both kinds: the prefix inside the name field says
+// which, and the four controls beside it mean the same thing for either.
+function paintDock(): void {
+  runProducer.hidden = pbDock === null;
+  const check = pbDock === 'check';
+  pbCheckBody.hidden = !check;
+  pbFnBody.hidden = pbDock !== 'function';
+  pbKind.textContent = check ? 'check' : 'function';
+  runNameInput.placeholder = check ? 'name this check' : 'name this function';
+  runNameInput.setAttribute('aria-label', check ? 'Name of this check' : 'Name of this function');
+  runSaveAsBtn.title = check
+    ? 'Keep this as a second check, leaving the original alone'
+    : 'Keep this as a second function, leaving the original alone';
+  runExecBtn.title = check
+    ? `Try this check on the document (${MAC_KEYS ? '⌘↵' : 'Ctrl ↵'})`
+    : 'Run this function over the document (Ctrl/Cmd+Enter)';
+  runExecBtn.setAttribute('aria-label', check ? 'Try this check on the document' : 'Run this function over the document');
+  runSaveBtn.title = `Keep these changes (${MAC_KEYS ? '⌘S' : 'Ctrl S'})`;
+  // Rule 18: the item the dock is writing is the selected row.
+  for (const item of runLibList.querySelectorAll<HTMLElement>('.pb-item')) {
+    const editing = item.dataset.kind === 'check'
+      ? pbDock === 'check' && item.dataset.id === pbCheckId
+      : pbDock === 'function' && item.dataset.id === runLoadedId;
+    item.querySelector('.run-lib-row')?.classList.toggle('selected', editing);
+  }
+}
+
+// The dock head: what is being written, whether it has drifted, and the
+// controls that act on it. Every state change in the dock comes through here.
 function paintRunHead(): void {
-  const dirty = runIsDirty();
-  const actions = functionActionState(runEditor?.getDoc() ?? '', dirty, runInFlight);
-  runNameEl.hidden = runAuthoring;
-  runNameInput.hidden = !runAuthoring;
-  runNameEl.textContent = runLoadedSnapshot.name || 'untitled';
-  runDirtyEl.hidden = !dirty;
-  runEditBtn.hidden = runAuthoring;
-  runSaveBtn.hidden = !runAuthoring;
-  runSaveAsBtn.hidden = !runAuthoring || !runLoadedId;
-  runSaveBtn.disabled = !actions.canSave;
-  runSaveAsBtn.disabled = !actions.hasCode || runInFlight;
-  runExecBtn.disabled = !actions.canRun;
-  runEditorHost.hidden = !runAuthoring;
-  paintRunNumberSetting();
-  paintRunNewButton();
-  // Run belongs to the function, not to the text field: one stable header
-  // position in both reading and authoring states.
-  runHead.appendChild(runExecBtn);
+  paintDock();
+  if (pbDock === 'check') {
+    paintCheckDock();
+  } else {
+    const dirty = runIsDirty();
+    const actions = functionActionState(runEditor?.getDoc() ?? '', dirty, runInFlight);
+    runDirtyEl.hidden = !dirty;
+    runSaveAsBtn.hidden = !runLoadedId;
+    runSaveBtn.disabled = !actions.canSave;
+    runSaveAsBtn.disabled = !actions.hasCode || runInFlight;
+    runExecBtn.disabled = !actions.canRun;
+    runEditorHost.hidden = !runAuthoring;
+    paintRunNumberSetting();
+  }
+  paintRunAllState();
 }
 
 function setAuthoring(on: boolean): void {
   runAuthoring = on;
+  if (on) pbDock = 'function';
+  else if (pbDock === 'function') pbDock = null;
   paintRunHead();
   if (on) runEditor?.focus();
+}
+
+function paintCheckDock(): void {
+  const raw = checkFormRaw();
+  const type = raw.type;
+  pbCheckCount.hidden = !expectationTakesCount(type);
+  pbCheckCountMax.hidden = type !== 'between';
+  pbCheckCount.setAttribute('aria-label', type === 'between' ? 'Lowest passing count' : 'Expected match count');
+  const fields = expectationFromFields(type, pbCheckCount.value, pbCheckCountMax.value);
+  pbCheckCount.toggleAttribute('aria-invalid', !fields.ok && fields.field === 'count');
+  pbCheckCountMax.toggleAttribute('aria-invalid', !fields.ok && fields.field === 'max');
+  const problem = raw.query ? checkQueryProblem(raw.query) : null;
+  pbCheckQuery.toggleAttribute('aria-invalid', !!problem);
+  const dirty = checkDockDirty();
+  const valid = fields.ok && !!raw.query && !problem;
+  runDirtyEl.hidden = !dirty;
+  runSaveAsBtn.hidden = !pbCheckId;
+  runSaveAsBtn.disabled = !valid;
+  runSaveBtn.disabled = !valid || (!!pbCheckId && !dirty);
+  runExecBtn.disabled = !raw.query || !!problem || !currentText;
+
+  pbCheckPreview.classList.remove('pass', 'fail', 'inconclusive', 'invalid', 'dim');
+  pbCheckError.hidden = true;
+  pbCheckPreview.hidden = false;
+  const say = (text: string, tone: string): void => {
+    pbCheckPreview.textContent = text;
+    pbCheckPreview.classList.add(tone);
+  };
+  if (!raw.query) {
+    say('Type a query to see how this check would do on this document.', 'dim');
+  } else if (problem) {
+    pbCheckPreview.hidden = true;
+    pbCheckError.textContent = `✗ ${problem}`;
+    pbCheckError.hidden = false;
+  } else if (!fields.ok) {
+    say(fields.error, 'invalid');
+  } else if (pbDraft && pbDraft.query === raw.query && pbDraft.documentToken === currentDocumentToken && pbDraft.edits === pbEdits) {
+    const outcome = judgeCheck({ name: raw.name || 'new check', query: raw.query, expectation: fields.expectation }, pbDraft.reply, pbDraft.ms);
+    if (outcome.verdict === 'error') {
+      pbCheckPreview.hidden = true;
+      pbCheckError.textContent = previewSentence('error', outcome.summary);
+      pbCheckError.hidden = false;
+    } else {
+      say(previewSentence(outcome.verdict, outcome.summary), outcome.verdict);
+    }
+  } else if (currentText.length > LIVE_SEARCH_MAX_CHARS) {
+    say('This document is too large to preview while you type — press ▶ to try it.', 'dim');
+  } else {
+    say('Measuring…', 'dim');
+  }
+}
+
+/** Measure the draft's query on the document, now (▶, ⌘↵) or after the typing pause. */
+async function measureDraft(force = false): Promise<void> {
+  if (pbDock !== 'check' || !currentText) return;
+  const query = pbCheckQuery.value.trim();
+  if (!query || checkQueryProblem(query)) {
+    paintCheckDock();
+    return;
+  }
+  if (!force && currentText.length > LIVE_SEARCH_MAX_CHARS) {
+    paintCheckDock();
+    return;
+  }
+  if (pbDraft && pbDraft.query === query && pbDraft.documentToken === currentDocumentToken && pbDraft.edits === pbEdits) {
+    paintCheckDock();
+    return;
+  }
+  const seq = ++pbDraftSeq;
+  const documentToken = currentDocumentToken;
+  const edits = pbEdits;
+  const started = performance.now();
+  let reply: CheckMeasureReply;
+  try {
+    reply = await call<CheckMeasureReply>({ type: 'checkMeasure', q: query, evidence: store.STORED_EVIDENCE });
+  } catch (error) {
+    reply = { ok: false, error: `the engine did not answer: ${error instanceof Error ? error.message : String(error)}`, pos: 0 };
+  }
+  // A reply about a query since retyped, or about another document, is dropped.
+  if (seq !== pbDraftSeq || documentToken !== currentDocumentToken || edits !== pbEdits || pbDock !== 'check') return;
+  pbDraft = { query, documentToken, edits, reply, ms: Math.round(performance.now() - started) };
+  // An exact count only: a capped one is a lower bound, not a number to expect.
+  if (reply.ok && reply.exact && !pbCountsTouched && expectationTakesCount(pbCheckExpectation.value)) {
+    pbCheckCount.value = String(reply.observed);
+    pbCheckCountMax.value = String(reply.observed);
+  }
+  paintCheckDock();
+  paintPlaybookAccent();
+}
+
+function scheduleDraftMeasure(): void {
+  clearTimeout(pbDraftTimer);
+  pbDraftSeq++;
+  // The same pause the Query panel's live preview takes.
+  pbDraftTimer = window.setTimeout(() => void measureDraft(false), 300);
+}
+
+function openCheckDock(check: SavedCheck | null): void {
+  runAuthoring = false;
+  pbDock = 'check';
+  pbCheckId = check?.id ?? null;
+  runNameInput.value = check?.name ?? 'new check';
+  pbCheckQuery.value = check?.query ?? '';
+  const fields = fieldsFromExpectation(check?.expectation ?? { type: 'no-matches' });
+  pbCheckExpectation.value = fields.type;
+  pbCheckCount.value = fields.count || '0';
+  pbCheckCountMax.value = fields.max || '0';
+  // A saved check's counts are its own; a new one's are placeholders.
+  pbCountsTouched = !!check && expectationTakesCount(fields.type);
+  pbCheckSnapshot = checkFormRaw();
+  pbDraft = null;
+  pbPending = null;
+  runPendingLoadId = null;
+  setRunStatus('');
+  paintRunHead();
+  runNameInput.focus();
+  runNameInput.select();
+  if (check) void measureDraft(false);
+}
+
+async function openFunctionDock(rec: SavedScript | null): Promise<void> {
+  await ensureRunEditor();
+  if (!runEditor) return;
+  pbDock = 'function';
+  pbCheckId = null;
+  setRunStatus('');
+  runErrorEl.hidden = true;
+  adoptScript(rec);
+  setAuthoring(true);
+  if (!rec) void loadRunPlaceholder();
+}
+
+/** Close the dock and say which item it was writing, so focus can go back to it. */
+function closeDock(): string | null {
+  const id = pbDock === 'check' ? pbCheckId : pbDock === 'function' ? runLoadedId : null;
+  pbDock = null;
+  runAuthoring = false;
+  pbCheckId = null;
+  pbDraft = null;
+  clearTimeout(pbDraftTimer);
+  pbDraftSeq++;
+  pbPending = null;
+  runPendingLoadId = null;
+  setRunStatus('');
+  paintRunHead();
+  return id;
+}
+
+/** The two-press guard: true when a dirty dock may be left by `key`, after saying what is at stake. */
+function dockMayClose(key: string, again: string): boolean {
+  if (!pbDock || !dockDirty() || pbPending === key) return true;
+  pbPending = key;
+  setRunStatus(`unsaved changes to \`${dockItemName()}\` — ${again}`);
+  return false;
+}
+
+async function saveDock(asNew: boolean): Promise<void> {
+  if (pbDock === 'check') await saveDockCheck(asNew);
+  else if (pbDock === 'function') await saveCurrentScript(asNew);
+}
+
+async function saveDockCheck(asNew: boolean): Promise<void> {
+  const raw = checkFormRaw();
+  const fields = expectationFromFields(raw.type, pbCheckCount.value, pbCheckCountMax.value);
+  if (!raw.query || checkQueryProblem(raw.query) || !fields.ok) {
+    paintCheckDock();
+    return;
+  }
+  const all = await store.listChecks();
+  const editing = !asNew && pbCheckId ? all.find((check) => check.id === pbCheckId) : undefined;
+  const base = raw.name || 'new check';
+  // A name is a check's identity in a playbook file; a second check under the
+  // same name would merge into the first on the next import.
+  const name = uniqueScriptName(base, all.filter((check) => check.id !== editing?.id).map((check) => check.name));
+  let rec: SavedCheck | null = null;
+  try {
+    if (editing) rec = await store.updateCheck(editing.id, { name, query: raw.query, expectation: fields.expectation });
+    // Edited in another tab out of existence: kept as a new check rather than lost.
+    rec ??= await store.saveCheck(name, raw.query, fields.expectation);
+  } catch (err) {
+    // A full library refuses rather than culling a check someone relies on.
+    if (!(err instanceof store.LibraryFullError)) throw err;
+    showToast(err.message, 'bad');
+    return;
+  }
+  const changed = !editing || editing.query !== rec.query || !sameExpectation(editing.expectation, rec.expectation);
+  const draft = pbDraft;
+  closeDock();
+  pbOpen.add(rec.id);
+  if (name !== base) showToast(`saved as \`${name}\` — \`${base}\` was taken`);
+  else showToast(editing ? `saved · ${name}` : 'check saved');
+  if (changed) {
+    checkRuns.delete(rec.id);
+    // The preview already measured exactly this query on exactly this document:
+    // that IS the check's first run, so it is kept rather than measured twice.
+    if (draft && draft.query === rec.query && draft.documentToken === currentDocumentToken && draft.edits === pbEdits) {
+      await keepCheckRuns([judgeCheck(rec, draft.reply, draft.ms)], currentDocumentToken);
+    } else {
+      void runOneCheck(rec);
+    }
+  }
+  await renderSheet();
+  focusItem(rec.id);
+  void renderSavedChecks();
+}
+
+/** Load a saved function into the editor, collapsed and clean. */
+function adoptScript(rec: SavedScript | null): void {
+  runLoadedId = rec?.id ?? null;
+  runLoadedReads = rec?.reads;
+  runNumberMode = normalizeRunNumberMode(rec?.numberMode);
+  runLoadedSnapshot = {
+    name: rec?.name ?? '',
+    script: rec?.script ?? '',
+    numberMode: runNumberMode,
+  };
+  runNameInput.value = runLoadedSnapshot.name;
+  runEditor?.setDoc(runLoadedSnapshot.script);
+  runPendingLoadId = null;
+  pbPending = null;
+  runLastRanCode = null;
+  paintRunHead();
+  void paintRunFit();
 }
 
 // ---------- what a function reads, against what this document has ----------
@@ -6484,7 +7429,8 @@ function setAuthoring(on: boolean): void {
 // whose orders are called something else and answers `[]` — which reads exactly
 // like "none today". run-exec.ts learns the paths a script touched on its first
 // run; the worker answers whether the open document has them (`hasPaths`); this
-// says so, in the head, BEFORE the run rather than after a plausible result.
+// says so, on the row and in the dock, BEFORE the run rather than after a
+// plausible result.
 //
 // It is a remark, never a gate: the reading comes from one run over one
 // document, so a script that branches recorded only the branch it took. The
@@ -6517,30 +7463,12 @@ async function paintRunFit(): Promise<void> {
   runFitEl.textContent = `this reads ${fmtPaths(missing)} — this document has none of that`;
 }
 
-/** Load a saved function into the editor, collapsed and clean. */
-function adoptScript(rec: SavedScript | null): void {
-  runLoadedId = rec?.id ?? null;
-  runLoadedReads = rec?.reads;
-  runNumberMode = normalizeRunNumberMode(rec?.numberMode);
-  runLoadedSnapshot = {
-    name: rec?.name ?? '',
-    script: rec?.script ?? '',
-    numberMode: runNumberMode,
-  };
-  runNameInput.value = runLoadedSnapshot.name;
-  runEditor?.setDoc(runLoadedSnapshot.script);
-  runPendingLoadId = null;
-  runPendingNew = false;
-  paintRunHead();
-  void paintRunFit();
-}
-
 async function loadAndRun(id: string): Promise<void> {
   // Mid-run, a press would swap the head and editor to a function whose own
   // run is then dropped (runScript refuses while one is in flight), leaving
   // the running one's result under the pressed one's name. Refused, and said.
   if (runInFlight) {
-    setRunStatus('a function is still running — press again when it finishes');
+    pbSay('a function is still running — press again when it finishes');
     return;
   }
   const rec = (await store.listScripts()).find((s) => s.id === id);
@@ -6561,8 +7489,15 @@ async function loadAndRun(id: string): Promise<void> {
   adoptScript(rec);
   setAuthoring(false);
   void store.touchSaved(id);
-  await renderLibrary();
-  await runScript();
+  await renderSheet();
+  // Pressed on the sheet, so the sheet stays up: the row says what came back,
+  // and `open result` is one press away.
+  runKeepFace = true;
+  try {
+    await runScript();
+  } finally {
+    runKeepFace = false;
+  }
 }
 
 async function saveCurrentScript(asNew: boolean): Promise<void> {
@@ -6599,28 +7534,196 @@ async function saveCurrentScript(asNew: boolean): Promise<void> {
       return;
     }
   }
+  // What just ran from the dock is this function's outcome if it ran exactly
+  // this code, this way, on the document as it is now; an outcome of other code
+  // is not this function's any more.
+  const ran = runDraftRun;
+  if (ran && ran.code === code && ran.numberMode === runNumberMode && ran.revision === currentDocumentRevision) {
+    functionRuns.set(rec.id, ran.run);
+    if (runResultFrom?.kind === 'function' && runResultFrom.id === null) runResultFrom = { kind: 'function', id: rec.id };
+  } else if (codeChanged || asNew) {
+    functionRuns.delete(rec.id);
+  }
   adoptScript(rec);
-  await renderLibrary();
+  // Saved is done: the dock closes, and the row it wrote is where focus goes.
+  setAuthoring(false);
+  pbOpen.add(rec.id);
+  if (runFace === 'result') setRunFace('functions');
+  await renderSheet();
+  focusItem(rec.id);
   showToast(`saved · ${rec.name}`);
 }
 
-runFaceSwitch.addEventListener('click', (e) => {
-  const face = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-face]')?.dataset.face;
-  if (face !== 'functions' && face !== 'result') return;
-  setRunFace(face);
-  if (face === 'functions') void renderLibrary();
+runLibSearch.addEventListener('input', () => paintSheet());
+
+pbNotPassingBtn.addEventListener('click', () => {
+  pbNotPassingOnly = !pbNotPassingOnly;
+  paintSheet();
 });
 
-runLibSearch.addEventListener('input', () => void renderLibrary());
+pbTickAll.addEventListener('change', () => {
+  const all = pbScripts.every((s) => runPicked.has(s.id));
+  for (const s of pbScripts) {
+    if (all) runPicked.delete(s.id);
+    else runPicked.add(s.id);
+  }
+  saveTicks();
+  paintSheet();
+});
+
+function toggleRow(id: string, open = !pbOpen.has(id)): void {
+  if (open) pbOpen.add(id);
+  else pbOpen.delete(id);
+  pbAutoOpened.delete(id);
+  paintRow(id);
+  if (open) runLibList.querySelector(`.pb-item[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+async function runItem(id: string, kind: string | undefined): Promise<void> {
+  if (kind === 'check') {
+    const check = pbChecks.find((c) => c.id === id);
+    if (check) await runOneCheck(check);
+    return;
+  }
+  // A clean dock steps aside for the run; a dirty one asks first.
+  if (pbDock === 'check' && !dockMayClose(`run:${id}`, 'press run again to discard them')) return;
+  if (pbDock === 'check') closeDock();
+  else if (pbDock === 'function' && !runIsDirty()) closeDock();
+  await loadAndRun(id);
+}
+
+async function editItem(id: string, kind: string | undefined): Promise<void> {
+  const same = kind === 'check' ? pbDock === 'check' && pbCheckId === id : pbDock === 'function' && runLoadedId === id;
+  if (same) {
+    if (pbDock === 'check') runNameInput.focus();
+    else runEditor?.focus();
+    return;
+  }
+  if (!dockMayClose(`edit:${id}`, 'press edit again to discard them')) return;
+  if (kind === 'check') {
+    const check = pbChecks.find((c) => c.id === id);
+    if (check) openCheckDock(check);
+  } else {
+    const rec = pbScripts.find((s) => s.id === id);
+    if (rec) await openFunctionDock(rec);
+  }
+}
+
+// Forget is undoable — the identical record goes back, same id, same last run
+// — so it can be one press, with the way back on the toast.
+async function forgetItem(id: string, kind: string | undefined): Promise<void> {
+  const check = kind === 'check' ? pbChecks.find((c) => c.id === id) : undefined;
+  const script = kind === 'check' ? undefined : pbScripts.find((s) => s.id === id);
+  const rec = check ?? script;
+  if (!rec) return;
+  const buttons = [...runLibList.querySelectorAll<HTMLElement>('.pb-item .pb-open')];
+  const at = buttons.findIndex((b) => b.closest<HTMLElement>('.pb-item')?.dataset.id === id);
+  const section = buttons[at]?.closest('.pb-section');
+  const sameSection = (b: HTMLElement | undefined): boolean => !!b && b.closest('.pb-section') === section;
+  const nextId = [buttons[at + 1], buttons[at - 1]].find(sameSection)?.closest<HTMLElement>('.pb-item')?.dataset.id ?? null;
+  const ticked = runPicked.has(id);
+  const kept = checkRuns.get(id);
+  const fnRun = functionRuns.get(id);
+  await store.removeSaved(id);
+  runPicked.delete(id);
+  saveTicks();
+  checkRuns.delete(id);
+  functionRuns.delete(id);
+  pbOpen.delete(id);
+  if ((pbDock === 'check' && pbCheckId === id) || (pbDock === 'function' && runLoadedId === id)) closeDock();
+  // The editor stays bound to nothing, rather than to a record that is gone —
+  // which is how the old library kept a forgotten function's name on screen.
+  if (runLoadedId === id) adoptScript(null);
+  await renderSheet();
+  void renderSavedChecks();
+  if (nextId) focusItem(nextId);
+  else (check ? pbNewCheckBtn : runNewBtn).focus();
+  showToastAction(`forgot ${rec.name}`, 'undo', () => void (async () => {
+    await store.restoreSaved(rec);
+    if (ticked) {
+      runPicked.add(id);
+      saveTicks();
+    }
+    if (kept) checkRuns.set(id, kept);
+    if (fnRun) functionRuns.set(id, fnRun);
+    await renderSheet();
+    void renderSavedChecks();
+    focusItem(id);
+  })());
+}
+
+/** The evidence entry at `index` in a check's run, revealed and selected in the tree. */
+async function revealEvidenceAt(id: string, index: number): Promise<void> {
+  const check = pbChecks.find((c) => c.id === id);
+  const run = check ? checkRunFor(check) : null;
+  const evidence = run?.evidence[index];
+  if (!evidence) return;
+  const row = await revealEvidence(evidence);
+  if (row < 0) {
+    showToast('that path is no longer in this document — run again', 'bad');
+    return;
+  }
+  pbRevealed = { id, index };
+  // Classes only, no repaint: focus stays on the entry that was pressed.
+  for (const entry of runLibList.querySelectorAll<HTMLElement>('.pb-evidence')) {
+    const owner = entry.closest<HTMLElement>('.pb-item')?.dataset.id;
+    entry.classList.toggle('on', owner === id && entry.dataset.ev === String(index));
+  }
+  // One surface at a time on a phone: the tree took the screen, so the way
+  // back rides the toast that says where you are.
+  if (mobileRunSurface === 'source') {
+    showToastAction(`showing ${evidence.pathText}`, 'back to playbook', () => setMobileRunSurface('workspace'));
+  }
+}
+
+async function revealEvidence(evidence: CheckEvidence): Promise<number> {
+  return revealInTree(evidence.path);
+}
+
+// "and 32 more": the panel keeps five, Query lists every match — opened over
+// this view, so its hits reveal into the tree beside the sheet.
+async function showCheckInQuery(check: SavedCheck): Promise<void> {
+  askPanel.hidden = false;
+  $('#ask-btn').classList.add('on');
+  void renderSavedChips();
+  askQueryEdit.value = check.query;
+  setAskMode('query');
+  paintPlaybookAccent();
+  await runAsk(check.query);
+}
+
+/** Show a function's result, from its row — the sheet's way to the result face. */
+async function openResultFor(id: string | null): Promise<void> {
+  pbReturnFocusId = id;
+  setRunFace('result');
+  await paintResultLabel();
+  runViewport.scrollTop = 0;
+}
+
+async function openReport(fromId: string | null): Promise<void> {
+  if (!pbReport) return;
+  pbReturnFocusId = fromId;
+  if (runResultFrom?.kind !== 'report' || !runResultText) {
+    runResultKind = pbReport.kind;
+    await showResultDocument(pbReport.text);
+    runResultFrom = { kind: 'report' };
+  } else {
+    setRunFace('result');
+  }
+}
 
 runLibList.addEventListener('click', async (e) => {
   const target = e.target as HTMLElement;
-  const id = target.closest<HTMLElement>('.run-lib-row')?.dataset.id;
-  if (!id) return;
-  // Ticking is not running: it says what a later press will cover, and the
-  // result on screen stays whatever it already was. Anywhere in the column
-  // counts — a click on the padding around the box has to mean the same thing
-  // as a click on the box, or the column is decoration rather than a target.
+  const item = target.closest<HTMLElement>('.pb-item');
+  if (!item) return;
+  const id = item.dataset.id!;
+  const kind = item.dataset.kind;
+  // A row run all opened by itself becomes yours once you work in its panel:
+  // the next run all leaves it open rather than tidying it away.
+  if (target.closest('.pb-detail')) pbAutoOpened.delete(id);
+  // Ticking is not running: it says what `run all` will cover, and nothing on
+  // screen changes but the tick and the counts. Anywhere in the column counts —
+  // a click on the padding around the box means the same as one on the box.
   const zone = target.closest('.run-lib-pickzone');
   if (zone) {
     const box = zone.querySelector<HTMLInputElement>('.run-lib-pick');
@@ -6629,38 +7732,394 @@ runLibList.addEventListener('click', async (e) => {
     if (target !== box) box.checked = !box.checked;
     if (box.checked) runPicked.add(id);
     else runPicked.delete(id);
-    paintPickState(runLibraryCount);
+    saveTicks();
+    paintHeads(pbCheckRows.querySelectorAll('.pb-item').length, pbFnRows.querySelectorAll('.pb-item').length);
+    paintRunAllState();
     return;
   }
-  if (target.closest('.run-lib-del')) {
-    await store.removeSaved(id);
-    if (id === runLoadedId) runLoadedId = null;
-    await renderLibrary();
-    paintRunHead();
+  if (target.closest('.pb-open')) {
+    toggleRow(id);
     return;
   }
-  await loadAndRun(id);
+  const evidence = target.closest<HTMLElement>('button.pb-evidence');
+  if (evidence) {
+    await revealEvidenceAt(id, Number(evidence.dataset.ev));
+    return;
+  }
+  const act = target.closest<HTMLElement>('[data-act]')?.dataset.act;
+  const check = kind === 'check' ? pbChecks.find((c) => c.id === id) : undefined;
+  if (act === 'run') await runItem(id, kind);
+  else if (act === 'edit') await editItem(id, kind);
+  else if (act === 'forget') await forgetItem(id, kind);
+  else if (act === 'copy' && check) await copyText(check.query).then(() => showToast('query copied'));
+  else if (act === 'more' && check) await showCheckInQuery(check);
+  else if (act === 'open-result') await openResultFor(id);
+  else if (act === 'open-report') await openReport(id);
+});
+
+// The sheet's keys. Every target is a button or an input, so the tree's
+// global keys stand down on their own (the focusedControl guard).
+runLibList.addEventListener('keydown', (e) => {
+  const target = e.target as HTMLElement;
+  const item = target.closest<HTMLElement>('.pb-item');
+  if (!item || e.altKey) return;
+  const id = item.dataset.id!;
+  const mod = e.metaKey || e.ctrlKey;
+  const onRow = target.classList.contains('pb-open');
+  if (mod && !e.shiftKey && e.key === 'Enter' && onRow) {
+    e.preventDefault();
+    void runItem(id, item.dataset.kind);
+    return;
+  }
+  if (mod) return;
+  if (onRow && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End')) {
+    e.preventDefault();
+    const rows = [...runLibList.querySelectorAll<HTMLElement>('.pb-open')];
+    const at = rows.indexOf(target);
+    const next = e.key === 'Home' ? 0
+      : e.key === 'End' ? rows.length - 1
+        : Math.max(0, Math.min(rows.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)));
+    rows[next]?.focus();
+    rows[next]?.closest('.pb-item')?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  if (onRow && e.key === 'ArrowRight') {
+    e.preventDefault();
+    if (!pbOpen.has(id)) toggleRow(id, true);
+    return;
+  }
+  if (e.key === 'ArrowLeft' && (onRow || target.closest('.pb-detail'))) {
+    e.preventDefault();
+    if (pbOpen.has(id)) toggleRow(id, false);
+    focusItem(id);
+  }
+});
+
+pbNewCheckBtn.addEventListener('click', () => {
+  if (!dockMayClose('new-check', 'press + check again to discard them')) return;
+  openCheckDock(null);
 });
 
 runNewBtn.addEventListener('click', () => {
-  if (runIsDirty() && !runPendingNew) {
-    runPendingNew = true;
-    setRunStatus('unsaved changes — press New function again to discard them');
+  if (!dockMayClose('new-function', 'press + function again to discard them')) return;
+  void openFunctionDock(null);
+});
+
+pbCancelBtn.addEventListener('click', () => {
+  if (!dockMayClose('cancel', 'press cancel again to discard them')) return;
+  // Discarded means discarded: a function's editor goes back to what it was
+  // loaded with, so the next run of that row runs the saved code.
+  if (pbDock === 'function' && runIsDirty()) {
+    runNameInput.value = runLoadedSnapshot.name;
+    runNumberMode = runLoadedSnapshot.numberMode;
+    runEditor?.setDoc(runLoadedSnapshot.script);
+  }
+  const id = closeDock();
+  if (id) focusItem(id);
+  else pbNewCheckBtn.focus();
+});
+
+runSaveBtn.addEventListener('click', () => void saveDock(false));
+runSaveAsBtn.addEventListener('click', () => void saveDock(true));
+runNameInput.addEventListener('input', () => {
+  pbPending = null;
+  setRunStatus('');
+  paintRunHead();
+});
+
+pbCheckQuery.addEventListener('input', () => {
+  pbPending = null;
+  setRunStatus('');
+  paintRunHead();
+  scheduleDraftMeasure();
+});
+pbCheckQuery.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+  e.preventDefault();
+  void measureDraft(true);
+});
+for (const field of [pbCheckExpectation, pbCheckCount, pbCheckCountMax]) {
+  field.addEventListener('input', () => {
+    if (field !== pbCheckExpectation) pbCountsTouched = true;
+    pbPending = null;
+    paintRunHead();
+  });
+}
+// A count condition picked before any count was typed starts at what the query
+// matches now, as the Query panel's editor does — not at "between 0 and 0".
+pbCheckExpectation.addEventListener('change', () => {
+  const draft = pbDraft;
+  if (pbCountsTouched || !draft?.reply.ok || !draft.reply.exact || draft.query !== pbCheckQuery.value.trim()) return;
+  pbCheckCount.value = String(draft.reply.observed);
+  pbCheckCountMax.value = String(draft.reply.observed);
+  paintRunHead();
+});
+
+runExecBtn.addEventListener('click', () => {
+  if (pbDock === 'check') void measureDraft(true);
+  else void runScript();
+});
+
+// The dock's keys: ⌘S saves whichever kind it holds; ⌘↵ in a check's fields
+// measures now. The function editor's own ⌘↵ (run-editor.ts) runs the draft,
+// so events from inside it are left to it.
+runProducer.addEventListener('keydown', (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod || e.altKey) return;
+  if (!e.shiftKey && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    void saveDock(false);
     return;
   }
-  runPendingNew = false;
-  setRunStatus('');
-  adoptScript(null);
-  setRunFace('result');
-  setAuthoring(true);
+  if (!e.shiftKey && e.key === 'Enter' && pbDock === 'check' && !runEditorHost.contains(e.target as Node)) {
+    e.preventDefault();
+    void measureDraft(true);
+  }
 });
+
+pbRunAllBtn.addEventListener('click', () => {
+  if (pbRunAllBtn.getAttribute('aria-disabled') === 'true') return;
+  void runAll();
+});
+
+pbBackBtn.addEventListener('click', () => {
+  setRunFace('functions');
+  void renderSheet().then(() => {
+    if (pbReturnFocusId) focusItem(pbReturnFocusId);
+    else pbRunAllBtn.focus();
+    pbReturnFocusId = null;
+  });
+});
+
+pbOpenReportBtn.addEventListener('click', () => void openReport(null));
+
+// ---------- running the playbook ----------
+
+/**
+ * Measure checks in the document's worker, one message each — so tree requests
+ * interleave and a 200 MB document stays scrollable — and keep the verdicts.
+ * A run the document outlived (another document, an edit, a re-parse) or that
+ * `stop` cut short is dropped whole: nothing it measured is kept.
+ */
+async function runChecksNow(
+  checks: readonly SavedCheck[],
+  opts: { onStart?(check: SavedCheck): void; onOutcome?: RunOptions['onOutcome']; stop?(): boolean } = {},
+): Promise<CheckRunReport> {
+  const documentToken = currentDocumentToken;
+  const edits = pbEdits;
+  let started = 0;
+  const report = await runCheckSet(
+    checks,
+    (q) => {
+      // runCheckSet measures in order, so the nth measure is the nth check.
+      const check = checks[started++];
+      if (check) opts.onStart?.(check);
+      return call<CheckMeasureReply>({ type: 'checkMeasure', q, evidence: store.STORED_EVIDENCE });
+    },
+    {
+      keepGoing: () => documentToken === currentDocumentToken && edits === pbEdits && workerParseRequest === 0 && !opts.stop?.(),
+      onOutcome: opts.onOutcome,
+    },
+  );
+  if (!report.aborted) await keepCheckRuns(report.outcomes, documentToken);
+  return report;
+}
+
+// Each verdict is kept with its check, with up to five matched paths, keyed to
+// this document by id and sampled hash. Running a check is not saving it: the
+// write never touches `updatedAt` or `uses` (recordCheckRuns), so a monthly
+// run reorders nothing and culls nothing.
+async function keepCheckRuns(outcomes: readonly CheckOutcome[], documentToken: number): Promise<void> {
+  let docId = currentDocId;
+  const pending = pendingInitialSave?.documentToken === documentToken ? pendingInitialSave.promise : null;
+  if (!docId && pending) {
+    try {
+      docId = (await pending).id;
+    } catch {
+      docId = null; // not stored, so the verdicts last as long as the tab
+    }
+  }
+  if (documentToken !== currentDocumentToken) return;
+  const hash = store.sampleHash(currentText);
+  // Stamped after the document's own save, so a reload's `at >= updatedAt`
+  // guard keeps it.
+  const at = Date.now();
+  const runs = outcomes.flatMap((outcome) => (
+    outcome.id ? [{ id: outcome.id, lastRun: store.lastRunOf(outcome, { id: docId ?? '', hash }, at) }] : []
+  ));
+  for (const run of runs) checkRuns.set(run.id, run.lastRun);
+  if (!docId) return;
+  try {
+    await store.recordCheckRuns(runs);
+  } catch (error) {
+    showToast(`local save failed: ${error instanceof Error ? error.message : String(error)}`, 'bad');
+  }
+}
+
+/**
+ * Every check, in sheet order, against the open document. Null when it cannot
+ * start: a run already going, no document, or a document still being parsed.
+ */
+async function runAllChecks(opts: { onOutcome?: RunOptions['onOutcome']; stop?(): boolean } = {}): Promise<CheckRunReport | null> {
+  if (pbChecksRun || !currentText || workerParseRequest !== 0) return null;
+  const checks = sortItems(await store.listChecks());
+  if (checks.length === 0) return null;
+  const documentToken = currentDocumentToken;
+  const edits = pbEdits;
+  pbChecksRun = { done: 0, total: checks.length };
+  pbCheckNotice = null;
+  runAllStop = false;
+  for (const check of checks) pbLive.set(check.id, 'waiting');
+  paintSheet();
+  try {
+    const report = await runChecksNow(checks, {
+      onStart: (check) => {
+        pbLive.set(check.id, 'running');
+        paintRow(check.id);
+      },
+      onOutcome: (outcome, index, total) => {
+        if (outcome.id) pbLive.set(outcome.id, outcome);
+        pbChecksRun = { done: index + 1, total };
+        if (outcome.id) paintRow(outcome.id);
+        paintHeads(pbCheckRows.querySelectorAll('.pb-item').length, pbFnRows.querySelectorAll('.pb-item').length);
+        opts.onOutcome?.(outcome, index, total);
+      },
+      stop: opts.stop,
+    });
+    if (report.aborted) {
+      pbCheckNotice = documentToken !== currentDocumentToken || edits !== pbEdits || workerParseRequest !== 0
+        ? { kind: 'document-changed' }
+        : { kind: 'stopped', done: report.outcomes.length, total: checks.length };
+    } else {
+      pbLastRunMs = report.summary.ms;
+    }
+    return report;
+  } finally {
+    pbChecksRun = null;
+    pbLive.clear();
+    runAllStop = false;
+    paintSheet();
+    void renderSavedChecks();
+  }
+}
+
+/** One check, through the same measure-and-keep path as run all. */
+async function runOneCheck(check: SavedCheck): Promise<CheckOutcome | null> {
+  if (!currentText || workerParseRequest !== 0) return null;
+  pbCheckNotice = null;
+  pbLive.set(check.id, 'running');
+  paintRow(check.id);
+  try {
+    const report = await runChecksNow([check]);
+    return report.aborted ? null : report.outcomes[0] ?? null;
+  } finally {
+    pbLive.delete(check.id);
+    paintRow(check.id);
+    if (activePane === 'run') paintHeads(pbCheckRows.querySelectorAll('.pb-item').length, pbFnRows.querySelectorAll('.pb-item').length);
+    void renderSavedChecks();
+  }
+}
+
+/**
+ * `run all`: every check, then — if the checks were not stopped — the ticked
+ * functions as one sandbox batch. Pressed again while checks run, it stops
+ * after the one in flight. Afterwards the first row that did not pass opens,
+ * and focus stays on the button that was pressed.
+ */
+async function runAll(): Promise<void> {
+  if (pbChecksRun) {
+    runAllStop = true;
+    return;
+  }
+  if (pbFunctionsRunning || runInFlight) {
+    pbSay('a function is still running — press again when it finishes');
+    return;
+  }
+  if (!currentText) return;
+  if (activePane === 'run' && runFace === 'result') setRunFace('functions');
+  const [checks, scripts] = await Promise.all([store.listChecks(), store.listScripts()]);
+  const ticked = sortItems(scripts.filter((s) => runPicked.has(s.id)));
+  if (checks.length === 0 && ticked.length === 0) return;
+  // What the last run opened by itself closes again; what you opened stays.
+  for (const id of pbAutoOpened) pbOpen.delete(id);
+  pbAutoOpened.clear();
+  let report: CheckRunReport | null = null;
+  if (checks.length) {
+    report = await runAllChecks({ stop: () => runAllStop });
+    if (!report || report.aborted) return;
+  }
+  if (ticked.length) await runPickedScripts();
+  const firstCheck = report?.outcomes.find((outcome) => outcome.verdict !== 'pass')?.id;
+  const firstFn = ticked.find((s) => functionRuns.get(s.id)?.ok === false)?.id;
+  const first = firstCheck ?? firstFn;
+  if (first && !pbOpen.has(first)) {
+    pbOpen.add(first);
+    pbAutoOpened.add(first);
+  }
+  await renderSheet();
+  if (first) runLibList.querySelector(`.pb-item[data-id="${CSS.escape(first)}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+// A check's last run, from storage, for the document just opened — but only a
+// run of this check as it is now, on this document as it is now: the same id
+// and sampled hash, and stamped no earlier than the document's last saved edit
+// (the hash samples only the ends, so an edit in the middle keeps it).
+async function hydrateCheckRuns(): Promise<void> {
+  const documentToken = currentDocumentToken;
+  const text = currentText;
+  pbElsewhere = null;
+  let docId = currentDocId;
+  const pending = pendingInitialSave?.documentToken === documentToken ? pendingInitialSave.promise : null;
+  if (!docId && pending) {
+    try {
+      docId = (await pending).id;
+    } catch {
+      return;
+    }
+  }
+  if (!docId) return;
+  const [checks, docs] = await Promise.all([store.listChecks(), store.listDocs()]);
+  if (documentToken !== currentDocumentToken) return;
+  const meta = docs.find((doc) => doc.id === docId);
+  if (!meta) return;
+  const hash = store.sampleHash(text);
+  for (const check of checks) {
+    // A run made in this session since the open is newer than anything stored.
+    if (checkRuns.has(check.id)) continue;
+    const run = store.currentLastRun(check, { id: docId, hash, updatedAt: meta.updatedAt });
+    if (run) checkRuns.set(check.id, run);
+  }
+  // Never run here: say where the library last ran, if that document is still kept.
+  const elsewhere = checks
+    .map((check) => check.lastRun)
+    .filter((run): run is store.CheckLastRun => !!run && run.docId !== docId)
+    .sort((a, b) => b.at - a.at)[0];
+  const title = elsewhere ? docs.find((doc) => doc.id === elsewhere.docId)?.title : undefined;
+  pbElsewhere = elsewhere && title ? { title, at: elsewhere.at } : null;
+  void renderSavedChecks();
+  if (activePane === 'run') paintSheet();
+}
+
+// An edit to the content after a run: every verdict on screen is now about a
+// document that is gone. They stay, faint, with their evidence as plain text,
+// and the head says why — nothing re-runs by itself (the same policy as a
+// function's result, markRunResultStale).
+function markPlaybookStale(): void {
+  pbEdits++;
+  pbEditedAt = Date.now();
+  pbDraft = null;
+  pbSchema = null;
+  if (activePane !== 'run') return;
+  paintSheet();
+  if (pbDock === 'check') scheduleDraftMeasure();
+}
 
 // ---------- the library as a file ----------
 //
-// Everything in run mode so far lives in this browser's IndexedDB, which means
-// it is one cleared storage away from gone and cannot be handed to anyone. A
-// playbook is the portable form: the functions, their learned reads, and
-// nothing else — never the document (playbook.ts says why).
+// Everything in this view lives in this browser's IndexedDB, which means it is
+// one cleared storage away from gone and cannot be handed to anyone. A
+// playbook is the portable form: the checks, the functions and their learned
+// reads, and nothing else — never the document (playbook.ts says why).
 
 async function exportPlaybook(): Promise<void> {
   const [all, checks] = await Promise.all([store.listScripts(), store.listChecks()]);
@@ -6694,7 +8153,7 @@ async function exportPlaybook(): Promise<void> {
  * MERGE, NEVER REPLACE, and a name collision keeps BOTH — the incoming one
  * lands as `slow orders 2`, the same way a fork does. Overwriting a function
  * someone wrote is the one outcome here that cannot be undone, so it is the one
- * thing import will not do; a duplicate, by contrast, is one `×` away.
+ * thing import will not do; a duplicate, by contrast, is one `forget` away.
  */
 async function importPlaybookText(
   text: string,
@@ -6729,7 +8188,7 @@ async function importPlaybookText(
     takenChecks.push(name);
     await store.saveCheck(name, check.query, check.expectation);
   }
-  await renderLibrary();
+  await renderSheet();
   await renderSavedChips();
   const count = res.playbook.functions.length + res.playbook.checks.length;
   showToast(
@@ -6748,15 +8207,6 @@ runImportInput.addEventListener('change', async () => {
   await importPlaybookText(await file.text(), file.name);
 });
 
-runEditBtn.addEventListener('click', () => setAuthoring(true));
-runSaveBtn.addEventListener('click', () => void saveCurrentScript(false));
-runSaveAsBtn.addEventListener('click', () => void saveCurrentScript(true));
-runNameInput.addEventListener('input', () => {
-  runPendingNew = false;
-  setRunStatus('');
-  paintRunHead();
-});
-
 runNumberSwitch.addEventListener('click', (event) => {
   if (!runAuthoring) return;
   const mode = (event.target as HTMLElement)
@@ -6764,7 +8214,7 @@ runNumberSwitch.addEventListener('click', (event) => {
   if (mode !== 'js' && mode !== 'exact-text') return;
   if (mode === runNumberMode) return;
   runNumberMode = mode;
-  runPendingNew = false;
+  pbPending = null;
   setRunStatus('');
   markRunResultStale();
   paintRunHead();
@@ -6788,22 +8238,24 @@ function markRunResultStale(): void {
 function clearRunResult(failed = false): void {
   runResultText = '';
   runResultKind = '';
+  runResultFrom = null;
   runStaleWanted = false;
   runStaleBadge.hidden = true;
   runResultLabel.textContent = failed ? 'run failed' : 'nothing run yet';
   paintRunEmpty(failed);
   resultTree.resetSelection();
   resultTree.setTotal(0);
-  // The library is the other face of these two surfaces: while it is up, an
+  // The sheet is the other face of these two surfaces: while it is up, an
   // emptied result must not push it off screen.
   runViewport.hidden = true;
   runEmpty.hidden = runFace === 'functions';
   for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = true;
 }
 
-// A new document resets run mode entirely. The script survives, for the same
+// A new document resets the view entirely. The script survives, for the same
 // reason the ask panel's question does: it is the user's own input and is meant
-// to be re-run across documents.
+// to be re-run across documents. Function outcomes do not: they were about the
+// last document.
 function resetRunState(hasUnsafeNumbers: boolean): void {
   setRunUnsafeNumbers(hasUnsafeNumbers);
   runErrorEl.hidden = true;
@@ -6812,17 +8264,37 @@ function resetRunState(hasUnsafeNumbers: boolean): void {
   setRunStatus('');
   resultDownloadName = '';
   clearRunResult();
+  functionRuns.clear();
+  pbFnBatch = null;
+  pbReport = null;
+  pbCheckNotice = null;
+  pbLastRunMs = null;
+  pbEditedAt = 0;
+  pbDraft = null;
+  pbSchema = null;
+  pbRevealed = null;
+  pbOpen.clear();
+  pbAutoOpened.clear();
   runPlaceholderRevision = -1;
   void loadRunPlaceholder();
   // A new document is exactly when "does this function fit?" changes its answer
-  // — for the loaded one, and for every row in the library.
+  // — for the loaded one, and for every row in the sheet.
   void paintRunFit();
-  if (activePane === 'run') void renderLibrary();
+  if (activePane === 'run') void renderSheet();
 }
 
 // Called from showPane on every exit, so there is one teardown rather than one
-// per way out (another view, a comparison, a new document).
+// per way out (another view, a comparison, a new document). A run of every
+// check stops after the one in flight, and the dock's lines from this visit
+// go with it — they described a visit that is over.
 function exitRunMode(): void {
+  if (pbChecksRun) runAllStop = true;
+  pbCheckRows.replaceChildren();
+  pbFnRows.replaceChildren();
+  setRunStatus('');
+  runErrorEl.hidden = true;
+  runConsole.hidden = true;
+  runConsole.open = false;
   if (!runResultChannel) return;
   runResultChannel.terminate();
   runResultChannel = null;
@@ -6855,7 +8327,7 @@ async function ensureRunEditor(): Promise<void> {
     // only honest if it is recomputed here.
     onChange: (code) => {
       saveLastScript(code);
-      runPendingNew = false;
+      pbPending = null;
       setRunStatus('');
       paintRunHead();
     },
@@ -6879,7 +8351,7 @@ async function loadRunPlaceholder(): Promise<string> {
 }
 
 // Whatever the source pane needs to be showing, mounted. Split arrives on the
-// tree, so run mode entered from split defaults to it — the mini-switch is how
+// tree, so the view entered from split defaults to it — the mini-switch is how
 // you get the other one.
 async function showRunSource(): Promise<void> {
   showPane('run');
@@ -6890,12 +8362,25 @@ async function showRunSource(): Promise<void> {
   else tree.refresh();
 }
 
+// The playbook view's own way to the tree: the source pane switches to it in
+// place, because showPane would leave the view a reveal was asked from. False
+// outside the view, where the caller keeps its own way there.
+async function showRunTree(): Promise<boolean> {
+  if (activePane !== 'run') return false;
+  if (runSource !== 'tree') {
+    runSource = 'tree';
+    await showRunSource();
+  }
+  if (window.matchMedia('(max-width: 760px)').matches) setMobileRunSurface('source');
+  return true;
+}
+
 async function openRun(): Promise<void> {
   // The source pane starts as the view being left — someone reading raw code
   // keeps reading it; split (and re-entry) fall back to the tree.
   if (activePane !== 'run') {
     runSource = activePane === 'code' ? 'code' : 'tree';
-    // Pressing Run means the workspace is the immediate destination on a
+    // Pressing the view means the playbook is the immediate destination on a
     // phone; source stays one explicit segment away and keeps its own state.
     mobileRunSurface = 'workspace';
   }
@@ -6905,19 +8390,12 @@ async function openRun(): Promise<void> {
   askPanel.hidden = true;
   if (!runResultChannel) runResultChannel = createWorkerChannel('result');
   await showRunSource();
-  await ensureRunEditor();
-  await renderLibrary();
-  // Someone with a library came here to press one of their functions, so that
-  // is what run mode opens on; someone with none came here to write one, and
-  // gets the editor they would have had to open anyway.
-  const library = await store.listScripts();
-  if (library.length > 0) {
-    setRunFace('functions');
-    setAuthoring(false);
-  } else {
-    setRunFace('result');
-    setAuthoring(true);
-  }
+  // The sheet is what this view opens on, every time. A dock left holding
+  // unsaved work stays open over it rather than losing that work.
+  if (pbDock && !dockDirty()) closeDock();
+  setRunFace('functions');
+  paintRunHead();
+  await renderSheet();
   scheduleResponsiveRefresh();
 }
 
@@ -6926,7 +8404,7 @@ runSrcSwitch.addEventListener('click', (e) => {
   const src = btn?.dataset.src;
   if ((src !== 'tree' && src !== 'code') || src === runSource) return;
   runSource = src;
-  void showRunSource();
+  void showRunSource().then(paintPlaybookAccent);
 });
 
 runMobileSwitch.addEventListener('click', (event) => {
@@ -7002,10 +8480,8 @@ async function paintResultLabel(): Promise<void> {
     runResultLabel.textContent = `nothing came back · ${root.type}`;
     return;
   }
-  // The switch beside it already says `result`; saying it again here put the
-  // word twice on one strip. What the label is for is what CAME BACK — and for
-  // a batch, what came back is a report, not an object that happens to have
-  // three keys. The head names what is LOADED; this names what produced this.
+  // What the label is for is what CAME BACK — and for a batch, what came back
+  // is a report, not an object that happens to have three keys.
   runResultLabel.textContent = runResultKind
     || `${root.type}${container ? ` ${fmtNumber(root.childCount)}` : ''}`;
 }
@@ -7013,7 +8489,9 @@ async function paintResultLabel(): Promise<void> {
 // Hand the result to its own worker and read it back as a document. The guard
 // compares the channel it started with: leaving run mode terminates that worker,
 // and a result that arrives afterwards belongs to a pane that is gone.
-async function showResultDocument(text: string): Promise<void> {
+// `keepFace` loads it behind the sheet — a run pressed on the sheet keeps the
+// sheet up, with the result one `open result` away.
+async function showResultDocument(text: string, opts: { keepFace?: boolean } = {}): Promise<void> {
   const channel = runResultChannel;
   const res = await resultCall<ParseOk | ParseErr>({ type: 'parse', text, expandRows: fitRows(runViewport) });
   if (!res || channel !== runResultChannel) return;
@@ -7028,11 +8506,11 @@ async function showResultDocument(text: string): Promise<void> {
   runResultText = text;
   runStaleWanted = false;
   runStaleBadge.hidden = true;
-  // A finished run is what the column is for: it takes the result face, so the
-  // library steps aside for the answer it was pressed for.
-  setRunFace('result');
-  runEmpty.hidden = true;
-  runViewport.hidden = false;
+  if (!opts.keepFace) setRunFace('result');
+  if (runFace === 'result') {
+    runEmpty.hidden = true;
+    runViewport.hidden = false;
+  }
   for (const b of [runCopyBtn, runDownloadBtn, runOpenBtn]) b.disabled = false;
   resultTree.resetSelection();
   resultTree.setTotal(res.totalRows);
@@ -7040,7 +8518,7 @@ async function showResultDocument(text: string): Promise<void> {
   await paintResultLabel();
 }
 
-async function renderRunResult(res: RunResult): Promise<void> {
+async function renderRunResult(res: RunResult, keepFace = false): Promise<void> {
   runConsole.hidden = res.logs.length === 0;
   runConsole.open = false;
   runConsoleBody.textContent = res.logs.join('\n');
@@ -7054,18 +8532,19 @@ async function renderRunResult(res: RunResult): Promise<void> {
   }
   runErrorEl.hidden = true;
   setRunStatus(`ran in ${res.ms} ms · ${fmtBytes(res.resultText.length)}`);
-  await showResultDocument(res.resultText);
+  await showResultDocument(res.resultText, { keepFace });
 }
 
 async function runScript(): Promise<void> {
   if (runInFlight) return;
+  const keepFace = runKeepFace;
   const code = runEditor?.getDoc().trim() ?? '';
   if (!code) {
-    setRunStatus('write an expression, or statements ending in a `return`');
+    pbSay('write an expression, or statements ending in a `return`');
     return;
   }
   if (!currentText) {
-    setRunStatus('open a document first');
+    pbSay('open a document first');
     return;
   }
   // A run outlives the document it was started on if the user opens another
@@ -7075,24 +8554,46 @@ async function runScript(): Promise<void> {
   // The id is taken NOW: what the run reads belongs to the function that
   // started it, not whichever one is loaded by the time the worker answers.
   const runId = runLoadedId;
+  // A draft that has drifted from its record is not that function: what it
+  // returns is not that row's outcome.
+  const rowId = runId !== null && !runIsDirty() ? runId : null;
   // Tracing costs a Proxy trap on every property read, so it is asked for once:
   // on the first run of a saved function, or the first after its code changed
   // (saving new code clears what the old code was seen to read).
   const trace = runId !== null && runLoadedReads === undefined;
   runInFlight = true;
+  if (rowId) {
+    pbFnLive.add(rowId);
+    paintRow(rowId);
+  }
   paintRunHead();
   runErrorEl.hidden = true;
   // One script answers for itself, so the label goes back to describing the
   // value rather than the press that made it.
   runResultKind = '';
-  runBatchEl.hidden = true;
   setRunStatus('running…');
-  const res = await executeInSandbox(currentText, code, trace, runNumberMode);
+  const numberMode = runNumberMode;
+  const res = await executeInSandbox(currentText, code, trace, numberMode);
   runInFlight = false;
+  runLastRanCode = code;
+  if (rowId) pbFnLive.delete(rowId);
   paintRunHead();
-  if (documentRevision !== currentDocumentRevision) return;
+  if (documentRevision !== currentDocumentRevision) {
+    if (rowId) paintRow(rowId);
+    return;
+  }
   if (res.ok && res.reads && runId) await learnReads(runId, res.reads);
-  await renderRunResult(res);
+  const run: FunctionRun = res.ok
+    ? { ok: true, ms: res.ms, at: Date.now(), shape: res.shape, bytes: res.resultText.length, logs: res.logs, batch: false }
+    : { ok: false, ms: 0, at: Date.now(), error: res.error, logs: res.logs, batch: false };
+  runDraftRun = { code, numberMode, revision: documentRevision, run };
+  if (rowId) functionRuns.set(rowId, run);
+  await renderRunResult(res, keepFace);
+  if (res.ok) runResultFrom = { kind: 'function', id: rowId };
+  if (rowId) {
+    paintRow(rowId);
+    if (activePane === 'run') paintHeads(pbCheckRows.querySelectorAll('.pb-item').length, pbFnRows.querySelectorAll('.pb-item').length);
+  }
 }
 
 // What the run just taught us about the function, kept on its record. Guarded
@@ -7102,7 +8603,7 @@ async function learnReads(id: string, reads: string[]): Promise<void> {
   await store.updateScript(id, { reads });
   if (runLoadedId !== id) return;
   runLoadedReads = reads;
-  void renderLibrary();
+  void renderSheet();
 }
 
 // ---------- a batch: several functions, one document, one report ----------
@@ -7111,16 +8612,17 @@ async function learnReads(id: string, reads: string[]): Promise<void> {
 // keeps the result face working unchanged — it is a document like any other, so
 // it scrolls, downloads and opens as its own document, and that object IS the
 // day's report. A function that fails keeps its key with a `null` beside it, so
-// the report has the same shape tomorrow as today; the reasons are said here
-// instead, because a batch is not a failure just because one of its parts was.
+// the report has the same shape tomorrow as today; the reason is said on its
+// own row instead, because a batch is not a failure just because one of its
+// parts was.
 async function runPickedScripts(): Promise<void> {
   if (runInFlight) return;
   if (!currentText) {
-    setRunStatus('open a document first');
+    pbSay('open a document first');
     return;
   }
   const all = await store.listScripts();
-  const picked = all.filter((s) => runPicked.has(s.id));
+  const picked = sortItems(all.filter((s) => runPicked.has(s.id)));
   if (picked.length === 0) return;
 
   const documentRevision = currentDocumentRevision;
@@ -7128,11 +8630,10 @@ async function runPickedScripts(): Promise<void> {
   // per-function cost is the same, and asking twice would need two passes.
   const trace = picked.some((s) => s.reads === undefined);
   runInFlight = true;
-  runPickedBtn.disabled = true;
+  pbFunctionsRunning = true;
+  for (const s of picked) pbFnLive.add(s.id);
+  paintSheet();
   paintRunHead();
-  runErrorEl.hidden = true;
-  runBatchEl.hidden = true;
-  setRunStatus(`running ${fmtNumber(picked.length)}…`);
 
   const res = await executeInSandbox(
     currentText,
@@ -7140,46 +8641,45 @@ async function runPickedScripts(): Promise<void> {
     trace,
   );
   runInFlight = false;
-  runPickedBtn.disabled = false;
+  pbFunctionsRunning = false;
+  pbFnLive.clear();
   paintRunHead();
-  if (documentRevision !== currentDocumentRevision) return;
+  if (documentRevision !== currentDocumentRevision) {
+    paintSheet();
+    return;
+  }
 
+  const at = Date.now();
   if (!res.ok) {
     // Only an unreadable document gets here — every script-level failure is an
-    // entry, not the batch's verdict.
-    clearRunResult(true);
-    runErrorEl.textContent = `✗ ${res.error}`;
-    runErrorEl.hidden = false;
-    setRunStatus('');
+    // entry, not the batch's verdict. Each row says so.
+    for (const s of picked) functionRuns.set(s.id, { ok: false, ms: 0, at, error: res.error, logs: [], batch: true });
+    pbFnBatch = { failed: picked.length, total: picked.length, at };
+    paintSheet();
     return;
   }
 
   const byName = new Map(picked.map((s) => [s.name, s.id]));
+  // A batch's console lines carry the function's name; each row keeps its own.
+  const logsOf = (name: string): string[] => res.logs.filter((line) => (
+    line.startsWith(`${name}: `) || line.startsWith(`${name} warn: `) || line.startsWith(`${name} error: `)
+  ));
   for (const entry of res.entries) {
     const id = byName.get(entry.name);
-    if (entry.reads && id) await learnReads(id, entry.reads);
+    if (!id) continue;
+    if (entry.reads) await learnReads(id, entry.reads);
+    functionRuns.set(id, entry.ok
+      ? { ok: true, ms: entry.ms, at, shape: entry.shape, logs: logsOf(entry.name), batch: true }
+      : { ok: false, ms: entry.ms, at, error: entry.error, logs: logsOf(entry.name), batch: true });
   }
-
-  const failed = res.entries.filter((e) => !e.ok);
-  runBatchEl.hidden = failed.length === 0;
-  runBatchEl.textContent = failed.length === 1
-    ? `${failed[0].name} failed · ${failed[0].error}`
-    : `${fmtNumber(failed.length)} of ${fmtNumber(res.entries.length)} failed · ${failed.map((f) => f.name).join(', ')}`;
-  runBatchEl.title = failed.map((f) => `${f.name}: ${f.error}`).join('\n');
-
-  runConsole.hidden = res.logs.length === 0;
-  runConsole.open = false;
-  runConsoleBody.textContent = res.logs.join('\n');
-  runErrorEl.hidden = true;
-  const ran = res.entries.length - failed.length;
-  setRunStatus(`ran ${fmtNumber(ran)} of ${fmtNumber(res.entries.length)} in ${res.ms} ms · ${fmtBytes(res.resultText.length)}`);
-  runResultKind = `report · ${fmtNumber(res.entries.length)} functions`;
-  await showResultDocument(res.resultText);
+  const failed = res.entries.filter((e) => !e.ok).length;
+  pbFnBatch = { failed, total: res.entries.length, at };
+  runResultKind = `report · ${plural(res.entries.length, 'function', 'functions')}`;
+  pbReport = { text: res.resultText, kind: runResultKind };
+  await showResultDocument(res.resultText, { keepFace: true });
+  runResultFrom = { kind: 'report' };
+  paintSheet();
 }
-
-runPickedBtn.addEventListener('click', () => void runPickedScripts());
-
-runExecBtn.addEventListener('click', () => void runScript());
 
 runCopyBtn.addEventListener('click', async () => {
   await copyText(runResultText);
@@ -7200,6 +8700,27 @@ runOpenBtn.addEventListener('click', () => {
   void openText(runResultText, `${docTitle()} · result.json`, null, null, null, true);
 });
 
+// ⌘⇧↵ runs the playbook from anywhere in the view — a text field and both
+// editors included — so it is caught on the way DOWN, before any field's own
+// Enter handler can read it as its own. Off the result face it comes back to
+// the sheet first, where the answers will land.
+window.addEventListener('keydown', (e) => {
+  if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key !== 'Enter') return;
+  if (viewer.hidden || activePane !== 'run' || document.querySelector('dialog[open]')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void runAll();
+}, true);
+
+/** The palette's way in: the view first, then the act. */
+async function playbookCommand(act: 'run-all' | 'new-check' | 'new-function'): Promise<void> {
+  if (activePane !== 'run') await openRun();
+  else if (runFace === 'result') setRunFace('functions');
+  if (act === 'run-all') await runAll();
+  else if (act === 'new-check') pbNewCheckBtn.click();
+  else runNewBtn.click();
+}
+
 // ---------- keyboard ----------
 
 const keysDialog = $<HTMLDialogElement>('#keys-dialog');
@@ -7218,7 +8739,15 @@ function paletteCommands(): PaletteCommand[] {
     add('view', 'tree', click('#mode-switch button[data-mode="tree"]'), { keywords: 'view mode' });
     add('view', 'code', click('#mode-switch button[data-mode="code"]'), { keywords: 'view mode text editor raw' });
     add('view', 'split — tree and code side by side', click('#mode-switch button[data-mode="split"]'), { keywords: 'view mode' });
-    add('view', 'functions — run JavaScript over this document', click('#mode-switch button[data-mode="run"]'), { keywords: 'script run code' });
+    add('view', 'playbook — run checks and functions over this document', click('#mode-switch button[data-mode="run"]'), {
+      keywords: 'functions script run code checks test verify',
+    });
+    add('playbook', 'run all checks and ticked functions', () => void playbookCommand('run-all'), {
+      keys: modKey('⇧↵'),
+      keywords: 'verify test checks functions batch',
+    });
+    add('playbook', 'new check', () => void playbookCommand('new-check'), { keywords: 'test verify assert query' });
+    add('playbook', 'new function', () => void playbookCommand('new-function'), { keywords: 'script javascript code' });
     add('document', 'search keys and values', () => searchBox.focus(), { keys: '/', keywords: 'find filter' });
     add('document', 'query', click('#ask-btn'), { keywords: 'jsonpath ask question english' });
     add('document', 'compare with another document', click('#compare-btn'), { keywords: 'diff baseline semantic' });
@@ -7285,14 +8814,19 @@ async function paletteFind(query: string): Promise<PaletteCommand[]> {
   }));
 }
 
-async function revealInTree(path: (string | number)[]): Promise<void> {
+// Expand to a path, scroll to it and select it, and say which row it landed
+// on (-1 when the document no longer has it). In the playbook view the source
+// pane becomes the tree in place — showPane would leave the view, which is how
+// a reveal from a code source once threw the sheet away.
+async function revealInTree(path: (string | number)[]): Promise<number> {
   const r = await call<{ rowIndex: number; totalRows: number }>({ type: 'revealPath', path });
-  if (treePane.hidden) showPane('tree');
+  if (!(await showRunTree()) && treePane.hidden) showPane('tree');
   tree.setTotal(r.totalRows);
   if (r.rowIndex >= 0) {
     tree.scrollToIndex(r.rowIndex);
     tree.select(r.rowIndex, { scroll: false });
   }
+  return r.rowIndex;
 }
 
 const palette = new CommandPalette(

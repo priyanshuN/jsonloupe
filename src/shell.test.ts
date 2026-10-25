@@ -261,11 +261,69 @@ describe('the responsive workbench shell', () => {
     expect(mobile).toContain('data-mobile-run="source"');
     expect(mobile).toContain('data-mobile-run="workspace"');
     expect(html).toContain('id="run-src-switch"');
-    expect(html).toContain('id="run-face-switch"');
+    // The playbook column has no face switch any more: a result opens from a
+    // row and goes back with one press, and run all is the column's one accent.
+    expect(html).toContain('id="pb-back"');
+    expect(html).toContain('id="pb-run-all"');
     const numbers = element(html, 'run-number-switch');
     expect(numbers).toContain('aria-label="Numbers handed to this function"');
     expect(numbers).toContain('data-number-mode="js"');
     expect(numbers).toContain('data-number-mode="exact-text"');
+  });
+});
+
+describe('the playbook column', () => {
+  const pane = withoutComments(element(html, 'run-pane'));
+  /** The opening tag carrying `id` — for a void element, the whole of it. */
+  const opening = (id: string): string => {
+    const at = pane.indexOf(`id="${id}"`);
+    expect(at, `#${id} is missing from the playbook column`).toBeGreaterThan(-1);
+    const open = pane.lastIndexOf('<', at);
+    return pane.slice(open, pane.indexOf('>', at) + 1);
+  };
+
+  it('has one accent in its markup, and it is run all (rule 6)', () => {
+    // Save and the dock's run start quiet; paintPlaybookAccent hands the one
+    // accent to whichever of them finishes the work in hand.
+    const accent = pane.match(/<button[^>]*class="[^"]*\bprimary\b[^>]*>/g) ?? [];
+    expect(accent).toHaveLength(1);
+    expect(accent[0]).toContain('id="pb-run-all"');
+    expect(opening('run-save')).toContain('btn-quiet');
+    expect(opening('run-exec')).toContain('btn-quiet');
+  });
+
+  it('names every control it adds, and says what run all runs', () => {
+    expect(opening('pb-back')).toContain('aria-label="Back to the playbook"');
+    expect(opening('pb-new-check')).toContain('aria-label="New check"');
+    expect(opening('pb-run-all')).toContain('aria-keyshortcuts="Meta+Shift+Enter Control+Shift+Enter"');
+    expect(opening('run-lib-search')).toContain('aria-label="Find a check or function"');
+    expect(opening('pb-tick-all')).toContain('aria-label="Include every function in run all"');
+    expect(opening('pb-check-expectation')).toContain('aria-label="Pass condition"');
+  });
+
+  it('labels each section by its own head, and announces only the head status', () => {
+    expect(opening('pb-checks')).toContain('aria-labelledby="pb-checks-label"');
+    expect(opening('pb-fns')).toContain('aria-labelledby="pb-fns-label"');
+    expect(opening('pb-checks-status')).toContain('aria-live="polite"');
+    expect(opening('pb-fns-status')).toContain('aria-live="polite"');
+  });
+
+  it('keeps export in place when there is nothing to export, disabled rather than hidden', () => {
+    const exp = opening('run-export');
+    expect(exp).toContain('disabled');
+    expect(exp).not.toMatch(/\shidden[\s>]/);
+  });
+
+  it('offers the same pass conditions as the Query editor, in the same order', () => {
+    const values = (id: string) => [...element(html, id).matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]);
+    expect(values('pb-check-expectation')).toEqual(values('check-expectation'));
+    expect(values('check-expectation')).toEqual(['no-matches', 'at-least-one', 'exact-count', 'at-most', 'at-least', 'between']);
+  });
+
+  it('drops the controls the old functions view had', () => {
+    for (const id of ['run-name', 'run-edit', 'run-batch', 'run-face-switch', 'run-lib-count', 'run-picked']) {
+      expect(html, `#${id} should be gone`).not.toContain(`id="${id}"`);
+    }
   });
 });
 

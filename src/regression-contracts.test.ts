@@ -526,8 +526,13 @@ describe('interactive UI regression contracts', () => {
     // A capped count reaches the verdict as the lower bound it is.
     const preview = mainSource.match(/function paintCheckPreview\([\s\S]*?\n\}/)?.[0] ?? '';
     expect(preview).toContain('evaluateCheck(expectation, observed, { exact: counted?.exact, unit: counted?.unit })');
-    const commit = mainSource.match(/function commitQueryResult\([\s\S]*?\n\}/)?.[0] ?? '';
-    expect(commit).toContain('judgeCheck(runningCheck, { ok: true, ...counted, evidence: [] }, 0)');
+    // A chip's verdict is not judged from the panel's page of hits: it comes
+    // from the same measurement run all makes, so the two never disagree, and
+    // the chip is only bumped once it has actually answered.
+    expect(mainSource).not.toContain('runningCheck');
+    const chips = mainSource.match(/askChecks\.addEventListener\('click'[\s\S]*?\n\}\);/)?.[0] ?? '';
+    expect(chips).toContain('const outcome = await runOneCheck(check);');
+    expect(chips.indexOf('runOneCheck(check)')).toBeLessThan(chips.indexOf('store.touchSaved(check.id)'));
   });
 
   it('exports a playbook\'s checks by name, query and expectation alone, at the lowest version that holds them', () => {
@@ -726,5 +731,66 @@ describe('document identity regression contracts', () => {
     expect(held).toBeGreaterThan(-1);
     expect(importer.indexOf('await openText(')).toBeGreaterThan(held);
     expect(importer).toMatch(/if \(pending\) \{\s*await openText\(\s*pending\.payload\.text,/);
+  });
+});
+
+describe('the playbook view', () => {
+  const fn = (re: RegExp): string => mainSource.match(re)?.[0] ?? '';
+
+  it('hands its one accent to Query, then Apply, then the dock, then run all', () => {
+    const accent = fn(/function paintPlaybookAccent\([\s\S]*?\n\}/);
+    const order = ['if (!askPanel.hidden)', "runSource === 'code' && !codeApplyBtn.disabled", "pbDock === 'function'", "pbDock === 'check'", 'owner = pbRunAllBtn'];
+    const at = order.map((text) => accent.indexOf(text));
+    expect(at.every((i) => i > -1), 'every owner is decided here').toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    // A swap between two tiers, never a third.
+    expect(accent).toContain("button.classList.toggle('primary', button === owner);");
+    expect(accent).toContain("button.classList.toggle('btn-quiet', button !== owner);");
+  });
+
+  it('reveals evidence and Query hits beside the sheet instead of leaving the view', () => {
+    // showPane('tree') runs exitRunMode, so a reveal from a code source used to
+    // throw the playbook away. The run branch switches the source in place.
+    const runTree = fn(/async function showRunTree\([\s\S]*?\n\}/);
+    expect(runTree).toContain("if (activePane !== 'run') return false;");
+    expect(runTree).not.toContain('showPane(');
+    const reveal = fn(/async function revealInTree\([\s\S]*?\n\}/);
+    expect(reveal).toContain("if (!(await showRunTree()) && treePane.hidden) showPane('tree');");
+    const hit = fn(/askResult\.addEventListener\('click', async \(e\) => \{[\s\S]*?\n\}\);/);
+    expect(hit).toContain("if (!(await showRunTree())) showPane('tree');");
+  });
+
+  it('renders the sheet only while it is on screen, and empties it on the way out', () => {
+    // A hidden sheet still holding check names makes every getByText for a
+    // check name find two elements: the Query chip and the hidden row.
+    const render = fn(/async function renderSheet\([\s\S]*?\n\}/);
+    expect(render.split('\n')[1].trim()).toBe("if (activePane !== 'run') return;");
+    const exit = fn(/function exitRunMode\([\s\S]*?\n\}/);
+    expect(exit).toContain('pbCheckRows.replaceChildren();');
+    expect(exit).toContain('pbFnRows.replaceChildren();');
+  });
+
+  it('marks verdicts stale on an edit, and forgets the last document on an open', () => {
+    expect(fn(/function markCurrentContentEdited\([\s\S]*?\n\}/)).toContain('markPlaybookStale();');
+    const open = fn(/async function openText\([\s\S]*?\n\}/);
+    const cleared = open.indexOf('checkRuns.clear();');
+    expect(cleared).toBeGreaterThan(open.indexOf('pendingInitialSave = null;'));
+    expect(open.indexOf('void hydrateCheckRuns();')).toBeGreaterThan(cleared);
+  });
+
+  it('runs checks without saving them, and drops a run the document moved under', () => {
+    for (const name of ['runAll', 'runAllChecks', 'runOneCheck', 'runChecksNow', 'keepCheckRuns']) {
+      const body = fn(new RegExp(`async function ${name}\\([\\s\\S]*?\\n\\}`));
+      expect(body, `${name} exists`).not.toBe('');
+      // touchSaved bumps updatedAt and uses, which reorders and culls.
+      expect(body, `${name} never bumps the library`).not.toContain('touchSaved');
+    }
+    const now = fn(/async function runChecksNow\([\s\S]*?\n\}/);
+    expect(now).toContain('keepGoing: () => documentToken === currentDocumentToken &&');
+    expect(now).toContain('if (!report.aborted) await keepCheckRuns(');
+  });
+
+  it('labels a one-function report in the singular', () => {
+    expect(mainSource).toContain("runResultKind = `report · ${plural(res.entries.length, 'function', 'functions')}`;");
   });
 });
