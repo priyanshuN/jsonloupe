@@ -7,7 +7,10 @@ import {
   checkHeadTitle,
   countText,
   errorKind,
+  expectationFromFields,
   expectationShort,
+  expectationTakesCount,
+  fieldsFromExpectation,
   figure,
   functionHeadParts,
   functionOutcome,
@@ -251,6 +254,59 @@ describe('a function row outcome', () => {
     expect(errorKind('the script sees strict JSON in exact-text mode, and this document is not: x')).toBe('document not strict JSON');
     expect(errorKind('something else')).toBe('failed');
     expect(functionOutcome({ ok: false }).text).toBe('✗ failed');
+  });
+});
+
+describe('the pass-condition fields', () => {
+  it('needs no count for the two open kinds, and one for the rest', () => {
+    expect(expectationTakesCount('no-matches')).toBe(false);
+    expect(expectationTakesCount('at-least-one')).toBe(false);
+    for (const type of ['exact-count', 'at-most', 'at-least', 'between']) expect(expectationTakesCount(type)).toBe(true);
+    expect(expectationFromFields('no-matches', 'junk')).toEqual({ ok: true, expectation: { type: 'no-matches' } });
+    expect(expectationFromFields('at-least-one', '')).toEqual({ ok: true, expectation: { type: 'at-least-one' } });
+  });
+
+  it('reads a count strictly and never coerces one to 0', () => {
+    expect(expectationFromFields('exact-count', '12')).toEqual({ ok: true, expectation: { type: 'exact-count', count: 12 } });
+    expect(expectationFromFields('at-most', ' 0 ')).toEqual({ ok: true, expectation: { type: 'at-most', count: 0 } });
+    for (const raw of ['', '1.5', '-1', '1e3', 'abc', '0x10']) {
+      expect(expectationFromFields('exact-count', raw)).toEqual({ ok: false, error: 'Enter a whole number of 0 or more.', field: 'count' });
+    }
+    // An int64 is refused, never rounded to its neighbour.
+    expect(expectationFromFields('exact-count', '9007199254740993'))
+      .toEqual({ ok: false, error: 'That number is too large to count exactly.', field: 'count' });
+  });
+
+  it('asks at least for 1 or more, since at least 0 can never fail', () => {
+    expect(expectationFromFields('at-least', '0')).toEqual({ ok: false, error: 'Enter a whole number of 1 or more.', field: 'count' });
+    expect(expectationFromFields('at-least', '1000')).toEqual({ ok: true, expectation: { type: 'at-least', count: 1000 } });
+  });
+
+  it('checks both ends of between, in order', () => {
+    expect(expectationFromFields('between', '3', '8')).toEqual({ ok: true, expectation: { type: 'between', min: 3, max: 8 } });
+    expect(expectationFromFields('between', '3', '3')).toEqual({ ok: true, expectation: { type: 'between', min: 3, max: 3 } });
+    expect(expectationFromFields('between', '8', '3'))
+      .toEqual({ ok: false, error: 'The highest count must be at least the lowest.', field: 'max' });
+    expect(expectationFromFields('between', '3', '')).toEqual({ ok: false, error: 'Enter a whole number of 0 or more.', field: 'max' });
+    expect(expectationFromFields('between', '3', '99999999999999999'))
+      .toEqual({ ok: false, error: 'That number is too large to count exactly.', field: 'max' });
+    expect(expectationFromFields('between', 'x', '3').ok).toBe(false);
+    expect(expectationFromFields('sometimes', '3')).toEqual({ ok: false, error: 'Pick a pass condition.', field: 'count' });
+  });
+
+  it('writes an expectation back into the fields it came from', () => {
+    const kinds: CheckExpectation[] = [
+      { type: 'no-matches' },
+      { type: 'at-least-one' },
+      { type: 'exact-count', count: 4 },
+      { type: 'at-most', count: 0 },
+      { type: 'at-least', count: 7 },
+      { type: 'between', min: 2, max: 9 },
+    ];
+    for (const expectation of kinds) {
+      const fields = fieldsFromExpectation(expectation);
+      expect(expectationFromFields(fields.type, fields.count, fields.max)).toEqual({ ok: true, expectation });
+    }
   });
 });
 

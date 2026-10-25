@@ -275,6 +275,68 @@ export function functionOutcome(run: { ok: boolean; shape?: string; error?: stri
   return { text: shape, tone: 'value', ink: 'number' };
 }
 
+// ---------- the pass-condition fields ----------
+
+/** The kinds that take a count field; `between` also takes its upper end. */
+export function expectationTakesCount(type: string): boolean {
+  return type === 'exact-count' || type === 'at-most' || type === 'at-least' || type === 'between';
+}
+
+export type ExpectationFields =
+  | { ok: true; expectation: CheckExpectation }
+  | { ok: false; error: string; field: 'count' | 'max' };
+
+// A count field's text, read strictly: digits only, and a number JavaScript
+// holds exactly. `1.5`, `-1`, `1e3` and an empty box are refused rather than
+// rounded or read as 0 — the old editor turned every one of them into "exactly
+// 0" without a word.
+function readCount(raw: string): number | 'bad' | 'big' {
+  const text = raw.trim();
+  if (!/^\d+$/.test(text)) return 'bad';
+  const n = Number(text);
+  return Number.isSafeInteger(n) ? n : 'big';
+}
+
+const TOO_LARGE = 'That number is too large to count exactly.';
+
+/**
+ * The expectation a pass-condition picker and its count fields say, or why
+ * they say none. Shared by the playbook's dock and Query's check editor, so the
+ * two refuse the same things in the same words.
+ */
+export function expectationFromFields(type: string, countRaw: string, maxRaw = ''): ExpectationFields {
+  if (type === 'no-matches' || type === 'at-least-one') return { ok: true, expectation: { type } };
+  const count = readCount(countRaw);
+  const least = type === 'at-least' ? 1 : 0;
+  if (count === 'big') return { ok: false, error: TOO_LARGE, field: 'count' };
+  if (count === 'bad' || count < least) {
+    return { ok: false, error: `Enter a whole number of ${least} or more.`, field: 'count' };
+  }
+  if (type === 'exact-count' || type === 'at-most' || type === 'at-least') {
+    return { ok: true, expectation: { type, count } };
+  }
+  if (type !== 'between') return { ok: false, error: 'Pick a pass condition.', field: 'count' };
+  const max = readCount(maxRaw);
+  if (max === 'big') return { ok: false, error: TOO_LARGE, field: 'max' };
+  if (max === 'bad') return { ok: false, error: 'Enter a whole number of 0 or more.', field: 'max' };
+  if (max < count) return { ok: false, error: 'The highest count must be at least the lowest.', field: 'max' };
+  return { ok: true, expectation: { type: 'between', min: count, max } };
+}
+
+/** The fields' text for an expectation — the inverse of expectationFromFields. */
+export function fieldsFromExpectation(expectation: CheckExpectation): { type: string; count: string; max: string } {
+  switch (expectation.type) {
+    case 'between':
+      return { type: 'between', count: String(expectation.min), max: String(expectation.max) };
+    case 'exact-count':
+    case 'at-most':
+    case 'at-least':
+      return { type: expectation.type, count: String(expectation.count), max: '' };
+    default:
+      return { type: expectation.type, count: '', max: '' };
+  }
+}
+
 // ---------- the check panel ----------
 
 /** The line beside "matched": how much of what matched the panel is showing. */
