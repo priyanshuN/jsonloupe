@@ -881,7 +881,8 @@ SPDX-License-Identifier: MIT -->
                 <label class="field pb-query-field">
                   <span class="field-prefix">query</span>
                   <input id="pb-check-query" type="text" spellcheck="false"
-                    placeholder="$.orders[?(@.status == 'FAILED')]" aria-label="Query this check counts" />
+                    placeholder="$.orders[?(@.status == 'FAILED')]" aria-label="Query this check counts"
+                    aria-describedby="pb-check-error" />
                 </label>
                 <select id="pb-check-expectation" aria-label="Pass condition">
                   <option value="no-matches">pass when no matches are found</option>
@@ -891,13 +892,15 @@ SPDX-License-Identifier: MIT -->
                   <option value="at-least">pass when at least this many matches are found</option>
                   <option value="between">pass when the count is between these two</option>
                 </select>
-                <input id="pb-check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count" hidden />
-                <input id="pb-check-count-max" type="number" min="0" step="1" value="0" aria-label="Highest passing count" hidden />
+                <input id="pb-check-count" type="number" min="0" step="1" value="0" aria-label="Expected match count"
+                  aria-describedby="pb-check-preview" hidden />
+                <input id="pb-check-count-max" type="number" min="0" step="1" value="0" aria-label="Highest passing count"
+                  aria-describedby="pb-check-preview" hidden />
               </div>
               <span id="pb-check-preview" aria-live="polite"></span>
               <!-- Rule 15 tier 3: a query this check cannot run is the one
                    thing to fix before anything else here works. -->
-              <div id="pb-check-error" class="ask-error" hidden></div>
+              <div id="pb-check-error" class="ask-error" aria-live="polite" hidden></div>
             </div>
             <div id="pb-fn-body" hidden>
               <!-- What this function was seen to read, against what the open
@@ -923,7 +926,9 @@ SPDX-License-Identifier: MIT -->
                 <pre id="run-console-body"></pre>
               </details>
             </div>
-            <span id="run-status" hidden></span>
+            <!-- A live region, always in the page: a guard's sentence is the
+                 only answer a press gets, so it has to be announced. -->
+            <span id="run-status" role="status"></span>
           </div>
           <!-- THE SHEET: a reading surface, so canvas, and no bar of its own —
                each section's head is a sticky column header (rule 11). Rows

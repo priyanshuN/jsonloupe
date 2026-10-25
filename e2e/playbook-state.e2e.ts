@@ -324,6 +324,24 @@ test.describe('functions and the result face', () => {
   });
 });
 
+test('the dock says why a press did nothing, where assistive technology hears it', async ({ page }) => {
+  await openSample(page);
+  await openPlaybook(page);
+  const status = page.locator('#run-status');
+  await expect(status).toHaveAttribute('role', 'status');
+  await page.getByRole('button', { name: 'New check' }).click();
+  const query = page.locator('#pb-check-query');
+  await query.fill('$.orders[*].total | sum');
+  await expect(query).toHaveAttribute('aria-invalid', '');
+  await expect(query).toHaveAccessibleDescription(/gives one value, not a count/);
+  await query.fill('$.orders[*]');
+  await expect(query).toHaveAccessibleDescription('');
+  // A dirty dock's first cancel only speaks.
+  await page.locator('#pb-cancel').click();
+  await expect(page.locator('#run-producer')).toBeVisible();
+  await expect(status).toContainText('press cancel again to discard them');
+});
+
 test('a function batch outlived by a document switch opens no row on the next document', async ({ page }) => {
   await page.goto('/');
   await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');

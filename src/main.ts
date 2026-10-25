@@ -6484,8 +6484,11 @@ function saveLastScript(code: string): void {
   try { localStorage.setItem(RUN_SCRIPT_KEY, code); } catch { /* private mode */ }
 }
 
+// A live region (role=status), so it stays in the page and only its words
+// change: one shown and filled in the same moment is not reliably announced,
+// and a guard sentence is the press's only answer. Empty, CSS keeps it out of
+// the dock's layout.
 function setRunStatus(msg: string): void {
-  runStatus.hidden = !msg;
   runStatus.textContent = msg;
 }
 
@@ -7284,6 +7287,8 @@ function paintCheckDock(): void {
 
   pbCheckPreview.classList.remove('pass', 'fail', 'inconclusive', 'invalid', 'dim');
   pbCheckError.hidden = true;
+  // It describes the query field (aria-describedby), hidden or not.
+  pbCheckError.textContent = '';
   pbCheckPreview.hidden = false;
   const say = (text: string, tone: string): void => {
     pbCheckPreview.textContent = text;

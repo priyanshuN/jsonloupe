@@ -4072,6 +4072,15 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   font-size: var(--fs-body);
   font-style: italic;
 }
+/* Empty, it stays in the accessibility tree — a live region has to exist
+   before its words change — but out of the dock's column and its gap. */
+#run-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 
 /* THE DOCK — present only while a check or a function is being written.
    Canvas, not chrome: its preview carries verdict ink, and rule 15 keeps that
