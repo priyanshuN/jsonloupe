@@ -163,6 +163,49 @@ SPDX-License-Identifier: MIT -->
       </div>
     </section>
 
+    <!-- The playbook's verdict row and head status, built the way main.ts
+         builds them (renderCheckItem, paintHeadStatus). The point to stare at
+         is rule 15's canvas clause: hover a row and only its button tints —
+         the mark is a lead cell of its own, so a ✕ never sits on a hover
+         ground. overflow: hidden keeps the sticky head inside this block. -->
+    <section>
+      <h2>verdict rows — rule 15, the mark stays on canvas</h2>
+      <div class="sg-row" style="display:block;padding:0;overflow:hidden">
+        <div class="pb-head">
+          <span class="pb-lead"></span>
+          <span class="pb-label">checks</span>
+          <span class="pb-head-status"><span>4</span><span> · <span class="pb-mark fail">✕</span> 1 failed</span><span> · <span class="pb-mark inconclusive">?</span> 1 inconclusive</span><span> · <span class="pb-mark pass">✓</span> 1 passed</span><span> · <span class="pb-mark not-run">◇</span> 1 not run</span><span class="pb-when"> · just now</span></span>
+        </div>
+        <div class="pb-item">
+          <div class="run-lib-row is-check">
+            <span class="run-lib-mark fail" aria-hidden="true">✕</span>
+            <button class="run-lib-open pb-open" type="button" aria-expanded="false" aria-label="no orders without customerId, check: Fail — 37 matches; expected no matches"><span class="pb-names"><span class="run-lib-name">no orders without customerId</span><span class="pb-first">first: $.orders[1203]</span></span><span class="pb-outcome"><span class="pb-figure">37 matches</span><span class="pb-expected"> · expected none</span></span><span class="pb-caret" aria-hidden="true">▸</span></button>
+          </div>
+        </div>
+        <div class="pb-item">
+          <div class="run-lib-row is-check">
+            <span class="run-lib-mark inconclusive" aria-hidden="true">?</span>
+            <button class="run-lib-open pb-open" type="button" aria-expanded="false" aria-label="one row per customer, check: Inconclusive — at least 1,00,000 distinct values; expected exactly 1,52,300 distinct values"><span class="pb-names"><span class="run-lib-name">one row per customer</span><span class="pb-first">first: $.orders[0]</span></span><span class="pb-outcome"><span class="pb-figure">≥ 1,00,000 values</span><span class="pb-expected"> · expected exactly 1,52,300</span></span><span class="pb-caret" aria-hidden="true">▸</span></button>
+          </div>
+        </div>
+        <div class="pb-item">
+          <div class="run-lib-row is-check">
+            <span class="run-lib-mark pass" aria-hidden="true">✓</span>
+            <button class="run-lib-open pb-open" type="button" aria-expanded="false" aria-label="has orders, check: Pass — 18,204 matches; expected at least one match"><span class="pb-names"><span class="run-lib-name">has orders</span></span><span class="pb-outcome"><span class="pb-figure">18,204 matches</span></span><span class="pb-caret" aria-hidden="true">▸</span></button>
+          </div>
+        </div>
+        <div class="pb-item">
+          <div class="run-lib-row is-check">
+            <span class="run-lib-mark not-run" aria-hidden="true">◇</span>
+            <button class="run-lib-open pb-open" type="button" aria-expanded="false" aria-label="few currencies, check: not run"><span class="pb-names"><span class="run-lib-name">few currencies</span></span><span class="pb-outcome"><span class="pb-pending">not run</span></span><span class="pb-caret" aria-hidden="true">▸</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="sg-row">
+        <span class="sg-note">marks are text, the same five everywhere a check is judged (rule 3): ✓ pass · ✕ fail · ? inconclusive · ✗ could not run · ◇ no verdict yet · the head is canvas, so its marks take their hue and its words keep the line's ink · a row's outcome never takes hue, because the button it sits in hovers</span>
+      </div>
+    </section>
+
     <!-- The one place two controls could compete for rule 6's single accent
          treatment, and the demotion that stops them. -->
     <section>
