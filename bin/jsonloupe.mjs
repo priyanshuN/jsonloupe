@@ -36,6 +36,14 @@ if (args[0] === 'check') {
   process.exit(await run(args));
 }
 if (args[0] === 'serve') args.shift();
+// Nothing below takes a positional argument, so a bare word here is a verb
+// this version does not have. Starting the server for it would open a browser
+// and wait forever — the way a pipeline on an older install would hang on a
+// verb added later — so it is refused instead.
+if (args.length > 0 && !args[0].startsWith('-')) {
+  console.error(`jsonloupe: unknown command \`${args[0]}\` — see jsonloupe --help`);
+  process.exit(1);
+}
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`jsonloupe — a loupe for large JSON, served locally from this package

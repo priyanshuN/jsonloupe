@@ -90,6 +90,19 @@ describe.skipIf(!built)('bin/jsonloupe.mjs check (skipped unless dist-cli/ is bu
     expect(r.out).toContain('exit status:');
   });
 
+  it('refuses a bare word it does not know instead of serving', async () => {
+    // What an older install would have done with `check`: start a server and
+    // wait forever. Any future verb on this version now fails fast instead.
+    const r = await runToExit(['frobnicate', 'x.json']);
+    expect(r.timedOut).toBe(false);
+    expect(r.code).toBe(1);
+    expect(r.err.trim()).toBe('jsonloupe: unknown command `frobnicate` — see jsonloupe --help');
+    expect(r.out).toBe('');
+    const afterServe = await runToExit(['serve', 'stray']);
+    expect(afterServe.code).toBe(1);
+    expect(afterServe.err).toContain('unknown command `stray`');
+  });
+
   it('lists check in the top-level help', async () => {
     const r = await runToExit(['--help']);
     expect(r.code).toBe(0);
