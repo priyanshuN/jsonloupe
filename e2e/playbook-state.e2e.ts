@@ -342,6 +342,18 @@ test('the dock says why a press did nothing, where assistive technology hears it
   await expect(status).toContainText('press cancel again to discard them');
 });
 
+test('+ function says so when this tab cannot load the function editor', async ({ page }) => {
+  // What a deploy that replaced the hashed chunks looks like after the one
+  // reload the app allows itself.
+  await page.addInitScript(() => sessionStorage.setItem('wb-chunk-reload', '1'));
+  await page.route(/run-editor-[\w-]+\.js$/, (route) => route.abort());
+  await openSample(page);
+  await openPlaybook(page);
+  await page.locator('#run-new').click();
+  await expect(page.locator('#toast')).toContainText('reload the page to write or run functions');
+  await expect(page.locator('#run-producer')).toBeHidden();
+});
+
 test('a function batch outlived by a document switch opens no row on the next document', async ({ page }) => {
   await page.goto('/');
   await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');

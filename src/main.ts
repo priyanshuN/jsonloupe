@@ -7387,8 +7387,11 @@ function openCheckDock(check: SavedCheck | null): void {
 }
 
 async function openFunctionDock(rec: SavedScript | null): Promise<void> {
-  await ensureRunEditor();
-  if (!runEditor) return;
+  // The dock is closed here, so its own empty state would say this to no one.
+  if (!(await ensureRunEditor()) || !runEditor) {
+    pbSay(RUN_EDITOR_GONE);
+    return;
+  }
   pbDock = 'function';
   pbCheckId = null;
   setRunStatus('');
@@ -7553,8 +7556,10 @@ async function loadAndRun(id: string): Promise<void> {
   // even though nothing is about to be typed into it. Without this a library
   // press on a tab whose lazy chunk never loaded runs the EMPTY editor and
   // blames the user for not writing an expression.
-  await ensureRunEditor();
-  if (!runEditor) return;
+  if (!(await ensureRunEditor()) || !runEditor) {
+    pbSay(RUN_EDITOR_GONE);
+    return;
+  }
   setRunStatus('');
   adoptScript(rec);
   setAuthoring(false);
@@ -8457,21 +8462,30 @@ function exitRunMode(): void {
   clearRunResult();
 }
 
-async function ensureRunEditor(): Promise<void> {
-  if (runEditor) return;
-  let mod: typeof import('./run-editor');
+/** The sentence for a run editor whose chunk is gone; also what a press that needed it says. */
+const RUN_EDITOR_GONE = 'jsonloupe was updated since this tab loaded — reload the page to write or run functions';
+
+/** Mount the function editor; false when its chunk could not be loaded. */
+async function ensureRunEditor(): Promise<boolean> {
+  if (runEditor) return true;
+  let mod: typeof import('./run-editor') | undefined;
   try {
     mod = await import('./run-editor');
   } catch {
-    // A deploy replaced this tab's hashed chunks — same case ensureEditor
-    // handles for the code view, same fallback.
+    mod = undefined;
+  }
+  // A deploy replaced this tab's hashed chunks — same case ensureEditor
+  // handles for the code view, same fallback. In a build the import does not
+  // even throw: the vite:preloadError handler above prevents its default, so a
+  // missing chunk resolves to nothing, and is caught here as one.
+  if (!mod?.ScriptEditor) {
     runEditorHost.replaceChildren(
       emptyState(
         'jsonloupe was updated since this tab loaded',
         'Reload the page to run scripts.',
       ),
     );
-    return;
+    return false;
   }
   runEditor = await mod.ScriptEditor.create({
     host: runEditorHost,
@@ -8488,6 +8502,7 @@ async function ensureRunEditor(): Promise<void> {
       paintRunHead();
     },
   });
+  return true;
 }
 
 async function loadRunPlaceholder(): Promise<string> {
