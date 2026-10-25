@@ -18,6 +18,7 @@
 //   fn      := count sum avg min max distinct group top bottom pluck
 
 import { isLosslessNumber, LosslessNumber, stringify as llStringify } from 'lossless-json';
+import type { CheckUnit } from './check';
 import {
   canonicalExactNumeric,
   compareExactNumeric,
@@ -796,7 +797,11 @@ function windowIsTruncated(total: number, offset: number, shown: number, complet
   return !complete || offset > 0 || offset + shown < total;
 }
 
-function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOptions): QueryResult {
+// A pipe consumes ONE walk, handed in by its caller, rather than starting its
+// own: that is what lets a check count a piped query and keep its first matched
+// paths in the same pass (measureQuery). Each case iterates `matches` at most
+// once, and the cases that refuse their arguments do so before iterating.
+function applyPipe(matches: Iterable<Match>, pipe: Pipe, options?: QueryOptions): QueryResult {
   const arg = pipe.args[0] ?? [];
   const pick = (m: Match): unknown => (arg.length ? resolveTail(m.value, arg) : m.value);
 
@@ -804,7 +809,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
     case 'count': {
       if (pipe.args.length) return { ok: false, error: 'count does not take a field argument; put the field in the path', pos: 0 };
       let total = 0;
-      for (const _ of walk(root, segs)) total++;
+      for (const _ of matches) total++;
       return { ok: true, kind: 'value', label: 'count', value: total, complete: true };
     }
     case 'sum':
@@ -814,7 +819,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       if (pipe.args.length > 1) return { ok: false, error: `${pipe.fn} accepts at most one @path argument`, pos: 0 };
       let total = 0;
       const stats = new ExactNumericStats();
-      for (const match of walk(root, segs)) {
+      for (const match of matches) {
         total++;
         stats.add(pick(match));
       }
@@ -833,7 +838,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       const cap = Math.max(1, options?.cardinalityCap ?? CARDINALITY_CAP);
       const seen = new Map<string, BucketValue>();
       let complete = true;
-      for (const match of walk(root, segs)) {
+      for (const match of matches) {
         const bucket = bucketOf(pick(match));
         if (seen.has(bucket.id)) continue;
         if (seen.size >= cap) {
@@ -861,7 +866,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       const groups = new Map<string, { label: string; count: number }>();
       const fields = pipe.args.length ? pipe.args : [[]];
       let complete = true;
-      for (const match of walk(root, segs)) {
+      for (const match of matches) {
         const buckets = fields.map((field) => bucketOf(field.length ? resolveTail(match.value, field) : match.value));
         const id = JSON.stringify(buckets.map((bucket) => bucket.id));
         const label = buckets.length === 1
@@ -907,7 +912,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       let total = 0;
       let skipped = 0;
       let sequence = 0;
-      for (const match of walk(root, segs)) {
+      for (const match of matches) {
         const key = fields[0].length ? resolveTail(match.value, fields[0]) : match.value;
         const candidateKind = rankKind(key);
         if (candidateKind === null || (kind !== null && candidateKind !== kind)) {
@@ -948,7 +953,7 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       const detail = window(options, ROW_CAP);
       const rows: unknown[][] = [];
       let total = 0;
-      for (const match of walk(root, segs)) {
+      for (const match of matches) {
         if (total >= detail.offset && rows.length < detail.limit) {
           rows.push(pipe.args.map((field) => resolveTail(match.value, field)));
         }
@@ -966,8 +971,12 @@ function applyPipe(root: unknown, segs: Seg[], pipe: Pipe, options?: QueryOption
       };
     }
     default:
-      return { ok: false, error: `unknown pipe function '${pipe.fn}' (count, sum, avg, min, max, distinct, group, top, bottom, pluck)`, pos: 0 };
+      return unknownPipe(pipe.fn);
   }
+}
+
+function unknownPipe(fn: string): { ok: false; error: string; pos: number } {
+  return { ok: false, error: `unknown pipe function '${fn}' (count, sum, avg, min, max, distinct, group, top, bottom, pluck)`, pos: 0 };
 }
 
 // ---------- entry ----------
@@ -995,7 +1004,7 @@ export function runQuery(root: unknown, src: string, options?: QueryOptions): Qu
   const parsed = parseQuery(src);
   if (!parsed.ok) return parsed;
   const q = parsed.query;
-  if (q.pipe) return applyPipe(root, q.segs, q.pipe, options);
+  if (q.pipe) return applyPipe(walk(root, q.segs), q.pipe, options);
   const detail = window(options, MATCH_CAP);
   const matches: Match[] = [];
   let total = 0;
@@ -1061,7 +1070,7 @@ export function planQueryExport(root: unknown, src: string): QueryExportPlan {
     };
   }
   if (query.pipe.fn === 'group' || query.pipe.fn === 'distinct') {
-    const result = applyPipe(root, query.segs, query.pipe, {
+    const result = applyPipe(walk(root, query.segs), query.pipe, {
       offset: 0,
       limit: CARDINALITY_CAP,
       cardinalityCap: CARDINALITY_CAP,
@@ -1091,4 +1100,118 @@ export function planQueryExport(root: unknown, src: string): QueryExportPlan {
     error: `a ${query.pipe.fn} result is a scalar, not an exportable collection`,
     pos: 0,
   };
+}
+
+// ---------- checks ----------
+//
+// A check asks one question of a query: how many? The answer has to be the
+// same in the browser, the MCP server and the CLI, so it is decided here, in
+// the one module all three run, and not by reading a result shape afterwards.
+
+/** The most matched nodes a check keeps as evidence, whatever a caller asks for. */
+export const MAX_CHECK_EVIDENCE = 100;
+
+/**
+ * What each pipe counts for a check; null means it yields one value, not a
+ * count. `| top` counts the values it could rank, `| pluck` every match, and
+ * `| group` / `| distinct` their buckets. Keys are exactly QUERY_PIPES.
+ */
+export const CHECK_UNIT_OF_PIPE: Readonly<Record<string, CheckUnit | null>> = {
+  count: 'match',
+  pluck: 'match',
+  top: 'match',
+  bottom: 'match',
+  group: 'group',
+  distinct: 'distinct',
+  sum: null,
+  avg: null,
+  min: null,
+  max: null,
+};
+
+export interface CheckMeasureOptions {
+  /** Matched nodes to keep, in document order; clamped to 0–MAX_CHECK_EVIDENCE. */
+  evidence?: number;
+  /** As QueryOptions; past it a group or distinct count is only a lower bound. */
+  cardinalityCap?: number;
+}
+
+export type CheckMeasure =
+  | { ok: true; observed: number; exact: boolean; unit: CheckUnit; evidence: Match[]; note?: string }
+  | { ok: false; error: string; pos: number };
+
+function checkUnitOf(fn: string): CheckUnit | null | undefined {
+  return Object.hasOwn(CHECK_UNIT_OF_PIPE, fn) ? CHECK_UNIT_OF_PIPE[fn] : undefined;
+}
+
+/**
+ * Count what a check's query matches, in one walk that also keeps the first
+ * matched nodes. For `| group` and `| distinct` those are the first matched
+ * NODES, not group keys: a path is what a reader can go and look at.
+ *
+ * `exact` is the engine's `complete`, never `truncated` — a detail window that
+ * was cut says nothing about the count — so only a capped group or distinct
+ * count comes back inexact, and the caller must treat it as a lower bound.
+ */
+export function measureQuery(root: unknown, src: string, options: CheckMeasureOptions = {}): CheckMeasure {
+  const parsed = parseQuery(src);
+  if (!parsed.ok) return parsed;
+  const { segs, pipe } = parsed.query;
+  const keep = Math.min(MAX_CHECK_EVIDENCE, Math.max(0, Math.floor(Number(options.evidence) || 0)));
+  const evidence: Match[] = [];
+  function* tapped(): Generator<Match> {
+    for (const match of walk(root, segs)) {
+      if (evidence.length < keep) evidence.push(match);
+      yield match;
+    }
+  }
+  if (!pipe) {
+    let observed = 0;
+    for (const _ of tapped()) observed++;
+    return { ok: true, observed, exact: true, unit: 'match', evidence };
+  }
+  const unit = checkUnitOf(pipe.fn);
+  if (unit === undefined) return unknownPipe(pipe.fn);
+  if (unit === null) {
+    // A sum of 12 is not "12 matches". Counting a value pipe as a count is the
+    // bug this refusal replaces, so say what a check can count instead.
+    return {
+      ok: false,
+      error: `\`| ${pipe.fn}\` gives one value, not a count — a check counts matches; end the query with \`| count\`, or drop the pipe`,
+      pos: 0,
+    };
+  }
+  const cap = Math.max(1, Number.isFinite(options.cardinalityCap) ? Math.floor(options.cardinalityCap!) : CARDINALITY_CAP);
+  // limit 0 retains no detail rows, so a ranked pipe returns its count without
+  // ever building the window its RANK_CAP guards.
+  const result = applyPipe(tapped(), pipe, { offset: 0, limit: 0, cardinalityCap: cap });
+  if (!result.ok) return result;
+  const observed = result.kind === 'value' ? Number(result.value) : result.total;
+  const exact = result.complete;
+  const note = !exact
+    ? `stopped counting at ${cap.toLocaleString('en-IN')} ${unit === 'group' ? 'groups' : 'distinct values'} (the cardinality cap) — narrow the query`
+    : result.kind === 'rows' ? result.note : undefined;
+  return { ok: true, observed, exact, unit, evidence, ...(note ? { note } : {}) };
+}
+
+/**
+ * The same count, read off a result the query bar already ran — so the Ask
+ * panel's verdict and a check run agree without a second walk. Null when the
+ * result is not a count: an error, a query that does not parse, or a pipe
+ * that yields a value.
+ */
+export function checkCountOf(
+  src: string,
+  result: QueryResult,
+): { observed: number; exact: boolean; unit: CheckUnit } | null {
+  if (!result.ok) return null;
+  const parsed = parseQuery(src);
+  if (!parsed.ok) return null;
+  const { pipe } = parsed.query;
+  const unit = pipe ? checkUnitOf(pipe.fn) : 'match';
+  if (!unit) return null;
+  if (result.kind === 'value') {
+    return typeof result.value === 'number' ? { observed: result.value, exact: result.complete, unit } : null;
+  }
+  return { observed: result.total, exact: result.complete, unit };
 }

@@ -2,7 +2,19 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
 import { LosslessNumber } from 'lossless-json';
-import { planQueryExport, runQuery, scanQuery, type QueryResult } from './query';
+import {
+  CHECK_UNIT_OF_PIPE,
+  checkCountOf,
+  MAX_CHECK_EVIDENCE,
+  measureQuery,
+  parseQuery,
+  planQueryExport,
+  runQuery,
+  scanQuery,
+  type CheckMeasure,
+  type QueryResult,
+} from './query';
+import { QUERY_PIPES } from './query-grammar';
 
 const doc = {
   account: 'acme-logistics',
@@ -500,5 +512,169 @@ describe('scale sanity', () => {
   it('counts beyond the former two-million-match materialization cap', () => {
     const values = new Array(2_000_001).fill(0);
     expect(value(runQuery(values, '$[*] | count'))).toBe(2_000_001);
+  });
+});
+
+describe('measureQuery (what a check counts)', () => {
+  function measured(m: CheckMeasure): Extract<CheckMeasure, { ok: true }> {
+    if (!m.ok) throw new Error(`expected a measurement, got ${m.error}`);
+    return m;
+  }
+
+  it('counts every pipe that yields a count, in its own unit', () => {
+    const counts: [string, number, string][] = [
+      ['$.tasks[*]', 6, 'match'],
+      ["$.tasks[?(@.status == 'FAILED')]", 3, 'match'],
+      ['$.tasks[*] | count', 6, 'match'],
+      ['$.tasks[*] | pluck(@.id)', 6, 'match'],
+      ['$.tasks[*] | group(@.status)', 3, 'group'],
+      ['$..status | distinct', 3, 'distinct'],
+      ['$.nope[*]', 0, 'match'],
+    ];
+    for (const [q, observed, unit] of counts) {
+      expect(measured(measureQuery(doc, q)), q).toMatchObject({ observed, exact: true, unit });
+    }
+  });
+
+  it('counts the values a ranking could rank, and says what it skipped', () => {
+    // Task 3 has no eta: it is not rankable, so it is not counted.
+    const m = measured(measureQuery(doc, '$.tasks[*] | top(@.eta)'));
+    expect(m).toMatchObject({ observed: 5, exact: true, unit: 'match' });
+    expect(m.note).toBe('1 unrankable or type-mismatched value skipped');
+    expect(measured(measureQuery(doc, '$.tasks[*] | bottom(@.eta)')).observed).toBe(5);
+  });
+
+  it('ranks a set larger than the ranking window without refusing it', () => {
+    // A query-bar window past RANK_CAP is refused; a check retains no window.
+    const many = { rows: Array.from({ length: 6000 }, (_, i) => ({ score: i })) };
+    expect(measured(measureQuery(many, '$.rows[*] | top(@.score)')).observed).toBe(6000);
+  });
+
+  it.each(['sum', 'avg', 'min', 'max'])('refuses | %s, which gives a value, not a count', (fn) => {
+    expect(measureQuery(doc, `$.tasks[*] | ${fn}(@.eta)`)).toEqual({
+      ok: false,
+      error: `\`| ${fn}\` gives one value, not a count — a check counts matches; end the query with \`| count\`, or drop the pipe`,
+      pos: 0,
+    });
+  });
+
+  it('keeps the engine\'s own errors for pipes it cannot run', () => {
+    expect(measureQuery(doc, '$.tasks[*] | count(@.id)')).toMatchObject({ ok: false, error: expect.stringContaining('count does not take') });
+    expect(measureQuery(doc, '$.tasks[*] | pluck')).toMatchObject({ ok: false, error: expect.stringContaining('pluck needs') });
+    expect(measureQuery(doc, '$.tasks[*] | median')).toMatchObject({ ok: false, error: expect.stringContaining("unknown pipe function 'median'") });
+    // An inherited name is not a pipe either.
+    expect(measureQuery(doc, '$.tasks[*] | toString')).toMatchObject({ ok: false, error: expect.stringContaining('unknown pipe') });
+  });
+
+  it('returns a parse error with the parser\'s position', () => {
+    const q = '$.tasks[?(@.status == )]';
+    const parsed = parseQuery(q);
+    if (parsed.ok) throw new Error('expected a parse error');
+    expect(parsed.pos).toBeGreaterThan(0);
+    expect(measureQuery(doc, q)).toEqual({ ok: false, error: parsed.error, pos: parsed.pos });
+  });
+
+  it('reports a capped group or distinct count as a lower bound, and says so', () => {
+    const group = measured(measureQuery(doc, '$.tasks[*] | group(@.id)', { cardinalityCap: 2 }));
+    expect(group).toMatchObject({ observed: 2, exact: false, unit: 'group' });
+    expect(group.note).toBe('stopped counting at 2 groups (the cardinality cap) — narrow the query');
+    const distinct = measured(measureQuery(doc, '$.tasks[*].id | distinct', { cardinalityCap: 2 }));
+    expect(distinct).toMatchObject({ observed: 2, exact: false, unit: 'distinct' });
+    expect(distinct.note).toBe('stopped counting at 2 distinct values (the cardinality cap) — narrow the query');
+    // Under the cap the same count is exact, and has nothing to say.
+    expect(measured(measureQuery(doc, '$.tasks[*] | group(@.status)', { cardinalityCap: 3 }))).not.toHaveProperty('note');
+  });
+
+  it('prints the default cap the en-IN way', () => {
+    const ids = { ids: Array.from({ length: 100_001 }, (_, i) => i) };
+    const m = measured(measureQuery(ids, '$.ids[*] | distinct'));
+    expect(m).toMatchObject({ observed: 100_000, exact: false });
+    expect(m.note).toContain('stopped counting at 1,00,000 distinct values');
+  });
+
+  it('keeps the first matched nodes in document order, never more than asked', () => {
+    const failed = measured(measureQuery(doc, "$.tasks[?(@.status == 'FAILED')]", { evidence: 2 }));
+    expect(failed.observed).toBe(3);
+    expect(failed.evidence.map((e) => e.path)).toEqual([['tasks', 3], ['tasks', 4]]);
+    expect(failed.evidence[0].value).toBe(doc.tasks[3]);
+    // A group keeps matched NODES, not its keys.
+    const grouped = measured(measureQuery(doc, '$.tasks[*] | group(@.status)', { evidence: 1 }));
+    expect(grouped.evidence.map((e) => e.path)).toEqual([['tasks', 0]]);
+    expect(measured(measureQuery(doc, '$.tasks[*]', { evidence: 0 })).evidence).toEqual([]);
+    expect(measured(measureQuery(doc, '$.tasks[*]')).evidence).toEqual([]);
+    expect(measured(measureQuery(doc, '$.tasks[*]', { evidence: 50 })).evidence).toHaveLength(6);
+    expect(measured(measureQuery(doc, '$.tasks[*]', { evidence: -4 })).evidence).toEqual([]);
+    expect(measured(measureQuery(doc, '$.tasks[*]', { evidence: Number.NaN })).evidence).toEqual([]);
+  });
+
+  it('clamps a huge evidence request to the check maximum', () => {
+    const many = { rows: Array.from({ length: 150 }, (_, i) => i) };
+    const m = measured(measureQuery(many, '$.rows[*]', { evidence: 1e9 }));
+    expect(m.observed).toBe(150);
+    expect(m.evidence).toHaveLength(MAX_CHECK_EVIDENCE);
+    expect(m.evidence.at(-1)?.path).toEqual(['rows', 99]);
+  });
+
+  it('hands back int64 evidence as the lossless number it is', () => {
+    const m = measured(measureQuery(cookbookDoc, '$.tasks[*].id', { evidence: 2 }));
+    expect(m.evidence[1].value).toBeInstanceOf(LosslessNumber);
+    expect(String(m.evidence[1].value)).toBe('9007199254740993');
+    // And an int64 predicate counts exactly one, not its rounded neighbour too.
+    expect(measured(measureQuery(cookbookDoc, '$.tasks[?(@.id == 9007199254740993)]')).observed).toBe(1);
+  });
+
+  it('measures an empty document without throwing, so it can pre-flight a query', () => {
+    expect(measureQuery(null, '$.tasks[*] | group(@.status)')).toMatchObject({ ok: true, observed: 0 });
+    expect(measureQuery(null, '$ | top(@.x)')).toMatchObject({ ok: true, observed: 0 });
+    expect(measureQuery(null, '$.a | sum')).toMatchObject({ ok: false });
+  });
+
+  it('names a unit for every pipe the grammar has, and no others', () => {
+    expect(Object.keys(CHECK_UNIT_OF_PIPE).sort()).toEqual([...QUERY_PIPES].sort());
+  });
+});
+
+describe('checkCountOf (the same count, read off a query-bar result)', () => {
+  const capped = { ids: Array.from({ length: 12 }, (_, i) => ({ id: i % 6 })) };
+  const parity: [unknown, string, { cardinalityCap?: number }?][] = [
+    [doc, '$.tasks[*]'],
+    [doc, "$.tasks[?(@.status == 'FAILED')]"],
+    [doc, '$.tasks[*] | count'],
+    [doc, '$.tasks[*] | pluck(@.id, @.eta)'],
+    [doc, '$.tasks[*] | top(@.eta)'],
+    [doc, '$.tasks[*] | bottom(@.eta, @.id)'],
+    [doc, '$.tasks[*] | group(@.status)'],
+    [doc, '$..status | distinct'],
+    [doc, '$.tasks[*] | sum(@.eta)'],
+    [doc, '$.tasks[*] | avg(@.eta)'],
+    [doc, '$.tasks[*] | min(@.eta)'],
+    [doc, '$.tasks[*] | max(@.eta)'],
+    [doc, '$.tasks[*] | count(@.id)'],
+    [doc, '$.tasks[*] | pluck'],
+    [doc, '$.tasks[*] | median'],
+    [doc, '$.tasks['],
+    [capped, '$.ids[*] | group(@.id)', { cardinalityCap: 3 }],
+    [capped, '$.ids[*].id | distinct', { cardinalityCap: 3 }],
+    [cookbookDoc, '$.tasks[?(@.id > 9007199254740992)] | count'],
+  ];
+
+  it.each(parity)('agrees with measureQuery on %#', (root, q, options) => {
+    const m = measureQuery(root, q, options);
+    const counted = checkCountOf(q, runQuery(root, q, options));
+    expect(counted).toEqual(m.ok ? { observed: m.observed, exact: m.exact, unit: m.unit } : null);
+  });
+
+  it('counts every group, not the first page of them', () => {
+    const items = Array.from({ length: 1500 }, (_, id) => ({ id }));
+    const grouped = runQuery({ items }, '$.items[*] | group(@.id)');
+    if (!grouped.ok || grouped.kind !== 'groups') throw new Error('expected groups');
+    expect(grouped.groups).toHaveLength(1000);
+    expect(checkCountOf('$.items[*] | group(@.id)', grouped)).toEqual({ observed: 1500, exact: true, unit: 'group' });
+  });
+
+  it('never reads a sum of 12 as 12 matches', () => {
+    const r = runQuery({ a: [{ q: 5 }, { q: 7 }] }, '$.a[*] | sum(@.q)');
+    expect(value(r)).toBe(12);
+    expect(checkCountOf('$.a[*] | sum(@.q)', r)).toBeNull();
   });
 });
