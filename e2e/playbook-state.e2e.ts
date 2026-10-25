@@ -77,6 +77,42 @@ async function editValue(page: Page, from: string, to: string): Promise<void> {
   await expect(page.locator('#tree-pane .val', { hasText: `"${to}"` }).first()).toBeVisible();
 }
 
+test.describe('a verdict that could not run', () => {
+  // A check the engine refuses (a value pipe) and a function that throws: the
+  // two `error` states, which used to wear the global tier-3 `.error` box.
+  const SUM: Check = { name: 'total spent', query: '$.orders[*].total | sum', expectation: { type: 'at-least-one' } };
+
+  test('keeps the row, both heads and the Query chip their own shape', async ({ page }) => {
+    await openSample(page);
+    await openPlaybook(page);
+    await importPlaybook(page, [SUM, ORDERS], [{ name: 'broken', script: 'data.nope.x' }]);
+    await page.locator('#pb-tick-all').check();
+    await page.locator('#pb-run-all').click();
+    await expect(page.locator('#pb-checks-status')).toContainText('could not run');
+    await expect(page.locator('#pb-fns-status')).toContainText('failed');
+
+    const lead = itemOf(page, 'total spent').locator('.run-lib-mark');
+    const passing = itemOf(page, 'has orders').locator('.run-lib-row');
+    const box = await lead.boundingBox();
+    expect(box?.width).toBe(34);
+    const rowHeights = await page.locator('#pb-check-rows .run-lib-row').evaluateAll((rows) => rows.map((r) => r.getBoundingClientRect().height));
+    expect(rowHeights[0]).toBe(rowHeights[1]);
+    expect(await passing.evaluate((r) => r.getBoundingClientRect().height)).toBe(rowHeights[0]);
+    for (const mark of await page.locator('.pb-mark').all()) {
+      const style = await mark.evaluate((el) => ({ padding: getComputedStyle(el).paddingTop, border: getComputedStyle(el).borderTopWidth }));
+      expect(style).toEqual({ padding: '0px', border: '0px' });
+    }
+
+    // The rail in the Query panel reads the same runs.
+    await page.locator('#ask-btn').click();
+    const chips = page.locator('#ask-checks .check-chip');
+    await expect(chips).toHaveCount(2);
+    const margins = await chips.evaluateAll((els) => els.map((el) => getComputedStyle(el).marginTop));
+    expect(margins).toEqual(['0px', '0px']);
+  });
+
+});
+
 test('a forget undone after switching documents puts no verdict on the new one', async ({ page }) => {
   await page.goto('/');
   await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');

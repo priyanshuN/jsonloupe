@@ -3891,15 +3891,15 @@ button.ask-meta {
 #pb-check-preview.invalid { color: var(--danger); }
 #check-preview.inconclusive,
 #pb-check-preview.inconclusive { color: var(--warn); }
-.check-chip.pass { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
-.check-chip.fail,
-.check-chip.error { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
-.check-chip.inconclusive { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.check-chip.v-pass { border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+.check-chip.v-fail,
+.check-chip.v-error { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.check-chip.v-inconclusive { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .check-chip .check-mark { font-weight: 700; }
-.check-chip.pass .check-mark { color: var(--ok); }
-.check-chip.fail .check-mark,
-.check-chip.error .check-mark { color: var(--danger); }
-.check-chip.inconclusive .check-mark { color: var(--warn); }
+.check-chip.v-pass .check-mark { color: var(--ok); }
+.check-chip.v-fail .check-mark,
+.check-chip.v-error .check-mark { color: var(--danger); }
+.check-chip.v-inconclusive .check-mark { color: var(--warn); }
 /* The chip's name is a real button now, so the keyboard reaches it; it wears
    the chip's own text and none of a button's chrome. */
 .check-chip-run {
@@ -4312,12 +4312,12 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   font-variant-numeric: tabular-nums;
 }
 .pb-mark { font-weight: 700; }
-.pb-mark.pass { color: var(--ok); }
-.pb-mark.fail,
-.pb-mark.error { color: var(--danger); }
-.pb-mark.inconclusive,
+.pb-mark.v-pass { color: var(--ok); }
+.pb-mark.v-fail,
+.pb-mark.v-error { color: var(--danger); }
+.pb-mark.v-inconclusive,
 .pb-warn { color: var(--warn); }
-.pb-mark.not-run { color: var(--text-faint); }
+.pb-mark.v-not-run { color: var(--text-faint); }
 .pb-head .btn-mini,
 .pb-head .tb-chip { flex-shrink: 0; }
 
@@ -4356,11 +4356,11 @@ button.ask-chip.chip-add:hover { color: var(--text); background: var(--bg-canvas
   color: var(--text-faint);
   font: 700 var(--fs-body) var(--mono);
 }
-.run-lib-mark.pass { color: var(--ok); }
-.run-lib-mark.fail,
-.run-lib-mark.error { color: var(--danger); }
-.run-lib-mark.inconclusive { color: var(--warn); }
-.run-lib-mark.running { color: var(--text-dim); }
+.run-lib-mark.v-pass { color: var(--ok); }
+.run-lib-mark.v-fail,
+.run-lib-mark.v-error { color: var(--danger); }
+.run-lib-mark.v-inconclusive { color: var(--warn); }
+.run-lib-mark.v-running { color: var(--text-dim); }
 /* A verdict from before you edited this document: the same glyph and words,
    faint — present, but no longer about what is on screen. */
 .run-lib-row.stale .run-lib-mark,

@@ -5927,7 +5927,7 @@ async function renderSavedChecks(): Promise<void> {
     const current = latest && latest.query === check.query && sameExpectation(latest.expectation, check.expectation)
       ? latest
       : undefined;
-    if (current) chip.classList.add(current.verdict);
+    if (current) chip.classList.add(verdictClass(current.verdict));
     const mark = document.createElement('span');
     mark.className = 'check-mark';
     mark.textContent = current ? VERDICT_MARK[current.verdict] : '◇';
@@ -6516,6 +6516,15 @@ function measuresAsDefined(run: Pick<CheckOutcome, 'query' | 'expectation'>, che
   return run.query === check.query && sameExpectation(run.expectation, check.expectation);
 }
 
+/**
+ * The class a verdict or row state wears. Never the bare word: `error` is the
+ * global tier-3 box (.error — full width, padded, filled), and a mark or chip
+ * that wore it as a class was drawn as one.
+ */
+function verdictClass(state: string): string {
+  return `v-${state}`;
+}
+
 /** The last run of this check on this document, for anyone outside the sheet. */
 function lastRunFor(id: string): store.CheckLastRun | undefined {
   return checkRuns.get(id);
@@ -6605,7 +6614,7 @@ function renderCheckItem(check: SavedCheck): HTMLElement {
   // Rule 15's rule for this view: verdict ink sits only on a canvas ground that
   // never changes. The mark is its own lead cell, outside the button, so a
   // hovered row tints the button and the ✕ stays on canvas.
-  const mark = sheetEl('span', `run-lib-mark ${state}`, stateMark(state));
+  const mark = sheetEl('span', `run-lib-mark ${verdictClass(state)}`, stateMark(state));
   mark.setAttribute('aria-hidden', 'true');
 
   const button = sheetButton('run-lib-open pb-open', '', 'open');
@@ -6884,7 +6893,7 @@ function paintHeadStatus(el: HTMLElement, parts: HeadPart[], title: string): voi
     if (part.mark) {
       // The glyph takes the verdict's hue — this head is on canvas — and the
       // words stay in the status line's own ink.
-      span.append(sheetEl('span', `pb-mark ${part.mark}`, part.text.charAt(0)), part.text.slice(1));
+      span.append(sheetEl('span', `pb-mark ${verdictClass(part.mark)}`, part.text.charAt(0)), part.text.slice(1));
     } else {
       span.append(part.text);
     }
