@@ -143,6 +143,28 @@ test.describe('a verdict that could not run', () => {
   });
 });
 
+test('the not-passing filter turns itself off by redrawing the whole sheet', async ({ page }) => {
+  await openSample(page);
+  await openPlaybook(page);
+  const passing = Array.from({ length: 7 }, (_, i) => ({ ...ORDERS, name: `has orders ${i + 1}` }));
+  await importPlaybook(page, [PACKING, ...passing]);
+  await page.locator('#pb-run-all').click();
+  await expect(page.locator('#pb-checks-status')).toContainText('1 failed');
+  await page.locator('#pb-not-passing').click();
+  await expect(page.locator('#pb-check-rows .pb-item')).toHaveCount(1);
+
+  // Edited until it passes and saved: nothing fails, so the filter goes — and
+  // the seven rows it was hiding come back with it.
+  await itemOf(page, PACKING.name).locator('[data-act="edit"]').click();
+  await page.locator('#pb-check-expectation').selectOption('at-least-one');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('#run-producer')).toBeHidden();
+  await expect(page.locator('#pb-check-rows .pb-item')).toHaveCount(8);
+  await expect(page.locator('#pb-check-rows')).not.toContainText('Nothing matches');
+  await expect(page.locator('#pb-not-passing')).toBeHidden();
+  await expect(page.locator('#pb-checks-status')).toContainText('all passed');
+});
+
 test.describe('run all', () => {
   test.beforeEach(async ({ page }) => {
     await countMeasures(page);

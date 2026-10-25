@@ -6972,7 +6972,13 @@ function paintHeads(shownChecks: number, shownFns: number): void {
 
   const notPassing = pbChecks.filter(didNotPass).length;
   const offerFilter = pbChecks.length >= NOT_PASSING_MIN && notPassing > 0;
-  if (!offerFilter) pbNotPassingOnly = false;
+  if (!offerFilter && pbNotPassingOnly) {
+    // The rows on screen were filtered by it: turning it off redraws them,
+    // rather than leaving the sheet on a subset, or on "Nothing matches".
+    pbNotPassingOnly = false;
+    paintSheet();
+    return;
+  }
   pbNotPassingBtn.hidden = !offerFilter;
   pbNotPassingBtn.textContent = `not passing ${fmtNumber(notPassing)}`;
   pbNotPassingBtn.classList.toggle('on', pbNotPassingOnly);
@@ -6989,6 +6995,8 @@ function paintSheet(): void {
   const term = pbFindWanted ? runLibSearch.value.trim().toLowerCase() : '';
   const has = (text: string): boolean => !term || text.toLowerCase().includes(term);
   let checks = pbChecks.filter((check) => has(`${check.name}\n${check.query}`));
+  // Decided before filtering, so the rows and the chip always agree.
+  if (pbChecks.length < NOT_PASSING_MIN || !pbChecks.some(didNotPass)) pbNotPassingOnly = false;
   if (pbNotPassingOnly) checks = checks.filter(didNotPass);
   const scripts = pbScripts.filter((script) => has(`${script.name}\n${script.script}`));
 
@@ -8101,8 +8109,14 @@ async function runOneCheck(check: SavedCheck): Promise<CheckOutcome | null> {
     return report.aborted ? null : report.outcomes[0] ?? null;
   } finally {
     pbLive.delete(check.id);
-    paintRow(check.id);
-    if (activePane === 'run') paintHeads(pbCheckRows.querySelectorAll('.pb-item').length, pbFnRows.querySelectorAll('.pb-item').length);
+    // Under `not passing`, a verdict that changed can add the row to the list
+    // or take it out, which a repaint of the row alone cannot do.
+    if (pbNotPassingOnly) {
+      paintSheet();
+    } else {
+      paintRow(check.id);
+      if (activePane === 'run') paintHeads(pbCheckRows.querySelectorAll('.pb-item').length, pbFnRows.querySelectorAll('.pb-item').length);
+    }
     void renderSavedChecks();
   }
 }
