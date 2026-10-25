@@ -100,6 +100,59 @@ test('a forget undone after switching documents puts no verdict on the new one',
   await expect(page.locator('#pb-checks-status')).not.toContainText('failed');
 });
 
+test('reload from disk shows none of the old file\'s verdicts as the new file\'s', async ({ page }) => {
+  // A file over 64 KB whose middle changes at the same length: the sampled
+  // hash reads only its first and last 32 KB, so only the time can tell.
+  const pad = 'x'.repeat(40_000);
+  const before = `{"head":"${pad}","items":[{"status":"paid"}],"tail":"${pad}"}`;
+  await page.goto('/');
+  await page.evaluate(async (text) => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('orders.json', { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(text);
+    await writable.close();
+    const now = Date.now() - 60_000;
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('json-workbench', 3);
+      open.onupgradeneeded = () => {
+        for (const name of ['meta', 'text', 'queries', 'convertSpecs']) {
+          if (!open.result.objectStoreNames.contains(name)) open.result.createObjectStore(name, { keyPath: 'id' });
+        }
+      };
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const t = open.result.transaction(['meta', 'text'], 'readwrite');
+        t.objectStore('meta').put({
+          id: 'disk-doc', title: 'orders.json', size: text.length, createdAt: now, updatedAt: now, openedAt: now, pinned: false, hash: 'seeded', handle,
+        });
+        t.objectStore('text').put({ id: 'disk-doc', text });
+        t.oncomplete = () => { open.result.close(); resolve(); };
+        t.onerror = () => reject(t.error);
+      };
+    });
+  }, before);
+  // The app reopens the document it was last on, handle and all.
+  await page.reload();
+  await expect(page.locator('#reload-btn')).toBeVisible();
+  await openPlaybook(page);
+  await importPlaybook(page, [{ name: 'nothing lost', query: "$.items[?(@.status == 'lost')]", expectation: { type: 'no-matches' } }]);
+  await page.locator('#pb-run-all').click();
+  await expect(page.locator('#pb-checks-status')).toContainText('all passed');
+
+  await page.evaluate(async (text) => {
+    const root = await navigator.storage.getDirectory();
+    const writable = await (await root.getFileHandle('orders.json')).createWritable();
+    await writable.write(text);
+    await writable.close();
+  }, before.replace('"paid"', '"lost"'));
+  await page.locator('#reload-btn').click();
+  await expect(page.locator('#toast')).toContainText(/change/);
+  await openPlaybook(page);
+  await expect(checkRow(page, 'nothing lost')).toHaveAccessibleName(/check: not run on this document$/);
+  await expect(page.locator('#pb-checks-status')).not.toContainText('passed');
+});
+
 /** Hold every check measure back by `ms`, in order, so a run all lasts long enough to work during. */
 async function slowMeasures(page: Page, ms: number): Promise<void> {
   await page.addInitScript((delay) => {

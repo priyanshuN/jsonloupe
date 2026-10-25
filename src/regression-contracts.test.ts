@@ -775,7 +775,9 @@ describe('the playbook view', () => {
     const open = fn(/async function openText\([\s\S]*?\n\}/);
     const cleared = open.indexOf('checkRuns.clear();');
     expect(cleared).toBeGreaterThan(open.indexOf('pendingInitialSave = null;'));
-    expect(open.indexOf('void hydrateCheckRuns();')).toBeGreaterThan(cleared);
+    // A reload's updateDoc commits only after openText returns, so a reload
+    // hydrates from no earlier than now: the old file's runs are not the new one's.
+    expect(open.indexOf('void hydrateCheckRuns(keepCurrentOnFailure ? Date.now() : 0);')).toBeGreaterThan(cleared);
   });
 
   it('runs checks without saving them, and drops a run the document moved under', () => {

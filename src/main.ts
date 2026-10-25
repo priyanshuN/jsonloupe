@@ -2438,7 +2438,11 @@ async function openText(
     );
   }
 
-  void hydrateCheckRuns();
+  // A reload's own updateDoc lands only after this returns, so the stored
+  // `updatedAt` hydrate reads is still the old file's: every run made before
+  // now is about that file, whose middle may have changed under an unchanged
+  // sampled hash. Only a reload passes keepCurrentOnFailure.
+  void hydrateCheckRuns(keepCurrentOnFailure ? Date.now() : 0);
 
   reloadBtn.hidden = !handle;
   setDocTitle(currentTitle);
@@ -8116,8 +8120,9 @@ async function runAll(): Promise<void> {
 // A check's last run, from storage, for the document just opened — but only a
 // run of this check as it is now, on this document as it is now: the same id
 // and sampled hash, and stamped no earlier than the document's last saved edit
-// (the hash samples only the ends, so an edit in the middle keeps it).
-async function hydrateCheckRuns(): Promise<void> {
+// (the hash samples only the ends, so an edit in the middle keeps it), nor
+// than `notBefore`, for an edit not saved yet.
+async function hydrateCheckRuns(notBefore = 0): Promise<void> {
   const documentToken = currentDocumentToken;
   const text = currentText;
   pbElsewhere = null;
@@ -8139,7 +8144,7 @@ async function hydrateCheckRuns(): Promise<void> {
   for (const check of checks) {
     // A run made in this session since the open is newer than anything stored.
     if (checkRuns.has(check.id)) continue;
-    const run = store.currentLastRun(check, { id: docId, hash, updatedAt: meta.updatedAt });
+    const run = store.currentLastRun(check, { id: docId, hash, updatedAt: Math.max(meta.updatedAt, notBefore) });
     if (run) checkRuns.set(check.id, run);
   }
   // Never run here: say where the library last ran, if that document is still kept.
