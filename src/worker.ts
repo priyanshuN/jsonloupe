@@ -16,8 +16,18 @@ import type {
   CompareMeta,
   CompareRow,
   CompareStatus,
+  CheckMeasureReply,
 } from './protocol';
-import { planQueryExport, runQuery, scanQuery, type PathSeg, type QueryOptions, type QueryResult } from './query';
+import {
+  checkCountOf,
+  measureQuery,
+  planQueryExport,
+  runQuery,
+  scanQuery,
+  type PathSeg,
+  type QueryOptions,
+  type QueryResult,
+} from './query';
 import { profileQuery } from './profile';
 import { EXPORT_CHUNK_BYTES, MAX_EXPORT_BYTES } from './export-policy';
 import { csvCell, csvField } from './csv';
@@ -1993,6 +2003,10 @@ function doQuery(q: string, options?: QueryOptions): object {
   lastQueryResult = r.ok ? r : null;
   lastQueryText = r.ok ? q : null;
   if (!r.ok) return r;
+  // What a saved check would count for this result, decided by the engine so
+  // the query bar never second-guesses a result shape: null for a value pipe,
+  // and `exact: false` when a group or distinct hit its cap.
+  const check = checkCountOf(q, r);
   if (r.kind === 'matches') {
     lastQueryPaths = r.matches.map((m) => m.path);
     lastQueryValues = r.matches.slice(0, 1000).map((m) => m.value);
@@ -2008,14 +2022,41 @@ function doQuery(q: string, options?: QueryOptions): object {
         pathText: formatPath(m.path),
         preview: previewOf(m.value),
       })),
+      check,
     };
   }
   lastQueryPaths = [];
   lastQueryValues = [];
   if (r.kind === 'rows') {
-    return { ...r, rows: r.rows.map((row) => row.map(queryDisplayCell)) };
+    return { ...r, rows: r.rows.map((row) => row.map(queryDisplayCell)), check };
   }
-  return r;
+  return { ...r, check };
+}
+
+/**
+ * One check's count and first matched nodes. It reads `root.value`, the same
+ * tree `doQuery` reads, and it deliberately writes NONE of the last-query state
+ * above: a run of every check must leave the Ask panel's reveal, filter and
+ * copy — and WebMCP's sample — acting on what the panel is showing.
+ */
+function doCheckMeasure(q: unknown, evidence: unknown, cardinalityCap: unknown): CheckMeasureReply {
+  const root = nodes.get(rootId);
+  if (!root) return { ok: false, error: 'no document open', pos: 0 };
+  if (typeof q !== 'string' || !q.trim()) return { ok: false, error: 'a check needs a query', pos: 0 };
+  const m = measureQuery(root.value, q, {
+    evidence: typeof evidence === 'number' ? evidence : 0,
+    cardinalityCap: typeof cardinalityCap === 'number' ? cardinalityCap : undefined,
+  });
+  if (!m.ok) return m;
+  return {
+    ok: true,
+    observed: m.observed,
+    exact: m.exact,
+    unit: m.unit,
+    ...(m.note ? { note: m.note } : {}),
+    // Segments for revealPath, text for reading; previewOf keeps int64 digits.
+    evidence: m.evidence.map((e) => ({ path: e.path, pathText: formatPath(e.path), preview: previewOf(e.value) })),
+  };
 }
 
 function queryReveal(i: number): { rowIndex: number; totalRows: number } {
@@ -2645,6 +2686,8 @@ export function handle(msg: { type: string } & Record<string, unknown>): object 
       return nextQueryExport(msg.exportId as string);
     case 'exportAbort':
       return { ok: queryExportSessions.delete(msg.exportId as string) };
+    case 'checkMeasure':
+      return doCheckMeasure(msg.q, msg.evidence, msg.cardinalityCap);
     case 'query':
       return doQuery(msg.q as string, {
         offset: msg.offset as number | undefined,
