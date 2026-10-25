@@ -114,6 +114,10 @@ test('a check written in the playbook runs, fails, and shows its evidence beside
 test('the playbook column passes WCAG at rest and with a failing row under the pointer, in every scheme', async ({
   page,
 }) => {
+  // Fourteen axe scans, eleven of them one per scheme: about 8 s here and
+  // two to three times that on CI's two-worker runner, which ran out the
+  // default 30 s when every scheme was scanned twice.
+  test.setTimeout(60_000);
   await openSample(page);
   await openPlaybook(page);
   await addCheck(page, 'every order shipped', "$.orders[?(@.status != 'shipped')]");
@@ -149,11 +153,17 @@ test('the playbook column passes WCAG at rest and with a failing row under the p
     .locator('.scheme-opt')
     .evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.scheme!));
   expect(schemes.length).toBeGreaterThanOrEqual(11);
+  // Every other scheme is scanned with the failing row hovered only. The rest
+  // of the sheet is at rest in that same scan, and the failing row's resting
+  // inks sit on the canvas, which the contract linter already measures for
+  // every scheme; the hover ground is the one it cannot see.
   for (const id of schemes) {
     await button.click();
     await menu.locator(`[data-scheme="${id}"]`).click();
     await expect(menu).toBeHidden();
-    await scanBoth();
+    await failed.hover();
+    await settle(page);
+    await expectNoWcagViolations(page, '#run-pane');
   }
 });
 
