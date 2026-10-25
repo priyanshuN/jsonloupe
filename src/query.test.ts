@@ -625,6 +625,20 @@ describe('measureQuery (what a check counts)', () => {
     expect(measured(measureQuery(doc, '$.tasks[*]', { evidence: Number.NaN })).evidence).toEqual([]);
   });
 
+  it('keeps as evidence only the nodes a ranking counted, never ones it skipped', () => {
+    const items = { items: [{ id: 'a' }, { id: 'b' }, { id: 'c', price: 1 }] };
+    const m = measured(measureQuery(items, '$.items[*] | top(@.price)', { evidence: 3 }));
+    expect(m.observed).toBe(1);
+    expect(m.evidence.map((e) => e.path)).toEqual([['items', 2]]);
+    // A type-mismatched key is skipped too, and so not shown.
+    const mixed = { items: [{ price: 5 }, { price: 'x' }, { price: 7 }] };
+    const ranked = measured(measureQuery(mixed, '$.items[*] | bottom(@.price)', { evidence: 5 }));
+    expect(ranked.observed).toBe(2);
+    expect(ranked.evidence.map((e) => e.path)).toEqual([['items', 0], ['items', 2]]);
+    // Nothing rankable: no count, and no evidence to point at.
+    expect(measured(measureQuery({ items: [{}, {}] }, '$.items[*] | top(@.price)', { evidence: 3 })).evidence).toEqual([]);
+  });
+
   it('clamps a huge evidence request to the check maximum', () => {
     const many = { rows: Array.from({ length: 150 }, (_, i) => i) };
     const m = measured(measureQuery(many, '$.rows[*]', { evidence: 1e9 }));

@@ -74,6 +74,12 @@ export interface QueryOptions {
   limit?: number;
   /** Defensive ceiling for distinct/group state, not for the number of scanned matches. */
   cardinalityCap?: number;
+  /**
+   * Called once for each match the pipe counts, in document order. A ranking
+   * skips matches it cannot rank, so this is how a check keeps as evidence
+   * only nodes it actually counted.
+   */
+  onCounted?: (match: Match) => void;
 }
 
 const MATCH_CAP = 5000;
@@ -804,12 +810,16 @@ function windowIsTruncated(total: number, offset: number, shown: number, complet
 function applyPipe(matches: Iterable<Match>, pipe: Pipe, options?: QueryOptions): QueryResult {
   const arg = pipe.args[0] ?? [];
   const pick = (m: Match): unknown => (arg.length ? resolveTail(m.value, arg) : m.value);
+  const counted = options?.onCounted;
 
   switch (pipe.fn) {
     case 'count': {
       if (pipe.args.length) return { ok: false, error: 'count does not take a field argument; put the field in the path', pos: 0 };
       let total = 0;
-      for (const _ of matches) total++;
+      for (const match of matches) {
+        total++;
+        counted?.(match);
+      }
       return { ok: true, kind: 'value', label: 'count', value: total, complete: true };
     }
     case 'sum':
@@ -839,6 +849,7 @@ function applyPipe(matches: Iterable<Match>, pipe: Pipe, options?: QueryOptions)
       const seen = new Map<string, BucketValue>();
       let complete = true;
       for (const match of matches) {
+        counted?.(match);
         const bucket = bucketOf(pick(match));
         if (seen.has(bucket.id)) continue;
         if (seen.size >= cap) {
@@ -867,6 +878,7 @@ function applyPipe(matches: Iterable<Match>, pipe: Pipe, options?: QueryOptions)
       const fields = pipe.args.length ? pipe.args : [[]];
       let complete = true;
       for (const match of matches) {
+        counted?.(match);
         const buckets = fields.map((field) => bucketOf(field.length ? resolveTail(match.value, field) : match.value));
         const id = JSON.stringify(buckets.map((bucket) => bucket.id));
         const label = buckets.length === 1
@@ -926,6 +938,7 @@ function applyPipe(matches: Iterable<Match>, pipe: Pipe, options?: QueryOptions)
           sequence: sequence++,
         };
         total++;
+        counted?.(match);
         retainRanked(
           retained,
           candidate,
@@ -958,6 +971,7 @@ function applyPipe(matches: Iterable<Match>, pipe: Pipe, options?: QueryOptions)
           rows.push(pipe.args.map((field) => resolveTail(match.value, field)));
         }
         total++;
+        counted?.(match);
       }
       return {
         ok: true,
@@ -1169,15 +1183,17 @@ export function measureQuery(root: unknown, src: string, options: CheckMeasureOp
   const { segs, pipe } = parsed.query;
   const keep = Math.min(MAX_CHECK_EVIDENCE, Math.max(0, Math.floor(Number(options.evidence) || 0)));
   const evidence: Match[] = [];
-  function* tapped(): Generator<Match> {
-    for (const match of walk(root, segs)) {
-      if (evidence.length < keep) evidence.push(match);
-      yield match;
-    }
-  }
+  // Evidence is kept where a match is COUNTED, not where the walk finds it: a
+  // ranking skips what it cannot rank, and those nodes are not what it counted.
+  const keepEvidence = (match: Match): void => {
+    if (evidence.length < keep) evidence.push(match);
+  };
   if (!pipe) {
     let observed = 0;
-    for (const _ of tapped()) observed++;
+    for (const match of walk(root, segs)) {
+      observed++;
+      keepEvidence(match);
+    }
     return { ok: true, observed, exact: true, unit: 'match', evidence };
   }
   const unit = checkUnitOf(pipe.fn);
@@ -1194,7 +1210,7 @@ export function measureQuery(root: unknown, src: string, options: CheckMeasureOp
   const cap = Math.max(1, Number.isFinite(options.cardinalityCap) ? Math.floor(options.cardinalityCap!) : CARDINALITY_CAP);
   // limit 0 retains no detail rows, so a ranked pipe returns its count without
   // ever building the window its RANK_CAP guards.
-  const result = applyPipe(tapped(), pipe, { offset: 0, limit: 0, cardinalityCap: cap });
+  const result = applyPipe(walk(root, segs), pipe, { offset: 0, limit: 0, cardinalityCap: cap, onCounted: keepEvidence });
   if (!result.ok) return result;
   const exact = result.complete;
   const observed = result.kind === 'value' ? Number(result.value) : cappedCount(result.total, exact);
