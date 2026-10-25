@@ -381,7 +381,7 @@ check that did not pass names.
 |---|---|
 | 0 | every check passed on every file |
 | 1 | usage, read or parse error — including a file that would need repairing |
-| 2 | the playbook is invalid, has no checks, or has a query no check can count; nothing was checked |
+| 2 | the playbook is invalid, has no checks or more than 100 (what a library holds), or has a query no check can count; nothing was checked |
 | 3 | at least one check failed |
 | 4 | nothing failed, but a check was inconclusive or could not run |
 

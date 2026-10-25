@@ -33,6 +33,12 @@ export const PLAYBOOK_VERSION = 4;
 /** The largest playbook the CLI and MCP server will read — a playbook is a short list, not a document. */
 export const MAX_PLAYBOOK_BYTES = 1_048_576;
 
+/**
+ * The most checks the CLI and MCP server run from one playbook: what a library
+ * holds of one kind (db.ts KEEP_SAVED), so every playbook the app exports fits.
+ */
+export const MAX_PLAYBOOK_CHECKS = 100;
+
 export interface PlaybookFunction {
   name: string;
   script: string;

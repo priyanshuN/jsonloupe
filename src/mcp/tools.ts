@@ -25,7 +25,7 @@ import type {
 import type { ConvertSpec, DraftHints, Inspection, Kind, Suggestion } from '../convert';
 import type { ProfileResult } from '../profile';
 import { QUERY_EXAMPLES, QUERY_GRAMMAR } from '../query-grammar';
-import { MAX_PLAYBOOK_BYTES, PLAYBOOK_VERSION, parsePlaybook, type PlaybookCheck } from '../playbook';
+import { MAX_PLAYBOOK_BYTES, MAX_PLAYBOOK_CHECKS, PLAYBOOK_VERSION, parsePlaybook, type PlaybookCheck } from '../playbook';
 import { DEFAULT_EVIDENCE } from '../playbook-run';
 import {
   cap,
@@ -74,7 +74,7 @@ const DEFAULT_PROFILE_TOP = 10;
 const MAX_PROFILE_TOP = 50;
 const MAX_PROFILE_FIELDS = 20;
 /** The most a library holds of one kind (db.ts KEEP_SAVED), so the most one call runs. */
-const MAX_CHECKS = 100;
+const MAX_CHECKS = MAX_PLAYBOOK_CHECKS;
 /** Paths per failed check; past a few they repeat the point and crowd the cap. */
 const MAX_CHECK_EVIDENCE = 20;
 

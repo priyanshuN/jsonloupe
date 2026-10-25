@@ -184,6 +184,17 @@ describe('an invalid playbook exits 2 and checks nothing', () => {
     expect(bare.err).toMatch(/has no checks\n/);
   });
 
+  it('refuses more checks than a library holds, before any document is read', async () => {
+    const many = Array.from({ length: 101 }, (_, i) => ({ ...HAS_ORDERS, name: `check ${i}` }));
+    const r = await check(await playbook(many), join(dir, 'never-read.json'));
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('has 101 checks; jsonloupe check runs at most 100');
+    expect(r.out).toBe('');
+    // Exactly the cap is a playbook the app can export, so it runs.
+    const full = Array.from({ length: 100 }, (_, i) => ({ ...HAS_ORDERS, name: `check ${i}` }));
+    expect((await check(await playbook(full), await orders())).code).toBe(0);
+  });
+
   it('lists every query that cannot run, before any document is read', async () => {
     const pb = await playbook([
       { name: 'total', query: '$.orders[*] | sum(@.total)', expectation: { type: 'at-least-one' } },

@@ -25,7 +25,7 @@ import { open, type FileHandle } from 'node:fs/promises';
 import { handle } from '../worker';
 import { loadDoc, type Engine, type LoadResult } from '../mcp/doc-ops';
 import { readPlaybookFile } from '../mcp/playbook-file';
-import { looksLikePlaybook, MAX_PLAYBOOK_BYTES, parsePlaybook, type Playbook } from '../playbook';
+import { looksLikePlaybook, MAX_PLAYBOOK_BYTES, MAX_PLAYBOOK_CHECKS, parsePlaybook, type Playbook } from '../playbook';
 import {
   checkQueryProblem,
   DEFAULT_EVIDENCE,
@@ -251,6 +251,15 @@ async function loadPlaybook(a: CheckArgs): Promise<PlaybookLoad> {
           ? `${a.playbook} has no checks — its functions run only in the browser, so there is nothing to check here`
           : `${a.playbook} has no checks`,
       ],
+    };
+  }
+  // Each check is a full walk of every file, so a playbook from a coworker or a
+  // model must not be able to hold a CI job for hours with thousands of them.
+  if (playbook.checks.length > MAX_PLAYBOOK_CHECKS) {
+    return {
+      ok: false,
+      code: 2,
+      problems: [`${a.playbook} has ${playbook.checks.length} checks; jsonloupe check runs at most ${MAX_PLAYBOOK_CHECKS}`],
     };
   }
   // The run's own rules over an empty document, so a query refused here is
