@@ -8136,6 +8136,7 @@ async function runAll(): Promise<void> {
 }
 
 async function runAllNow(): Promise<void> {
+  const documentToken = currentDocumentToken;
   if (activePane === 'run' && runFace === 'result') setRunFace('functions');
   const [checks, scripts] = await Promise.all([store.listChecks(), store.listScripts()]);
   const ticked = sortItems(scripts.filter((s) => runPicked.has(s.id)));
@@ -8149,6 +8150,9 @@ async function runAllNow(): Promise<void> {
     if (!report || report.aborted) return;
   }
   if (ticked.length) await runPickedScripts();
+  // Another document opened while the functions ran: this report is not its,
+  // and its sheet starts with every row closed.
+  if (documentToken !== currentDocumentToken) return;
   const firstCheck = report?.outcomes.find((outcome) => outcome.verdict !== 'pass')?.id;
   const firstFn = ticked.find((s) => functionRuns.get(s.id)?.ok === false)?.id;
   const first = firstCheck ?? firstFn;

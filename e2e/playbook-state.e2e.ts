@@ -234,6 +234,28 @@ test('pressing a Query check chip from the keyboard keeps focus on that chip', a
   await expect(page.locator('#ask-checks .check-chip', { hasText: PACKING.name }).locator('.check-chip-run')).toBeFocused();
 });
 
+test('a function batch outlived by a document switch opens no row on the next document', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#paste-box').fill('{"note":"doc B","items":[1,2]}');
+  await page.locator('#parse-btn').click();
+  await expect(page.getByRole('tree', { name: 'JSON document' })).toBeVisible();
+  await page.locator('#new-btn').click();
+  await page.getByRole('button', { name: 'try a sample' }).click();
+  await expect(page.locator('#recents .doc-row-open', { hasText: 'sample-orders.json' })).toBeVisible();
+  await openPlaybook(page);
+  // A function slow enough to switch documents under.
+  const slow = '(() => { const end = Date.now() + 1500; while (Date.now() < end); return data.orders.length; })()';
+  await importPlaybook(page, [PACKING], [{ name: 'slow count', script: slow }]);
+  await page.locator('#pb-tick-all').check();
+  await page.locator('#pb-run-all').click();
+  await expect(page.locator('#pb-fns-status')).toContainText('running');
+  await page.locator('#recents .doc-row-open', { hasText: 'note' }).click();
+  await expect(page.locator('#tree-pane')).toContainText('note');
+  await page.waitForTimeout(2000);
+  await openPlaybook(page);
+  await expect(checkRow(page, PACKING.name)).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('reload from disk shows none of the old file\'s verdicts as the new file\'s', async ({ page }) => {
   // A file over 64 KB whose middle changes at the same length: the sampled
   // hash reads only its first and last 32 KB, so only the time can tell.
