@@ -7,6 +7,11 @@ diffed, and queried entirely in your browser (a web worker + IndexedDB). There i
 no backend, no telemetry, no analytics, and no account system. The authors never
 see your data.
 
+Saved checks keep their last verdict, with up to five matched paths and a short
+preview of each (at most 200 characters) from the document they ran on. That
+record lives only in this browser's IndexedDB beside the check: it is never
+written into an exported playbook, and removing the document removes it.
+
 ## Security review scope
 
 The supported system includes the static browser application, the npm-distributed
@@ -130,8 +135,8 @@ All DOM rendering uses `createElement`/`textContent` — the codebase contains n
 `innerHTML`, `insertAdjacentHTML`, `document.write`, or `eval`. Hostile documents
 and model responses render as inert text and never enter a code constructor.
 
-The Run panel is the deliberate exception for code a user explicitly chooses to
-execute. Its two `new Function` calls live in `src/run-exec.ts` and run in a new
+A playbook's functions (the Run panel) are the deliberate exception for code a
+user explicitly chooses to execute. Their two `new Function` calls live in `src/run-exec.ts` and run in a new
 ephemeral worker, not the document worker. Before execution, `src/run-sandbox.ts`
 removes network, IndexedDB, Cache, navigator, import-script, and nested-worker
 capabilities; the worker's own response CSP (see
@@ -139,6 +144,13 @@ capabilities; the worker's own response CSP (see
 other origin, and the page terminates the worker on its first result or timeout. Run parses a plain
 JSON copy, so it is a lossy convenience for deliberate local scripts—not a
 lossless query path and never a destination for Ask/model output.
+
+Nothing outside the browser runs a function. `jsonloupe check` and the MCP
+server's `run_checks` read a playbook's checks as declarative data, measured by
+the same query engine, and only count its functions and report them as not run:
+Node has no equivalent sandbox, and a playbook handed to CI or written by a
+model is untrusted input, not code to execute. The `check` bundle contains no
+`new Function`, and a test pins that.
 
 ## CSV exports
 

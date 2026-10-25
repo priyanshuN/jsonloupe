@@ -36,11 +36,14 @@ parsed tree into the main thread. Rendering uses `createElement` and
 `textContent`, so document text is not interpreted as markup. IndexedDB access
 is isolated in `src/db.ts` and stores documents only in the user's browser.
 
-Run mode is a separate, explicit-code surface. It copies the current document
-through plain `JSON.parse` into a fresh ephemeral worker, strips that worker's
-network and browser-storage capabilities, executes only the script the user put
-in the Run editor, and terminates on its first result or timeout. It never runs
-inside the lossless document worker and is not reachable from Ask/model output.
+Run mode (the playbook view) holds two kinds of saved work. Checks are queries
+with an expected count; each is one `checkMeasure` message to the document
+worker, judged by `src/playbook-run.ts`. Functions are the separate,
+explicit-code surface. A function run copies the current document through plain
+`JSON.parse` into a fresh ephemeral worker, strips that worker's network and
+browser-storage capabilities, executes only the script the user put in the Run
+editor, and terminates on its first result or timeout. It never runs inside the
+lossless document worker and is not reachable from Ask/model output.
 
 ## Shared deterministic engines
 
@@ -64,6 +67,15 @@ therefore has the same meaning on every surface.
 `bin/jsonloupe-mcp.mjs` starts the stdio MCP server. Build scripts bundle their
 implementations into `dist-cli/` and `dist-mcp/`, leaving the published package
 with zero runtime dependencies.
+
+The CLI is built twice, apart on purpose. `dist-cli/commands.js` holds the
+converter verbs and gets no asset plugins, so a converter import of the codec
+fails to bundle rather than growing what every `inspect` loads.
+`dist-cli/check.js` holds `jsonloupe check`, which reuses the worker engine
+in-process: it reads each file through the MCP server's `loadDoc`, then sends
+each check to the same `handle` that answers the browser's worker and every MCP
+document thread, so a verdict is the browser's verdict by construction. Neither
+the CLI nor the MCP server's `run_checks` executes a playbook's functions.
 
 The MCP server accepts only explicit input and output paths from its client. A
 document is parsed in a worker thread and referenced by an opaque document id;
