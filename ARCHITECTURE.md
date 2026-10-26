@@ -23,8 +23,9 @@ flowchart LR
 
 ## Browser application
 
-Vite builds `index.html`, `json-to-excel.html`, `spec.html`, and the search
-landing pages (`json-editor.html`, `json-diff.html`, `large-json-viewer.html`)
+Vite builds `index.html`, `json-to-excel.html`, `json-to-csv.html`, `spec.html`,
+and the search landing pages (`json-editor.html`, `json-diff.html`,
+`large-json-viewer.html`, `jsonl-viewer.html`)
 into a static site. `src/main.ts` owns application coordination and DOM composition.
 `src/worker.ts` owns the parsed document and performs expensive parsing,
 searching, querying, diffing, compression, profiling, and conversion away from

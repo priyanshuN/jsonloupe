@@ -1,0 +1,145 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/jsonl-viewer.html" />
+  <!-- A search landing page, built like large-json-viewer.html: the title, the
+       description and the <h1> carry the words people type into a search box
+       ("jsonl viewer / open jsonl file / ndjson viewer"), so the result reads
+       as the answer to their question. -->
+  <title>JSONL Viewer — open JSON Lines and NDJSON in your browser — jsonloupe</title>
+  <meta name="description" content="View JSONL files in your browser: each line becomes one record you can browse, search and query. JSON Lines and NDJSON, exact long numbers, nothing uploaded." />
+  <meta property="og:title" content="JSONL viewer" />
+  <meta property="og:description" content="Open JSON Lines logs and data dumps as a list of records you can browse, search and count, with exact long numbers, all in your browser." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jsonloupe.dev/jsonl-viewer.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <!-- Link-preview card for HN, Reddit, X, Slack and Discord; its source is
+       .github/assets/og-image.svg. Crawlers need an absolute URL and a PNG. -->
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<!-- data-route and data-handoff tell tool-landing.js where to send the pasted
+     text; the app reads that key on that route and on no other. The app needs
+     no JSONL switch: text that is not one JSON value but is one per line opens
+     as a list of those values (tryJsonl in worker.ts). -->
+<body data-route="#open" data-handoff="wb-open-handoff">
+  <!-- index.html's marketing landing, reused whole (same #landing wrapper and
+       the same control ids), so this page needs almost no CSS of its own.
+       main.ts does not run here. -->
+  <section id="landing">
+    <header class="lp-header">
+      <a class="lp-brand" href="./" title="jsonloupe">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span>json<span class="brand-loupe">loupe</span></span>
+      </a>
+      <nav class="lp-nav">
+        <a href="#what">what you get</a>
+        <a href="#how">how it works</a>
+        <a href="#privacy">privacy</a>
+        <a href="./">the viewer</a>
+      </nav>
+      <span class="lp-spacer"></span>
+      <span class="lp-meta">free · no account</span>
+      <button id="cta-open" class="lp-cta" type="button">open the viewer →</button>
+    </header>
+
+    <div class="lp-hero">
+      <div class="lp-hero-copy">
+        <h1>JSONL viewer</h1>
+        <p class="lp-lede">Open a JSON Lines file, one record per line, and read it as a list. Log extracts, Kafka dumps and data exports open as records you can scroll, search and filter.</p>
+        <p class="lp-wedge">A text editor shows each record as one long line. Here every line becomes an item you can expand on its own.</p>
+        <p class="lp-trust">0 bytes uploaded · no account · free</p>
+      </div>
+      <div class="lp-paste">
+        <div class="lp-paste-head">
+          <span class="lp-paste-title">Paste JSON Lines</span>
+          <span class="lp-paste-status">nothing leaves this tab</span>
+        </div>
+        <div class="lp-paste-body">
+          <textarea id="paste-box" spellcheck="false"
+            placeholder="Paste JSON Lines here, one record per line, then press open — or open a file for anything large."></textarea>
+          <p class="lp-paste-hint">for big files, “open a file instead” reads the file straight from your disk — .jsonl and .json</p>
+          <div class="lp-paste-actions">
+            <button id="parse-btn" type="button">open</button>
+            <button id="open-btn" type="button" title="Open the app and choose a file there — up to 200 MB">open a file instead</button>
+            <span class="lp-spacer"></span>
+            <span class="lp-note">⌃↵ to open</span>
+          </div>
+          <div id="parse-error" class="error" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="lp-band" id="what">
+      <h2 class="lp-h2">What happens to your JSONL</h2>
+      <div class="lp-grid">
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-accent">records</span>
+          <h3>Each line becomes one record</h3>
+          <p>The file opens as one list with one item per line, also when the format is called NDJSON. The file size beside the document's name says JSONL.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-ok">speed</span>
+          <h3>Big logs stay responsive</h3>
+          <p>The tree draws only the rows on screen, and a long list opens in pages of 10,000 records. Reading, searching and filtering run in the background.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-number">numbers</span>
+          <h3>Long IDs keep every digit</h3>
+          <p>Trace IDs and order numbers longer than 15 digits can be rounded by other viewers. Here they stay exactly as they are in the file.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="lp-split" id="how">
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Search every record at once</h2>
+        <p class="lp-body">Search by text or pattern across all records, and filter the tree down to the matches. Each closed record shows its size in bytes, so the heavy ones are easy to find.</p>
+      </section>
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Count and group records</h2>
+        <p class="lp-body">Short queries run in this tab, for example the errors in a log grouped by service.</p>
+        <pre class="lp-code">$[?(@.level == 'error')] | group(@.service)</pre>
+      </section>
+    </div>
+
+    <section class="lp-band lp-privacy" id="privacy">
+      <div>
+        <h2 class="lp-h2 lp-h2-sm">Why nothing is uploaded</h2>
+        <p class="lp-body lp-body-wide">The viewer runs inside this browser tab. Your file is read here and nowhere else. There is no server to send your file to, which is why it keeps working with your wifi off. Nothing is logged, counted, or kept anywhere but your own computer.</p>
+      </div>
+      <div class="lp-facts">
+        <div class="lp-fact"><span>bytes uploaded</span><span class="lp-fact-ok">0</span></div>
+        <div class="lp-fact"><span>largest file</span><span class="lp-fact-accent">200 MB</span></div>
+        <div class="lp-fact"><span>works with wifi off</span><span class="lp-fact-ok">yes</span></div>
+        <div class="lp-fact"><span>price</span><span class="lp-fact-accent">free · MIT</span></div>
+      </div>
+    </section>
+
+    <footer class="lp-footer">
+      <span>jsonloupe — MIT</span>
+      <span class="lp-spacer"></span>
+      <a href="./json-editor.html">json editor</a>
+      <a href="./json-diff.html">json diff</a>
+      <a href="./large-json-viewer.html">large files</a>
+      <a href="./json-to-excel.html">json to excel</a>
+      <a href="./json-to-csv.html">json to csv</a>
+      <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+      <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+    </footer>
+  </section>
+
+  <script src="/tool-landing.js"></script>
+</body>
+</html>

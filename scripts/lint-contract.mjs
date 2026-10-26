@@ -635,7 +635,7 @@ function withoutComments(html) {
   return out + html.slice(at);
 }
 
-for (const page of ['index.html', 'json-to-excel.html', 'json-editor.html', 'json-diff.html', 'large-json-viewer.html', 'spec.html']) {
+for (const page of ['index.html', 'json-to-excel.html', 'json-editor.html', 'json-diff.html', 'large-json-viewer.html', 'jsonl-viewer.html', 'json-to-csv.html', 'spec.html']) {
   const markup = withoutComments(readFileSync(join(root, page), 'utf8'));
   const names = new Set([...markup.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(/\s+/)));
   for (const name of names) {
