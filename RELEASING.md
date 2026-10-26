@@ -1,9 +1,9 @@
 # Releases and verification
 
 The official installable release of jsonloupe is the public npm package named
-[`jsonloupe`](https://www.npmjs.com/package/jsonloupe). GitHub Releases provide
-the version tag and release notes and trigger publishing; GitHub's automatic
-source archives are not the npm artifact users install.
+[`jsonloupe`](https://www.npmjs.com/package/jsonloupe). The publish workflow
+creates each version's tag and GitHub Release after npm has the package;
+GitHub's automatic source archives are not the npm artifact users install.
 
 ## Release process
 
@@ -24,23 +24,35 @@ source archives are not the npm artifact users install.
    npm audit
    ```
 
-3. Merge the reviewed version change to `main` with all required checks green.
-4. Publish a GitHub Release whose `vX.Y.Z` tag exactly matches the package
-   version. `.github/workflows/publish.yml` refuses mismatched versions.
-5. The release workflow rebuilds and retests the package, then publishes with
-   npm trusted publishing. GitHub supplies a short-lived OIDC identity; no npm
-   token or project signing key is stored in the repository.
-6. Verify the registry version, provenance, and clean installation before
-   announcing it.
-7. List the release in the [MCP Registry](https://registry.modelcontextprotocol.io)
-   from the repository root, after npm shows the new version. The registry
-   reads `mcpName` from the published `package.json`, so this step must come
-   after npm. Install the publisher once with `brew install mcp-publisher`.
+3. Merge the version change to `main` with all required checks green. A pull
+   request with auto-merge on merges itself when they pass.
+4. The merge starts `.github/workflows/publish.yml`. It sees that npm does not
+   have the version in `package.json` yet, and then:
+   - stops if `CHANGELOG.md` has no entry for the version;
+   - rebuilds and retests the package, then publishes it with npm trusted
+     publishing. GitHub supplies a short-lived OIDC identity; no npm token or
+     project signing key is stored in the repository;
+   - creates the `vX.Y.Z` tag and its GitHub Release on the merged commit,
+     with the version's `CHANGELOG.md` entry as the notes;
+   - waits until npm serves the new version, then lists it in the
+     [MCP Registry](https://registry.modelcontextprotocol.io) through GitHub
+     OIDC. The registry reads `mcpName` from the published `package.json`,
+     so this must come after npm.
 
-   ```sh
-   mcp-publisher login github
-   mcp-publisher publish
-   ```
+   No one needs to create the tag or the GitHub Release by hand. The workflow
+   checks npm, the tag and the registry before each step, so a run that failed
+   part way can be re-run from the Actions tab.
+5. Verify the registry version, provenance, and clean installation before
+   announcing it.
+
+If the workflow cannot list the version in the MCP Registry, list it from the
+repository root after npm shows the new version. Install the publisher once
+with `brew install mcp-publisher`.
+
+```sh
+mcp-publisher login github
+mcp-publisher publish
+```
 
 Only the current minor line is maintained. Patch releases carry compatible bug
 and security fixes; users on an older minor line upgrade with

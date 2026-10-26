@@ -103,6 +103,7 @@ The complete security argument and residual risks are maintained in
 
 CI runs the contract linter, the test suite with an 80% statement threshold,
 TypeScript checks, production builds, and the clean-path repeatability check.
-GitHub Releases trigger `.github/workflows/publish.yml`, which uses npm trusted
-publishing and short-lived OIDC identity. Verification instructions are in
-[RELEASING.md](RELEASING.md).
+A version bump merged to `main` triggers `.github/workflows/publish.yml`, which
+uses npm trusted publishing and short-lived OIDC identity, then creates the
+version's tag and GitHub Release and lists it in the MCP Registry. Verification
+instructions are in [RELEASING.md](RELEASING.md).
