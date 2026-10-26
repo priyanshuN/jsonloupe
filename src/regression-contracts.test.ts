@@ -139,8 +139,27 @@ describe('deployment hardening contracts', () => {
       expect(page).toContain("object-src 'none'");
       expect(page).toContain("script-src 'self'");
       expect(page).not.toMatch(/script-src[^;]*'unsafe-(?:inline|eval)'/i);
-      expect(page).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
+      // The one inline tag allowed is a bare JSON-LD data block, which no
+      // browser executes.
+      expect(page).not.toMatch(/<script(?!\s+type="application\/ld\+json">)(?![^>]*\bsrc=)[^>]*>/i);
     }
+  });
+
+  it('names the site for search engines in one JSON-LD block on the home page', () => {
+    const blocks = [...appHtml.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+    expect(blocks).toHaveLength(1);
+    const data = JSON.parse(blocks[0][1]) as { '@graph': Array<Record<string, unknown>> };
+    const node = (type: string) => data['@graph'].find((n) => n['@type'] === type);
+    expect(node('WebSite')).toMatchObject({ name: 'jsonloupe', url: 'https://jsonloupe.dev/' });
+    // sameAs follows package.json, so a renamed repo or package cannot leave
+    // the name pointing at the old one.
+    const manifest = JSON.parse(packageText) as { name: string; repository: { url: string } };
+    expect(node('Organization')).toMatchObject({
+      name: 'jsonloupe',
+      sameAs: [manifest.repository.url.replace(/\.git$/, ''), `https://www.npmjs.com/package/${manifest.name}`],
+    });
+    // Search Console reports a SoftwareApplication without ratings as invalid.
+    expect(node('SoftwareApplication')).toBeUndefined();
   });
 
   it('sends applicable hardening headers from the packaged loopback server', () => {

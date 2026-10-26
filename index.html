@@ -32,6 +32,40 @@ SPDX-License-Identifier: MIT -->
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
   <meta name="twitter:card" content="summary_large_image" />
+  <!-- Structured data, for searches of the name itself: Google splits
+       "jsonloupe" into "json loupe" and answers with other products. WebSite
+       gives the site its name in results; Organization ties that name to the
+       repo and the npm package through sameAs. SoftwareApplication would be
+       the closer type, but Google reports one without ratings as an invalid
+       item. This is a data block, not a script: browsers never run
+       application/ld+json, so script-src 'self' still holds. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://jsonloupe.dev/#website",
+        "name": "jsonloupe",
+        "alternateName": "jsonloupe.dev",
+        "url": "https://jsonloupe.dev/",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://jsonloupe.dev/#organization" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://jsonloupe.dev/#organization",
+        "name": "jsonloupe",
+        "url": "https://jsonloupe.dev/",
+        "description": "A local-first viewer, diff and query tool for large JSON, and a converter that turns nested JSON into linked Excel or CSV tables.",
+        "sameAs": [
+          "https://github.com/priyanshuN/jsonloupe",
+          "https://www.npmjs.com/package/jsonloupe"
+        ]
+      }
+    ]
+  }
+  </script>
   <!-- The landing headline is the LCP element and uses Martian Mono; the lede
        right under it uses Space Grotesk. Discover both fonts from HTML instead
        of waiting for the stylesheet to reveal them. -->
