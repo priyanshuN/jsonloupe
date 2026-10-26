@@ -1,6 +1,6 @@
 {
   "name": "jsonloupe",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "mcpName": "io.github.priyanshuN/jsonloupe",
   "description": "A loupe for large JSON — lossless, local-first viewer, differ, and query tool. Int64-exact, worker-powered, zstd-aware.",
   "license": "MIT",
