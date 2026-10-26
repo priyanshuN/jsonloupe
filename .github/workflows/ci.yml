@@ -17,24 +17,24 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # Docs-only fast path. When every file a pull request changes is Markdown,
+  # the work Markdown cannot affect is skipped: the build, the browser tests,
+  # the MCP smoke test and the reproducible build. Install, audit, lint and
+  # the unit tests still run, because tests read README.md, SECURITY.md and
+  # RELEASING.md. Pushes to main always run everything. --no-renames lists
+  # both sides of a rename, so moving code into a .md path is not docs-only.
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.diff.outputs.docs_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # A pull request checks out GitHub's merge commit. Two commits deep
-          # reaches its first parent, the base branch, which the docs check
-          # diffs against.
+          # reaches its first parent, the base branch, which the diff is
+          # against.
           fetch-depth: 2
-      # Docs-only fast path. When every file a pull request changes is
-      # Markdown, the steps Markdown cannot affect are skipped: the build, the
-      # browser tests, the MCP smoke test and the reproducible build. Install,
-      # audit, lint and the unit tests still run, because tests read
-      # README.md, SECURITY.md and RELEASING.md. The job still reports, so the
-      # required "test" check passes instead of waiting forever; pushes to
-      # main always run everything. --no-renames lists both sides of a rename,
-      # so moving code into a .md path is not docs-only.
-      - id: changes
+      - id: diff
         if: github.event_name == 'pull_request'
         run: |
           # If the diff fails, docs_only stays unset and everything runs.
@@ -44,6 +44,15 @@ jobs:
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
             echo "Docs only: skipping the build, browser tests, MCP smoke test and reproducible build."
           fi
+
+  test:
+    needs: changes
+    # Runs even when the changes job fails: its output is then empty, so
+    # nothing is skipped. A skipped job would count as a passing check.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 24.16.0
@@ -54,13 +63,50 @@ jobs:
       - run: npm run lint:headers
       - run: npm run lint:security
       - run: npm run coverage -- --coverage.reporter=text
-      - if: steps.changes.outputs.docs_only != 'true'
+      - if: needs.changes.outputs.docs_only != 'true'
         run: npm run build
-      - if: steps.changes.outputs.docs_only != 'true'
-        run: npx playwright install --with-deps chromium
-      - if: steps.changes.outputs.docs_only != 'true'
-        run: npm run test:a11y
-      - if: steps.changes.outputs.docs_only != 'true'
+      - if: needs.changes.outputs.docs_only != 'true'
         run: npm run smoke:mcp
-      - if: steps.changes.outputs.docs_only != 'true'
+      - if: needs.changes.outputs.docs_only != 'true'
         run: npm run check:reproducible-build
+
+  # The browser tests, split across two runners. The two schemes-wide WCAG
+  # tests time out when one runner's four cores carry more than two workers,
+  # so the split adds runners, not workers.
+  e2e-shard:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
+    name: e2e shard ${{ matrix.shard }}/2
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24.16.0
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # No --with-deps: the runner image already has Chrome's system
+      # libraries, and the extra apt install (mostly fonts) once stalled on
+      # Ubuntu's mirror for 13 minutes. No test compares screenshots.
+      - run: npx playwright install chromium
+      - run: npm run test:a11y -- --shard=${{ matrix.shard }}/2
+
+  # One stable check for branch protection, whatever the shard count. It
+  # passes when every shard passed, or when a docs-only pull request skipped
+  # them; a shard skipped for any other reason fails it.
+  e2e:
+    needs: [changes, e2e-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          SHARDS: ${{ needs.e2e-shard.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+        run: |
+          echo "shards: $SHARDS, docs only: ${DOCS_ONLY:-false}"
+          [ "$SHARDS" = success ] || { [ "$SHARDS" = skipped ] && [ "$DOCS_ONLY" = true ]; }
