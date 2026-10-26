@@ -25,7 +25,9 @@ async function expectNoWcagViolations(page: Page, include?: string): Promise<voi
 
 /** Controls ease between colours at rule 12's speed; scan the settled frame. */
 async function settle(page: Page): Promise<void> {
-  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+  // A transition that a newer one replaced is cancelled, and its `finished`
+  // rejects; it has settled all the same.
+  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
 }
 
 async function openSample(page: Page): Promise<void> {
@@ -60,7 +62,8 @@ async function addCheck(page: Page, name: string, query: string, condition?: str
 }
 
 function checkRow(page: Page, name: string): Locator {
-  return page.locator('#pb-check-rows').getByRole('button', { name: new RegExp(`^${name}, check: `) });
+  // A row's name is everything it shows, then `, check: ` and the verdict.
+  return page.locator('#pb-check-rows').getByRole('button', { name: new RegExp(`^${name} .*, check: `) });
 }
 
 test('a check written in the playbook runs, fails, and shows its evidence beside the sheet', async ({ page }) => {
@@ -99,7 +102,7 @@ test('a check written in the playbook runs, fails, and shows its evidence beside
 
   // The evidence path: the source switches to the tree in place, the node is
   // selected, and the playbook is still on screen with focus on the entry.
-  const evidence = page.getByRole('button', { name: 'Show $.orders[1] in the tree' });
+  const evidence = page.getByRole('button', { name: /^\$\.orders\[1\] .*, show in the tree$/ });
   await evidence.focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#tree-pane')).toBeVisible();

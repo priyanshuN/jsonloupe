@@ -5099,6 +5099,9 @@ mark.hl {
   box-shadow: none;
 }
 .actions button:hover { color: var(--text); border-color: var(--border-strong); }
+/* The word on each action is its accessible name, drawn here rather than
+   written as text, so it never joins the row's visible label (tree.ts). */
+.actions button::before { content: attr(aria-label); }
 
 /* Rule 20's reserved gutter costs ~140px on every row — a third of a phone's
    width, spent on buttons that only ever show on the one row you tapped. On a

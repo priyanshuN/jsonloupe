@@ -136,10 +136,10 @@ describe('sentences', () => {
     expect(previewSentence('error', 'Could not run — bad query')).toBe('✗ Could not run — bad query');
   });
 
-  it('leads a row label with the visible name', () => {
-    expect(rowLabel('orders have customerId', 'check', 'Fail — 37 matches; expected no matches'))
-      .toBe('orders have customerId, check: Fail — 37 matches; expected no matches');
-    expect(rowLabel('count orders', 'function', '18204')).toBe('count orders, function: 18204');
+  it('leads a row label with everything the row shows', () => {
+    expect(rowLabel('orders have customerId 37 matches · expected none', 'check', 'Fail — 37 matches; expected no matches'))
+      .toBe('orders have customerId 37 matches · expected none, check: Fail — 37 matches; expected no matches');
+    expect(rowLabel('count orders 18204', 'function', '18204')).toBe('count orders 18204, function: 18204');
   });
 });
 

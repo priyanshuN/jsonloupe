@@ -41,7 +41,8 @@ async function importPlaybook(page: Page, checks: Check[], functions: Fn[] = [])
 }
 
 function checkRow(page: Page, name: string): Locator {
-  return page.locator('#pb-check-rows').getByRole('button', { name: new RegExp(`^${name}, check: `) });
+  // A row's name is everything it shows, then `, check: ` and the verdict.
+  return page.locator('#pb-check-rows').getByRole('button', { name: new RegExp(`^${name} .*, check: `) });
 }
 
 function itemOf(page: Page, name: string): Locator {
@@ -129,7 +130,9 @@ test.describe('a verdict that could not run', () => {
     await expect(page.locator('#pb-check-error')).toBeVisible();
 
     const scan = async (): Promise<void> => {
-      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+      // A transition that a newer one replaced is cancelled, and its `finished`
+      // rejects; it has settled all the same.
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
       const results = await new AxeBuilder({ page }).withTags(wcagTags).include('#run-pane').analyze();
       expect(results.violations.map((v) => ({ id: v.id, targets: v.nodes.map((n) => n.target.join(' ')) }))).toEqual([]);
     };
