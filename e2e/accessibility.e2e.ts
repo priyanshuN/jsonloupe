@@ -359,7 +359,9 @@ test('colour schemes: a keyboard menu that previews, keeps a pick, and passes WC
     await expect(button).toContainText(name);
     // Controls ease between colours at rule 12's speed; scan the settled frame,
     // not a blend of two schemes.
-    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+    // A transition that a newer one replaced is cancelled, and its `finished`
+    // rejects; it has settled all the same.
+    await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
     await expectNoWcagViolations(page);
   }
 

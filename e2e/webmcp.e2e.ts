@@ -17,8 +17,8 @@ interface ModelContextTool {
 }
 interface ModelContextLike {
   getTools(): Promise<ModelContextTool[]>;
-  /** Chrome 151 takes the arguments as a JSON string, not an object. */
-  executeTool(tool: ModelContextTool, input: string): Promise<unknown>;
+  /** Chrome 156 takes the arguments as an object; Chrome 151 took a JSON string. */
+  executeTool(tool: ModelContextTool, input: Record<string, unknown> | string): Promise<unknown>;
 }
 
 type ToolResult = Record<string, unknown>;
@@ -85,11 +85,17 @@ async function callTool(page: Page, name: string, input: Record<string, unknown>
       if (!mc) throw new Error('document.modelContext is not available');
       const tool = (await mc.getTools()).find((candidate) => candidate.name === name);
       if (!tool) throw new Error(`no registered tool named ${name}`);
-      const out = await mc.executeTool(tool, input);
+      // Chrome 151 cannot parse an object and refuses before the tool runs,
+      // so sending the same arguments again as text never runs a tool twice.
+      // Drop the retry once no supported Playwright bundles a Chrome that old.
+      const out = await mc.executeTool(tool, input).catch((error: unknown) => {
+        if (!String(error).includes('Failed to parse input arguments')) throw error;
+        return mc.executeTool(tool, JSON.stringify(input));
+      });
       // Results come back as JSON text, the same as they would over stdio.
       return (typeof out === 'string' ? JSON.parse(out) : out) as Record<string, unknown>;
     },
-    { name, input: JSON.stringify(input) },
+    { name, input },
   );
 }
 
@@ -160,7 +166,8 @@ test('reveal_path expands the tree to the node and flashes the row it landed on'
   // ...and exactly the second of them carries the one-shot flash class.
   const flashed = page.locator('#tree-layer .row.flash');
   await expect(flashed).toHaveCount(1);
-  await expect(flashed).toHaveAttribute('aria-label', /^1: /);
+  // Row 4: the root, `tasks`, element 0, then element 1.
+  await expect(flashed).toHaveAttribute('aria-label', /^4 1: /);
 });
 
 /**
@@ -186,6 +193,9 @@ test('sample is filter-independent: it answers the document, not the visible row
     query: "$.deliveries[?(@.status == 'FAILED')]",
   });
   expect(highlighted).toMatchObject({ ok: true, matches: 3 });
+  // The tool answers before the tree redraws; count the filtered rows, not
+  // the ones still on screen from before.
+  await expect(page.getByRole('button', { name: 'Filter the tree to matches' })).toHaveText('3');
   const rowsWhileFiltered = await page.getByRole('treeitem').count();
 
   // 1. A single match outside the filtered set: used to fail with

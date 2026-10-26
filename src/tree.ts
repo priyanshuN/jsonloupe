@@ -376,15 +376,18 @@ export class VirtualTree {
     el.setAttribute('role', 'treeitem');
     el.setAttribute('aria-level', String(r.depth + 1));
     el.setAttribute('aria-selected', String(selected));
-    el.setAttribute(
-      'aria-label',
-      r.type === 'chunk'
-        ? `${r.preview}, ${r.childCount} items`
-        : r.key === null
-          ? r.preview
-          : `${r.key}: ${r.preview}`,
-    );
     if (r.hasChildren) el.setAttribute('aria-expanded', String(r.expanded));
+    // The accessible name is the row's visible text, in order (WCAG 2.5.3,
+    // label in name), so a speech-input user can say what they see. Buttons
+    // name themselves. A space goes between the parts, or anything that reads
+    // the row's text (axe, a copied selection) gets "3currency" for the row
+    // number and key; a flex row does not render whitespace between items.
+    const name: string[] = [];
+    const named = (part: HTMLElement): void => {
+      if (name.length) el.append(' ');
+      el.appendChild(part);
+      name.push((part.textContent ?? '').trim());
+    };
     // Roving tab stop: enter the tree once, then use arrows. The first visible
     // row is the entry point until a row has been selected.
     el.tabIndex = selected || (this.selected < 0 && r.index === this.lastRows[0]?.index) ? 0 : -1;
@@ -392,7 +395,7 @@ export class VirtualTree {
     const num = document.createElement('span');
     num.className = 'rownum';
     num.textContent = String(r.index + 1);
-    el.appendChild(num);
+    named(num);
 
     const indent = document.createElement('span');
     indent.className = 'indent';
@@ -410,11 +413,12 @@ export class VirtualTree {
       const range = document.createElement('span');
       range.className = 'chunk-range';
       range.textContent = `[ ${r.preview} ]`;
-      el.appendChild(range);
+      named(range);
       const count = document.createElement('span');
       count.className = 'chunk-count';
       count.textContent = `${r.childCount} items`;
-      el.appendChild(count);
+      named(count);
+      el.setAttribute('aria-label', name.join(' '));
       return el;
     }
 
@@ -426,7 +430,7 @@ export class VirtualTree {
       separator.className = 'key-separator';
       separator.textContent = ':';
       key.appendChild(separator);
-      el.appendChild(key);
+      named(key);
     }
 
     if (r.unpacked) {
@@ -460,12 +464,12 @@ export class VirtualTree {
     // Only a primitive's own text is marked: a container's preview repeats its
     // children's keys, and marking those would light up every ancestor row.
     else appendMarked(val, r.preview, this.matcher);
-    el.appendChild(val);
+    named(val);
     if (tail >= 0) {
       const count = document.createElement('span');
       count.className = 'val-count';
       count.textContent = r.preview.slice(tail);
-      el.appendChild(count);
+      named(count);
     }
 
     if (r.maybeJson) {
@@ -480,7 +484,7 @@ export class VirtualTree {
       const hint = document.createElement('span');
       hint.className = 'hint';
       hint.textContent = `· ${r.hint}`;
-      el.appendChild(hint);
+      named(hint);
     }
 
     if (r.bytes !== undefined && r.bytes >= 1024) {
@@ -488,8 +492,9 @@ export class VirtualTree {
       size.className = 'weight';
       size.textContent = fmtBytes(r.bytes);
       size.title = 'Approx serialized size of this subtree';
-      el.appendChild(size);
+      named(size);
     }
+    el.setAttribute('aria-label', name.join(' '));
 
     // The gutter these sit in is reserved on EVERY row (style.css rule 20), so
     // arriving on a row cannot re-truncate the value already under the pointer.
@@ -511,7 +516,10 @@ export class VirtualTree {
     for (const [cls, label, title, key] of btns) {
       const b = document.createElement('button');
       b.className = cls;
-      b.textContent = label;
+      // The word is drawn from the label by CSS rather than written as text:
+      // on the row under the pointer or focus, text here would join the row's
+      // visible label, which the row's name above has to hold whole.
+      b.setAttribute('aria-label', label);
       b.title = title;
       if (key !== undefined) b.dataset.key = key;
       actions.appendChild(b);

@@ -18,6 +18,8 @@ export interface SemanticCompareCallbacks {
 const ROW_H = 22; // = --row-h in style.css (rule 8b)
 const OVERSCAN = 12;
 const INDENT_W = 16;
+/** The parts of a row that show words, in document order, for its label. */
+const SHOWN_PARTS = '.compare-key, .compare-preview, .compare-missing, .compare-match-label, .compare-embedded';
 
 const STATUS_META: Record<CompareStatus, { glyph: string; title: string }> = {
   equal: { glyph: '=', title: 'Equal' },
@@ -166,7 +168,6 @@ export class SemanticCompareView {
     element.setAttribute('role', 'treeitem');
     element.setAttribute('aria-level', String(row.depth + 1));
     element.setAttribute('aria-selected', row.index === this.selected ? 'true' : 'false');
-    element.setAttribute('aria-label', `${meta.title}: ${row.pathText}`);
     if (row.hasChildren) element.setAttribute('aria-expanded', String(row.expanded));
 
     element.appendChild(this.sideElement('left', row));
@@ -216,6 +217,16 @@ export class SemanticCompareView {
 
     element.appendChild(gutter);
     element.appendChild(this.sideElement('right', row));
+
+    // The status and path come first, then the row's visible text in order
+    // (WCAG 2.5.3, label in name), so a speech-input user can say what they
+    // see. A space goes before each part, or anything that reads the row's
+    // text gets `1a:` for a left value 1 beside a right key a; a grid or flex
+    // container does not render whitespace between its items.
+    const shown = [...element.querySelectorAll<HTMLElement>(SHOWN_PARTS)];
+    for (const part of shown.slice(1)) part.before(' ');
+    const text = shown.map((part) => part.textContent).filter(Boolean).join(' ');
+    element.setAttribute('aria-label', `${meta.title}: ${row.pathText}, ${text}`);
     return element;
   }
 
