@@ -7,9 +7,12 @@ import cliSource from '../bin/jsonloupe.mjs?raw';
 import indexNowSource from '../scripts/indexnow.mjs?raw';
 import deployWorkflow from '../.github/workflows/deploy-pages.yml?raw';
 import releasing from '../RELEASING.md?raw';
+import securityPolicy from '../SECURITY.md?raw';
+import securityTxt from '../public/.well-known/security.txt?raw';
 
 // How people and agents find jsonloupe outside Google: the MCP Registry entry
-// (server.json) and the IndexNow ping after each deploy.
+// (server.json), the IndexNow ping after each deploy, and security.txt for
+// whoever has a vulnerability to report.
 
 const manifest = JSON.parse(packageText) as { name: string; version: string; mcpName: string };
 const server = JSON.parse(serverText) as {
@@ -74,5 +77,33 @@ describe('the IndexNow ping', () => {
     // CodeQL's js/file-access-to-http: no file read may flow into the request.
     expect(indexNowSource).toContain("await live('/sitemap.xml')");
     expect(indexNowSource).not.toMatch(/\bnode:fs\b|readFile|readdir/);
+  });
+});
+
+describe('security.txt', () => {
+  const fields = Object.fromEntries(
+    securityTxt
+      .trim()
+      .split('\n')
+      .map((line) => line.split(/:\s(.*)/s).slice(0, 2)),
+  ) as Record<string, string>;
+
+  it('names the address SECURITY.md asks reporters to use', () => {
+    const email = securityPolicy.match(/email \*\*([^*]+@jsonloupe\.dev)\*\*/)?.[1];
+    expect(email).toBeDefined();
+    expect(fields.Contact).toBe(`mailto:${email}`);
+    expect(fields.Canonical).toBe('https://jsonloupe.dev/.well-known/security.txt');
+  });
+
+  it('has not expired, and expires within a year as RFC 9116 asks', () => {
+    // A file past its Expires date tells readers to ignore it. Renew the date
+    // when this fails.
+    const left = Date.parse(fields.Expires) - Date.now();
+    expect(left).toBeGreaterThan(0);
+    expect(left).toBeLessThanOrEqual(366 * 24 * 60 * 60 * 1000);
+  });
+
+  it('survives the Pages upload, which drops hidden folders by default', () => {
+    expect(deployWorkflow).toMatch(/upload-pages-artifact@\S+ # v5\.0\.0\n\s+with:\n\s+path: dist\n\s+include-hidden-files: true/);
   });
 });

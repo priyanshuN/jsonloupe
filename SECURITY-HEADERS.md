@@ -72,6 +72,13 @@ claim to have deployed.
    nothing off-origin. The packaged loopback server sends the same header.
 6. Do not enable HSTS `includeSubDomains` or preload without separately checking
    every subdomain; neither is required for this project criterion.
+7. Set **Minimum TLS Version** to TLS 1.2 (SSL/TLS → Edge Certificates). The
+   zone default still accepts TLS 1.0 and 1.1, which browsers no longer use.
+
+The `_github-pages-challenge-priyanshuN` TXT record verifies `jsonloupe.dev` on
+the GitHub account. While the apex records point at GitHub, it stops any other
+account from publishing a Pages site at the domain, so keep it, even while the
+site is down or the repository is private.
 
 Cloudflare applies response transforms only to proxied traffic. If the records
 are returned to DNS-only mode, the headers disappear and HSTS can make the site
