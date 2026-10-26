@@ -56,10 +56,10 @@ describe('the IndexNow ping', () => {
   const keyFiles = import.meta.glob<string>('../public/*.txt', { query: '?raw', import: 'default', eager: true });
   const keys = Object.entries(keyFiles).filter(([path]) => /\/[0-9a-f]{32}\.txt$/.test(path));
 
-  it('ships one key file that holds exactly its own name', () => {
+  it('ships the key file the script names, holding exactly the key', () => {
+    const key = indexNowSource.match(/const KEY = '([0-9a-f]{32})';/)?.[1];
     expect(keys).toHaveLength(1);
-    const [path, content] = keys[0];
-    expect(content).toBe(path.match(/([0-9a-f]{32})\.txt$/)?.[1]);
+    expect(keys[0]).toEqual([`../public/${key}.txt`, key]);
   });
 
   it('runs after the deploy, from the sitemap, without failing the deploy', () => {
@@ -67,7 +67,12 @@ describe('the IndexNow ping', () => {
     expect(deployWorkflow).toContain('continue-on-error: true');
     expect(deployWorkflow).toContain('node scripts/indexnow.mjs "$BEFORE" "$GITHUB_SHA"');
     expect(deployWorkflow).toContain('BEFORE: ${{ github.event.before }}');
-    expect(indexNowSource).toContain("join(root, 'public', 'sitemap.xml')");
     expect(indexNowSource).toContain('https://api.indexnow.org/indexnow');
+  });
+
+  it('sends only what the live site serves, never a file from the checkout', () => {
+    // CodeQL's js/file-access-to-http: no file read may flow into the request.
+    expect(indexNowSource).toContain("await live('/sitemap.xml')");
+    expect(indexNowSource).not.toMatch(/\bnode:fs\b|readFile|readdir/);
   });
 });
