@@ -175,11 +175,13 @@ describe('semantic compare rows', () => {
 
     expect(typed.getAttribute('role')).toBe('treeitem');
     expect(typed.getAttribute('aria-level')).toBe('3');
-    expect(typed.getAttribute('aria-label')).toBe('Type changed: $.a.b');
+    // Status and path, then both sides as shown (WCAG 2.5.3, label in name).
+    expect(typed.getAttribute('aria-label')).toBe('Type changed: $.a.b, b: 1 b: "1"');
     // A leaf is not "collapsed": aria-expanded on it would announce a toggle that does nothing.
     expect(typed.hasAttribute('aria-expanded')).toBe(false);
     expect(typed.querySelector<HTMLElement>('.compare-indent')?.style.width).toBe('32px');
-    expect(branch.getAttribute('aria-label')).toBe('Ambiguous match: $.c');
+    // This fixture gives the branch keys but no previews.
+    expect(branch.getAttribute('aria-label')).toBe('Ambiguous match: $.c, c: c:');
     expect(branch.querySelector('.compare-caret')?.classList.contains('open')).toBe(true);
   });
 });

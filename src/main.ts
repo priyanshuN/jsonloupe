@@ -4083,6 +4083,9 @@ let filterOn = false;
 // scroll position is main-side), restored when the filter is cleared.
 let filterScrollSnapshot: number | null = null;
 
+/** The filter button's name in index.html, before it shows a count. */
+const FILTER_LABEL = 'Filter the tree to matches';
+
 // The funnel says what the control DOES and never changes; the count says what
 // it did, and only exists while the filter is on. Rebuilt rather than assigned
 // as text, because the glyph is a child element and `textContent` would delete
@@ -4091,10 +4094,13 @@ let filterScrollSnapshot: number | null = null;
 function paintFilterBtn(matches: number | null): void {
   filterBtn.replaceChildren(icon('filter'));
   filterBtn.setAttribute('aria-pressed', String(matches !== null));
+  // The name carries the count the button shows (WCAG 2.5.3, label in name).
+  filterBtn.setAttribute('aria-label', FILTER_LABEL);
   if (matches === null) return;
   const count = document.createElement('span');
   count.textContent = `${fmtNumber(matches)}${matches >= 2000 ? '+' : ''}`;
   filterBtn.appendChild(count);
+  filterBtn.setAttribute('aria-label', `${FILTER_LABEL}, ${count.textContent} found`);
 }
 
 async function setFilter(query: string): Promise<void> {
@@ -6607,6 +6613,17 @@ function sheetEl<K extends keyof HTMLElementTagNameMap>(tag: K, className: strin
   return el;
 }
 
+/**
+ * A playbook row's visible words, spaced apart, for a label that holds them
+ * whole (WCAG 2.5.3, label in name). Without the space anything that reads the
+ * button's text gets "cities served2 values"; a flex row does not render it.
+ */
+function shownText(button: HTMLElement): string {
+  const parts = [...button.querySelectorAll<HTMLElement>('.run-lib-name, .pb-first, .pb-tag, .pb-outcome')];
+  for (const part of parts.slice(1)) part.before(' ');
+  return parts.map((part) => part.textContent).join(' ');
+}
+
 function sheetButton(className: string, text: string, focusKey: string, title?: string): HTMLButtonElement {
   const button = sheetEl('button', className, text);
   button.type = 'button';
@@ -6679,7 +6696,7 @@ function renderCheckItem(check: SavedCheck): HTMLElement {
   const caret = sheetEl('span', 'pb-caret', open ? '▾' : '▸');
   caret.setAttribute('aria-hidden', 'true');
   button.append(names, outcome, caret);
-  button.setAttribute('aria-label', rowLabel(check.name, 'check', sentence));
+  button.setAttribute('aria-label', rowLabel(shownText(button), 'check', sentence));
   if (stale) button.title = 'From before you edited this document';
   row.append(mark, button);
   item.append(row, renderCheckDetail(check, state, run, stale, misfits, open));
@@ -6735,10 +6752,13 @@ function renderCheckDetail(
         : sheetButton('pb-evidence', '', `ev-${index}`, `Show ${evidence.pathText} in the tree`);
       if (!stale) {
         entry.dataset.ev = String(index);
-        entry.setAttribute('aria-label', `Show ${evidence.pathText} in the tree`);
+        // The name leads with what the entry shows (WCAG 2.5.3, label in name).
+        entry.setAttribute('aria-label', `${evidence.pathText} ${evidence.preview}, show in the tree`);
       }
       entry.classList.toggle('on', pbRevealed?.id === check.id && pbRevealed.index === index);
-      entry.append(sheetEl('span', 'pb-ev-path', evidence.pathText), sheetEl('span', 'pb-ev-preview', evidence.preview));
+      // The space keeps `$.a.b` and `42` two words for anything that reads the
+      // entry's text; the grid does not render it.
+      entry.append(sheetEl('span', 'pb-ev-path', evidence.pathText), ' ', sheetEl('span', 'pb-ev-preview', evidence.preview));
       list.append(entry);
     });
     panel.append(matched, list);
@@ -6820,7 +6840,7 @@ function renderFunctionItem(rec: SavedScript): HTMLElement {
   const caret = sheetEl('span', 'pb-caret', open ? '▾' : '▸');
   caret.setAttribute('aria-hidden', 'true');
   button.append(names, outcome, caret);
-  button.setAttribute('aria-label', rowLabel(rec.name, 'function', sentence));
+  button.setAttribute('aria-label', rowLabel(shownText(button), 'function', sentence));
   row.append(zone, button);
   item.append(row, renderFunctionDetail(rec, run, misfit, open));
   return item;

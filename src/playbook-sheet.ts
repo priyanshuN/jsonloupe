@@ -105,9 +105,12 @@ export function previewSentence(verdict: RunVerdict, summary: string): string {
   return verdict === 'inconclusive' ? `Would be ${lowered}` : `Would ${lowered}`;
 }
 
-/** A row button's accessible name: its own visible name first, then what it says. */
-export function rowLabel(name: string, kind: 'check' | 'function', sentence: string): string {
-  return `${name}, ${kind}: ${sentence}`;
+/**
+ * A row button's accessible name: everything it shows first and whole (WCAG
+ * 2.5.3, label in name), then what it is and the engine's own sentence.
+ */
+export function rowLabel(shown: string, kind: 'check' | 'function', sentence: string): string {
+  return `${shown}, ${kind}: ${sentence}`;
 }
 
 /**

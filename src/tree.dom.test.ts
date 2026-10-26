@@ -87,7 +87,9 @@ describe('VirtualTree property keys and row actions', () => {
     expect(row.getAttribute('role')).toBe('treeitem');
     expect(row.getAttribute('aria-level')).toBe('2');
     expect(row.getAttribute('aria-expanded')).toBe('true');
-    expect(row.getAttribute('aria-label')).toBe('payload: { inner } · 1 key');
+    // The name is the row's visible text: row number, key, then the open
+    // object's count (WCAG 2.5.3, label in name).
+    expect(row.getAttribute('aria-label')).toBe('2 payload: { 1 key }');
   });
 
   it('routes every row action without changing selection', () => {
@@ -251,7 +253,7 @@ describe('VirtualTree object summaries and truncation', () => {
     expect(closed.querySelector('.val')?.textContent).toBe('{ a, b, c, d, e, … }');
     expect(closed.querySelector('.val-count')?.textContent).toBe(' · 10 keys');
     // The accessible name still carries the whole preview.
-    expect(closed.getAttribute('aria-label')).toBe('payload: { a, b, c, d, e, … } · 10 keys');
+    expect(closed.getAttribute('aria-label')).toBe('2 payload: { a, b, c, d, e, … } · 10 keys');
   });
 
   it('titles a value only while it is cut short', () => {
@@ -620,11 +622,11 @@ describe('VirtualTree selection by pointer, focus and keyboard', () => {
     expect(viewport.scrollTop).toBe(132 - 56);
   });
 
-  it('names a keyless root by its preview alone', () => {
+  it('names a keyless root by its row number and preview', () => {
     const { inner } = harness();
     const root = inner.rowEl({ ...objectRow, index: 0, depth: 0, key: null, expanded: false });
 
-    expect(root.getAttribute('aria-label')).toBe('{ inner } · 1 key');
+    expect(root.getAttribute('aria-label')).toBe('1 { inner } · 1 key');
     expect(root.querySelector('.key')).toBeNull();
     expect(root.querySelector('.btn-key')).toBeNull();
   });
@@ -632,7 +634,7 @@ describe('VirtualTree selection by pointer, focus and keyboard', () => {
   it('offers only the actions its host granted', () => {
     const { inner } = harness({ onCopyKey: undefined });
     const row = inner.rowEl({ ...objectRow, type: 'array' });
-    const labels = [...row.querySelectorAll('.actions button')].map((button) => button.textContent);
+    const labels = [...row.querySelectorAll('.actions button')].map((button) => button.getAttribute('aria-label'));
 
     // No onCopyKey, no onTable: no `key`, no `tbl`, never a dead chip.
     expect(labels).toEqual(['path', 'copy']);
