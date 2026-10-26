@@ -3,7 +3,7 @@
 
 (function () {
   // The search landing pages (json-editor.html, large-json-viewer.html,
-  // json-diff.html) share this script. Like converter-landing.js it opens
+  // jsonl-viewer.html, json-diff.html) share this script. Like converter-landing.js it opens
   // nothing itself: it collects the pasted text and hands it to the app, which
   // owns parsing, editing and comparing. The <body> names the route and the
   // sessionStorage key, so the app reads only what this page sent. With

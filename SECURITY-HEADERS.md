@@ -55,8 +55,9 @@ claim to have deployed.
 3. Create a response-header transform rule for hostnames `jsonloupe.dev` and
    `www.jsonloupe.dev`, on all paths, setting the five non-CSP headers above.
 4. Create a second response-header transform rule for the HTML paths `/`,
-   `/index.html`, `/json-to-excel.html`, `/json-editor.html`, `/json-diff.html`,
-   `/large-json-viewer.html`, `/spec.html`, and `/styleguide.html`,
+   `/index.html`, `/json-to-excel.html`, `/json-to-csv.html`, `/json-editor.html`,
+   `/json-diff.html`, `/large-json-viewer.html`, `/jsonl-viewer.html`,
+   `/spec.html`, and `/styleguide.html`,
    setting `Content-Security-Policy` to the policy above. The page policy is
    not applied to the Run worker, which must compile the script a user
    explicitly enters, while the document still restricts worker creation to
