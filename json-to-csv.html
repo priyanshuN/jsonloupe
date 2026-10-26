@@ -1,0 +1,168 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/json-to-csv.html" />
+  <!-- The CSV twin of json-to-excel.html: the title, the description and the
+       <h1> open with the words people type ("convert json to csv"), and the
+       page hands the paste to the same converter. -->
+  <title>Convert JSON to CSV — jsonloupe</title>
+  <meta name="description" content="Convert JSON to CSV in your browser. Each list inside your file becomes its own CSV file joined by ID, long ID numbers keep every digit, and nothing is uploaded." />
+  <meta property="og:title" content="Convert JSON to CSV" />
+  <meta property="og:description" content="Paste JSON, get CSV files: one per list, joined by ID, with every digit kept. The file never leaves your browser." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jsonloupe.dev/json-to-csv.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <!-- Link-preview card for HN, Reddit, X, Slack and Discord; its source is
+       .github/assets/og-image.svg. Crawlers need an absolute URL and a PNG. -->
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<body>
+  <!-- index.html's marketing landing, reused whole, as on json-to-excel.html.
+       main.ts does NOT run here: converter-landing.js switches the example's
+       file tabs and hands the pasted text to the app's converter. -->
+  <section id="landing">
+    <header class="lp-header">
+      <a class="lp-brand" href="./" title="jsonloupe">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span>json<span class="brand-loupe">loupe</span></span>
+      </a>
+      <nav class="lp-nav">
+        <a href="#what">what you get</a>
+        <a href="#how">how it works</a>
+        <a href="#privacy">privacy</a>
+        <a href="./">the viewer</a>
+      </nav>
+      <span class="lp-spacer"></span>
+      <span class="lp-meta">free · no account</span>
+      <button id="cta-open" class="lp-cta" type="button">open the converter →</button>
+    </header>
+
+    <div class="lp-hero">
+      <div class="lp-hero-copy">
+        <h1>Convert JSON to CSV</h1>
+        <p class="lp-lede">Paste the JSON you were handed and get CSV files back: one file per list, joined up by ID, with every number written exactly as it was.</p>
+        <!-- What the visitor gets, as the files themselves. This text is the
+             converter's real CSV output for the sample behind "try a sample"
+             (src/json-to-csv-page.test.ts runs the converter to check), less
+             the byte-order mark at the start of each file. -->
+        <figure class="lp-sheet" aria-label="Example output: two CSV files, orders.csv and items.csv">
+          <div class="lp-sheet-grid">
+<pre data-sheet="orders">id,status,placed_at,total,address.city,address.postcode
+1234567890123456789,shipped,2026-10-01 00:00:00,27.50,Pune,411001
+1234567890123456790,packing,2026-10-02 00:00:00,12.50,Delhi,110001</pre>
+<pre data-sheet="items" hidden>order_id,sku,qty,price
+1234567890123456789,MUG-RED,2,8.75
+1234567890123456789,TEA-500G,1,10.00
+1234567890123456790,TEA-500G,1,10.00
+1234567890123456790,SPOON,2,1.25</pre>
+          </div>
+          <div class="lp-sheet-tabs">
+            <button type="button" class="lp-sheet-tab on" data-sheet="orders" aria-pressed="true">orders.csv</button>
+            <button type="button" class="lp-sheet-tab" data-sheet="items" aria-pressed="false">items.csv</button>
+          </div>
+          <figcaption class="lp-sheet-note">Each order's items land in their own file, with an order_id column filled in so they join back.</figcaption>
+        </figure>
+      </div>
+      <div class="lp-paste">
+        <div class="lp-paste-head">
+          <span class="lp-paste-title">Paste JSON</span>
+          <span class="lp-paste-status">nothing leaves this tab</span>
+        </div>
+        <div class="lp-paste-body">
+          <textarea id="paste-box" spellcheck="false"
+            placeholder="Paste JSON here, then press convert."></textarea>
+          <p class="lp-paste-hint">you see the tables it found, and can rename or drop columns, then choose CSV before anything downloads</p>
+          <div class="lp-paste-actions">
+            <button id="parse-btn" type="button">convert</button>
+            <button id="sample-btn" type="button" title="Convert the two example orders shown on this page">try a sample</button>
+            <button id="open-btn" type="button" title="Open the converter and choose a file there — no size limit">open a file instead</button>
+            <span class="lp-spacer"></span>
+            <span class="lp-note">⌃↵ to convert</span>
+          </div>
+          <div id="parse-error" class="error" hidden></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="lp-band" id="what">
+      <h2 class="lp-h2">What this converter gets right</h2>
+      <div class="lp-grid">
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-accent">lists</span>
+          <h3>A list gets its own file</h3>
+          <p>An order with three items does not become <code>items/0/sku, items/1/sku, items/2/sku</code>. The items land in their own CSV with the order's ID on every row, so they join back with a lookup.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-number">numbers</span>
+          <h3>Long IDs are written digit for digit</h3>
+          <p>A 19-digit order number is written exactly as it was. A spreadsheet app can still round it when it opens a CSV, so the converter names the columns at risk before you download, and Excel output is one click away.</p>
+        </article>
+        <article class="lp-cell">
+          <span class="lp-tag lp-tag-ok">safe to open</span>
+          <h3>Opens cleanly in Excel</h3>
+          <p>A text cell that starts with =, +, - or @ gets a leading apostrophe, so it cannot run as a formula. Files are UTF-8 with the marker Excel looks for, so Müller stays Müller.</p>
+          <div class="lp-chips lp-cell-chips">
+            <span class="lp-chip">one CSV per list</span>
+            <span class="lp-chip">.zip download</span>
+            <span class="lp-chip">saved setups</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div class="lp-split" id="how">
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">Same files every month</h2>
+        <p class="lp-body">You see real rows from your own file first, and rename headings or drop columns. Save the setup, and next month's file gives you the same files with the same headings.</p>
+      </section>
+      <section class="lp-split-cell">
+        <h2 class="lp-h2 lp-h2-sm">From the command line</h2>
+        <p class="lp-body">The same converter runs offline with Node. <code>draft</code> writes a setup you can read and edit; <code>convert</code> writes one CSV per table.</p>
+        <pre class="lp-code">npx jsonloupe draft orders.json -o spec.json
+npx jsonloupe convert orders.json --spec spec.json --to csv</pre>
+      </section>
+    </div>
+
+    <section class="lp-band lp-privacy" id="privacy">
+      <div>
+        <h2 class="lp-h2 lp-h2-sm">The file never leaves your browser</h2>
+        <p class="lp-body lp-body-wide">The conversion runs inside this tab. There is no server to send your file to, so it keeps working with your wifi off. A file you are not allowed to email is a file you are allowed to convert.</p>
+      </div>
+      <div class="lp-facts">
+        <div class="lp-fact"><span>bytes uploaded</span><span class="lp-fact-ok">0</span></div>
+        <div class="lp-fact"><span>account needed</span><span class="lp-fact-ok">none</span></div>
+        <div class="lp-fact"><span>works with wifi off</span><span class="lp-fact-ok">yes</span></div>
+        <div class="lp-fact"><span>price</span><span class="lp-fact-accent">free · MIT</span></div>
+      </div>
+    </section>
+
+    <footer class="lp-footer">
+      <span>jsonloupe — MIT</span>
+      <span class="lp-spacer"></span>
+      <a href="./#convert">open the converter</a>
+      <a href="./">the viewer</a>
+      <a href="./json-to-excel.html">json to excel</a>
+      <a href="./json-editor.html">json editor</a>
+      <a href="./json-diff.html">json diff</a>
+      <a href="./large-json-viewer.html">large files</a>
+      <a href="./jsonl-viewer.html">jsonl viewer</a>
+      <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+      <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
+    </footer>
+  </section>
+
+  <script src="/converter-landing.js"></script>
+</body>
+</html>

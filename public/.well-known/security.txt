@@ -1,0 +1,5 @@
+Contact: mailto:security@jsonloupe.dev
+Expires: 2027-10-25T00:00:00Z
+Policy: https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md
+Canonical: https://jsonloupe.dev/.well-known/security.txt
+Preferred-Languages: en

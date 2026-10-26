@@ -37,10 +37,11 @@ export function lparse(text: string, parseNumber: (v: string) => unknown = numbe
   return mayNameProto(text) ? restoreProtoMembers(value, JSON.parse(text)) : value;
 }
 
-// lossless-json builds each object as `{}` and assigns `object[key] = value`,
-// so a "__proto__" member runs Object.prototype's setter: an object value
-// becomes the object's prototype (its fields then read as the document's own)
-// and a scalar is dropped. JSON.parse defines the member as an own property.
+// lossless-json up to 4.3.1 builds each object as `{}` and assigns
+// `object[key] = value`, so a "__proto__" member runs Object.prototype's
+// setter: an object value becomes the object's prototype (its fields then
+// read as the document's own) and a scalar is dropped. JSON.parse, and
+// lossless-json from 4.3.2, define the member as an own property.
 // Only text that can spell that key pays for the repair: the literal
 // `"__proto__"`, or a \u escape of one of its characters.
 function mayNameProto(text: string): boolean {
@@ -61,9 +62,12 @@ function restoreProtoMembers(value: unknown, plain: unknown): unknown {
   }
   const object = value as Record<string, unknown>;
   const source = plain as Record<string, unknown>;
-  // The setter kept an object, array, null or boxed number as the prototype,
-  // and dropped a string, boolean or native number, which JSON.parse already
-  // holds exactly (a native number is one whose float form IS its spelling).
+  // An own "__proto__" means the library defined the member itself (4.3.2
+  // on), so its value is the lossless one; JSON.parse's copy would round a
+  // boxed number. Otherwise the setter kept an object, array, null or boxed
+  // number as the prototype, and dropped a string, boolean or native number,
+  // which JSON.parse already holds exactly (a native number is one whose
+  // float form IS its spelling).
   const prototype: unknown = Object.getPrototypeOf(object);
   // Object.fromEntries defines each member as an own data property, as
   // JSON.parse does, so a "__proto__" entry never reaches the setter. Every
@@ -72,7 +76,12 @@ function restoreProtoMembers(value: unknown, plain: unknown): unknown {
   // the very setter this undoes. Only text mayNameProto lets through pays.
   return Object.fromEntries(
     Object.keys(source).map((key) => {
-      const member = key !== '__proto__' ? object[key] : prototype === Object.prototype ? source[key] : prototype;
+      const member =
+        key !== '__proto__' || Object.hasOwn(object, key)
+          ? object[key]
+          : prototype === Object.prototype
+            ? source[key]
+            : prototype;
       return [key, restoreProtoMembers(member, source[key])];
     }),
   );

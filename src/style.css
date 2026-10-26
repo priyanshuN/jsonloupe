@@ -2170,6 +2170,16 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 .lp-sheet .lp-sheet-id { color: var(--c-number); }
 .lp-sheet .lp-sheet-num { text-align: right; color: var(--text); }
 .lp-sheet th.lp-sheet-join { color: var(--accent); }
+/* json-to-csv.html shows its files as the text they are, in the same frame;
+   long lines scroll inside .lp-sheet-grid instead of widening the hero. */
+.lp-sheet pre {
+  margin: 0;
+  padding: 10px 14px;
+  font: var(--fs-body)/1.8 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: pre;
+}
 .lp-sheet-tabs {
   display: flex;
   gap: 2px;

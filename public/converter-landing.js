@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 (function () {
-  // This page converts nothing. It collects the text and hands it to the
+  // json-to-excel.html and json-to-csv.html share this script. Neither page
+  // converts anything. It collects the text and hands it to the
   // app's converter — one implementation of the conversion, not two. With
   // scripting off the buttons go quiet and the footer's plain link to the
   // converter is the way through, which is why that link is an <a>.
@@ -19,8 +20,8 @@
   var sample = document.getElementById('sample-btn');
   var err = document.getElementById('parse-error');
 
-  // The same two orders the example spreadsheet on this page is drawn from,
-  // so the first click produces the sheets the visitor has just looked at.
+  // The same two orders each page's example is drawn from, so the first click
+  // produces the sheets or files the visitor has just looked at.
   // Kept as text, not an object literal: JSON.stringify would round the
   // 19-digit ids, which is the exact loss the page promises does not happen.
   var SAMPLE = [
@@ -86,10 +87,11 @@
     convertNow();
   });
 
-  // The example spreadsheet's sheet tabs. Without scripting the first sheet
-  // stays on screen, which is a complete picture on its own.
+  // The example's tabs: sheets of a spreadsheet on the Excel page, files on
+  // the CSV page. Without scripting the first one stays on screen, which is a
+  // complete picture on its own.
   var tabs = document.querySelectorAll('.lp-sheet-tab');
-  var sheets = document.querySelectorAll('.lp-sheet-grid table');
+  var sheets = document.querySelectorAll('.lp-sheet-grid [data-sheet]');
   tabs.forEach(function (tab) {
     tab.addEventListener('click', function () {
       var name = tab.getAttribute('data-sheet');

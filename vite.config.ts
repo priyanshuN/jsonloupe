@@ -95,6 +95,9 @@ export default defineConfig({
         jsonEditor: join(root, 'json-editor.html'),
         jsonDiff: join(root, 'json-diff.html'),
         largeJsonViewer: join(root, 'large-json-viewer.html'),
+        jsonlViewer: join(root, 'jsonl-viewer.html'),
+        // The converter's CSV twin of json-to-excel.html (public/converter-landing.js).
+        jsonToCsv: join(root, 'json-to-csv.html'),
       },
       output: {
         // CodeMirror reaches the page only through the lazy ./code and

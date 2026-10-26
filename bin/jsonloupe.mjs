@@ -17,6 +17,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, join, normalize, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 
@@ -34,6 +35,22 @@ if (CONVERT.has(args[0])) {
 if (args[0] === 'check') {
   const { run } = await import('../dist-cli/check.js');
   process.exit(await run(args));
+}
+// The MCP server, for registries and hosts that start a package by its main
+// command (`npx -y jsonloupe mcp`); jsonloupe-mcp starts the same server.
+// main() returns once the server listens on stdio, and the session ends when
+// the client closes stdin, so wait for that rather than fall through to the
+// viewer below.
+if (args[0] === 'mcp') {
+  const { main } = await import('../dist-mcp/server.js');
+  try {
+    await main();
+  } catch (err) {
+    console.error(`jsonloupe mcp: ${err?.message ?? err}`);
+    process.exit(1);
+  }
+  await once(process.stdin, 'close');
+  process.exit(0);
 }
 if (args[0] === 'serve') args.shift();
 // Nothing below takes a positional argument, so a bare word here is a verb
@@ -53,6 +70,7 @@ usage: jsonloupe [serve] [--port <n>] [--no-open] [--key-file <path>]
        jsonloupe draft   <file> [-o spec.json]
        jsonloupe convert <file> --spec <spec.json> [-o out] [--to xlsx|csv]
        jsonloupe check   <playbook.json> <file> [more files…] [--format text|json|github]
+       jsonloupe mcp
 
   --port, -p   port to listen on (default 5199; next free port if taken)
   --no-open    don't open the browser
@@ -65,6 +83,8 @@ nested JSON into flat tables: \`inspect\` reports what is in a document,
 \`draft\` writes a mapping spec you can read and edit, \`convert\` runs one.
 \`check\` runs a playbook's checks against files and exits non-zero when one
 fails, for CI (\`jsonloupe check --help\` lists its options and exit codes).
+\`mcp\` runs the MCP server on stdio for AI agents, the same server as
+\`jsonloupe-mcp\`.
 
 Nothing leaves your machine: the server binds 127.0.0.1 and serves only the
 app's own files (plus, with --key-file, the one key file you name — to

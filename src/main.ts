@@ -2099,8 +2099,8 @@ function consumeHandoff(key: string): LandingHandoff {
   }
 }
 
-// The search landing pages — json-editor.html and large-json-viewer.html on
-// `#open`, json-diff.html on `#compare` — hand pasted text over the way the
+// The search landing pages — json-editor.html, large-json-viewer.html and
+// jsonl-viewer.html on `#open`, json-diff.html on `#compare` — hand pasted text over the way the
 // converter landing does, each under its own key, so a route only ever opens
 // what its own page sent. `#compare` carries {before, after} as JSON strings:
 // the inner documents stay text, so no number in them is ever parsed here.

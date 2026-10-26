@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import editorPage from '../json-editor.html?raw';
 import diffPage from '../json-diff.html?raw';
 import largePage from '../large-json-viewer.html?raw';
+import jsonlPage from '../jsonl-viewer.html?raw';
 import toolLanding from '../public/tool-landing.js?raw';
 import sitemap from '../public/sitemap.xml?raw';
 import mainSource from './main.ts?raw';
@@ -19,6 +20,7 @@ const pages = [
   { file: 'json-editor.html', html: editorPage, searched: /online json editor/i, h1: 'Online JSON editor', route: '#open', key: 'wb-open-handoff' },
   { file: 'json-diff.html', html: diffPage, searched: /compare (two )?json/i, h1: 'Compare two JSON files', route: '#compare', key: 'wb-compare-handoff' },
   { file: 'large-json-viewer.html', html: largePage, searched: /large json/i, h1: 'Open large JSON files', route: '#open', key: 'wb-open-handoff' },
+  { file: 'jsonl-viewer.html', html: jsonlPage, searched: /jsonl/i, h1: 'JSONL viewer', route: '#open', key: 'wb-open-handoff' },
 ];
 
 describe.each(pages)('the $file search landing page', ({ file, html, searched, h1, route, key }) => {

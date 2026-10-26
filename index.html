@@ -8,11 +8,11 @@ SPDX-License-Identifier: MIT -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <link rel="canonical" href="https://jsonloupe.dev/" />
-  <!-- WebMCP origin trial (Chrome 149-156): enables document.modelContext for
+  <!-- WebMCP origin trial (Chrome 149-162): enables document.modelContext for
        visitors so in-browser agents can drive the open document. The token is
-       origin-bound public data, expires 2026-11-17; renew or drop it when the
-       API reaches stable. -->
-  <meta http-equiv="origin-trial" content="Arafpsetsy8oj3MJTjDtx1GtDCYSmTfEGDwUa0Rn2bOSHkKxePxpXykN1EYYwXa7QVCyIMMNikLKvdHjYP5Y2AcAAABNeyJvcmlnaW4iOiJodHRwczovL2pzb25sb3VwZS5kZXY6NDQzIiwiZmVhdHVyZSI6IldlYk1DUCIsImV4cGlyeSI6MTc5NDg3MzYwMH0=" />
+       origin-bound public data, expires 2027-03-30, the trial's last day;
+       drop it then, or sooner if the API reaches stable. -->
+  <meta http-equiv="origin-trial" content="AtKPjqpCix6eOqHgcXxybWwv5T/t6fAhnL2axh+kTVMV5KvJTyn1HLBMc7lVDXVqbSFLhRdRwg8npo5Qo3SNEAcAAABNeyJvcmlnaW4iOiJodHRwczovL2pzb25sb3VwZS5kZXY6NDQzIiwiZmVhdHVyZSI6IldlYk1DUCIsImV4cGlyeSI6MTgwNjM2NDgwMH0=" />
   <!-- Two jobs, and the second one is the one people type into a search box:
        someone handed a JSON file who needs it as a spreadsheet searches for
        exactly that, and every word of this page's title and description used to
@@ -32,6 +32,40 @@ SPDX-License-Identifier: MIT -->
   <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
   <meta name="twitter:card" content="summary_large_image" />
+  <!-- Structured data, for searches of the name itself: Google splits
+       "jsonloupe" into "json loupe" and answers with other products. WebSite
+       gives the site its name in results; Organization ties that name to the
+       repo and the npm package through sameAs. SoftwareApplication would be
+       the closer type, but Google reports one without ratings as an invalid
+       item. This is a data block, not a script: browsers never run
+       application/ld+json, so script-src 'self' still holds. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://jsonloupe.dev/#website",
+        "name": "jsonloupe",
+        "alternateName": "jsonloupe.dev",
+        "url": "https://jsonloupe.dev/",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://jsonloupe.dev/#organization" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://jsonloupe.dev/#organization",
+        "name": "jsonloupe",
+        "url": "https://jsonloupe.dev/",
+        "description": "A local-first viewer, diff and query tool for large JSON, and a converter that turns nested JSON into linked Excel or CSV tables.",
+        "sameAs": [
+          "https://github.com/priyanshuN/jsonloupe",
+          "https://www.npmjs.com/package/jsonloupe"
+        ]
+      }
+    ]
+  }
+  </script>
   <!-- The landing headline is the LCP element and uses Martian Mono; the lede
        right under it uses Space Grotesk. Discover both fonts from HTML instead
        of waiting for the stylesheet to reveal them. -->
@@ -426,7 +460,9 @@ SPDX-License-Identifier: MIT -->
           <a href="./json-editor.html">json editor</a>
           <a href="./json-diff.html">json diff</a>
           <a href="./large-json-viewer.html">large files</a>
+          <a href="./jsonl-viewer.html">jsonl viewer</a>
           <a href="./json-to-excel.html">json to excel</a>
+          <a href="./json-to-csv.html">json to csv</a>
           <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
           <a href="https://github.com/priyanshuN/jsonloupe/blob/main/SECURITY.md" rel="noreferrer">security.md</a>
           <a href="https://github.com/sponsors/priyanshuN" rel="noreferrer" title="jsonloupe has no business model — sponsorship keeps it that way">sponsor</a>
