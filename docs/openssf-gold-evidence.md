@@ -31,7 +31,7 @@ clean build paths produced 34 byte-identical files with manifest SHA-256
 | `two_person_review` | **Blocked: Unmet** | A sole maintainer cannot truthfully claim that another person reviews at least 50% of proposed changes before release. The documented self-review is evidence, not a substitute. |
 | `build_reproducible` | Branch-ready: Met | [Pinned independent rebuild procedure](../REPRODUCIBLE-BUILD.md) plus [`check:reproducible-build`](../scripts/check-repeatable-build.mjs) require two clean installs in different paths to produce byte-identical bundles and npm tarballs. |
 | `test_invocation` | Ready: Met | `npm test` is the standard invocation documented in [CONTRIBUTING](../CONTRIBUTING.md#get-it-running). |
-| `test_continuous_integration` | Ready: Met | [CI](../.github/workflows/ci.yml) runs the full suite on every push and pull request to `main`. |
+| `test_continuous_integration` | Ready: Met | [CI](../.github/workflows/ci.yml) runs the full suite on every push to `main` and on every pull request that changes more than Markdown; a Markdown-only pull request still runs lint and the unit tests. |
 | `test_statement_coverage90` | Branch-ready: Met | `npm run coverage` fails below 90% statement coverage; the recorded full-suite result is 90.08%. |
 | `test_branch_coverage80` | Branch-ready: Met | The same FLOSS Vitest/V8 gate fails below 80% branch coverage; the recorded result is 81.47%. |
 | `crypto_used_network` | Ready: Met | Runtime network calls use fixed HTTPS provider URLs; HTTP is limited to the explicitly local loopback server. |
