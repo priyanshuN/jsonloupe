@@ -2,6 +2,20 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## 1.9.0 — 2026-10-26
+
+- **`jsonloupe mcp`.** `npx -y jsonloupe mcp` starts the MCP server on stdio,
+  the same server as `jsonloupe-mcp`. Hosts and registries that start a
+  package through its main command can now run it. It exits when the client
+  closes stdin.
+- **MCP Registry.** `server.json` describes the server for the official MCP
+  Registry as `io.github.priyanshuN/jsonloupe`. The npm package now carries
+  the matching `mcpName`, which the registry checks before it lists a server.
+- **Search.** The home page names the site "jsonloupe" for search engines in
+  a JSON-LD block, linked to the GitHub repository and the npm package. After
+  each deploy, jsonloupe.dev tells Bing and the other IndexNow engines which
+  pages changed.
+
 ## 1.8.0 — 2026-10-25
 
 - **Playbook: run your checks as a set.** The functions view is now the
