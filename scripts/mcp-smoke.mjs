@@ -283,6 +283,22 @@ try {
 
   console.log(`\ntotal response bytes: ${rpc.bytes} (budget ${RESPONSE_BUDGET}) · fixture ${(size / 1024 / 1024).toFixed(1)} MB`);
   check(`every response together stays under ${RESPONSE_BUDGET} bytes`, rpc.bytes < RESPONSE_BUDGET, `${rpc.bytes} bytes`);
+
+  // The same server through the main command, the way the MCP Registry starts
+  // it (npx -y jsonloupe mcp). It must answer, and it must exit when the client
+  // closes stdin instead of falling through to the viewer.
+  const viaVerb = spawn(process.execPath, [join(root, 'bin', 'jsonloupe.mjs'), 'mcp'], {
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  const verbInit = await client(viaVerb).request('initialize', {
+    protocolVersion: '2025-06-18',
+    capabilities: {},
+    clientInfo: { name: 'jsonloupe-smoke', version: '0' },
+  });
+  check('`jsonloupe mcp` starts the same server', verbInit.result?.serverInfo?.name === 'jsonloupe', JSON.stringify(verbInit).slice(0, 200));
+  viaVerb.stdin.end();
+  const [verbExit] = await once(viaVerb, 'exit');
+  check('`jsonloupe mcp` exits 0 when the client closes stdin', verbExit === 0, `exit ${verbExit}`);
 } finally {
   await rm(dir, { recursive: true, force: true });
 }
