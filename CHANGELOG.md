@@ -2,6 +2,23 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## 1.9.1 — 2026-10-26
+
+- **Names hold the visible text.** Tree rows, compare rows, playbook rows,
+  evidence entries and the filter button now have accessible names that
+  contain the words they show, in order (WCAG 2.5.3, label in name). A
+  speech-input user can say what is on the screen to reach a control. The
+  filter button's name now includes the match count it shows.
+- **Exact digits on the newer parser.** The bundled lossless-json is now
+  4.3.3, which stores a `"__proto__"` member as its own property instead of
+  through the prototype setter. jsonloupe keeps that member's exact digits
+  either way: `{"__proto__":9007199254740993}` still reads back as
+  9007199254740993, not 9007199254740992.
+- **jsonloupe.dev.** Two new pages answer common searches: JSON to CSV and
+  JSONL viewer. Both open the same local app. The site now publishes
+  `/.well-known/security.txt` (RFC 9116), and its WebMCP origin-trial token
+  lasts until the trial ends on 2027-03-30.
+
 ## 1.9.0 — 2026-10-26
 
 - **`jsonloupe mcp`.** `npx -y jsonloupe mcp` starts the MCP server on stdio,
