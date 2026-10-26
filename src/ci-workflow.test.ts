@@ -10,7 +10,7 @@ import ciWorkflow from '../.github/workflows/ci.yml?raw';
 const guard = "steps.changes.outputs.docs_only != 'true'";
 const skipped = [
   'npm run build',
-  'npx playwright install --with-deps chromium',
+  'npx playwright install chromium',
   'npm run test:a11y',
   'npm run smoke:mcp',
   'npm run check:reproducible-build',

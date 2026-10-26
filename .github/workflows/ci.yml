@@ -56,8 +56,11 @@ jobs:
       - run: npm run coverage -- --coverage.reporter=text
       - if: steps.changes.outputs.docs_only != 'true'
         run: npm run build
+      # No --with-deps: the runner image already has Chrome's system
+      # libraries, and the extra apt install (mostly fonts) once stalled on
+      # Ubuntu's mirror for 13 minutes. No test compares screenshots.
       - if: steps.changes.outputs.docs_only != 'true'
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - if: steps.changes.outputs.docs_only != 'true'
         run: npm run test:a11y
       - if: steps.changes.outputs.docs_only != 'true'
