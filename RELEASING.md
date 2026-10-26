@@ -7,7 +7,9 @@ source archives are not the npm artifact users install.
 
 ## Release process
 
-1. Update `package.json` and `CHANGELOG.md` using Semantic Versioning.
+1. Update `package.json` and `CHANGELOG.md` using Semantic Versioning. Set
+   the same version twice in `server.json` (`version` and
+   `packages[0].version`); the tests refuse a mismatch.
 2. Run the same gates used by CI:
 
    ```sh
@@ -30,6 +32,15 @@ source archives are not the npm artifact users install.
    token or project signing key is stored in the repository.
 6. Verify the registry version, provenance, and clean installation before
    announcing it.
+7. List the release in the [MCP Registry](https://registry.modelcontextprotocol.io)
+   from the repository root, after npm shows the new version. The registry
+   reads `mcpName` from the published `package.json`, so this step must come
+   after npm. Install the publisher once with `brew install mcp-publisher`.
+
+   ```sh
+   mcp-publisher login github
+   mcp-publisher publish
+   ```
 
 Only the current minor line is maintained. Patch releases carry compatible bug
 and security fixes; users on an older minor line upgrade with

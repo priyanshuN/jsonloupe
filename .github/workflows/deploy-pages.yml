@@ -52,3 +52,24 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+
+  # Tells Bing and the other IndexNow engines which public pages this deploy
+  # changed (scripts/indexnow.mjs). A failed ping does not fail the run: the
+  # site is already live, and the sitemap still lists every page.
+  indexnow:
+    needs: deploy
+    if: github.event.repository.private != true
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # the diff needs the push's "before" commit
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.16.0
+      - run: node scripts/indexnow.mjs "$BEFORE" "$GITHUB_SHA"
+        env:
+          BEFORE: ${{ github.event.before }}
