@@ -3,7 +3,7 @@
   "name": "io.github.priyanshuN/jsonloupe",
   "title": "jsonloupe",
   "description": "Open huge JSON locally and give agents its shape, queries and exact values, never the whole blob.",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "websiteUrl": "https://jsonloupe.dev/",
   "repository": {
     "url": "https://github.com/priyanshuN/jsonloupe",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "jsonloupe",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
