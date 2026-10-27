@@ -2,6 +2,20 @@
 
 Notable changes to jsonloupe. Dates are UTC.
 
+## 1.9.2 — 2026-10-27
+
+- **MCP tools name the tool to use instead.** Each of the twelve tool
+  descriptions now says which neighbouring tool covers the other case, so an
+  agent can choose between near neighbours. `export_csv` says it is the
+  CSV-only shortcut for `export_result`, `convert` says its spec comes from
+  `draft_spec`, and `diff_docs` says it shows the first 25 changes and needs
+  both documents loaded. Tool names, inputs and results do not change.
+- **Releases publish themselves.** Merging a version bump to `main` now
+  publishes the package to npm, creates the tag and GitHub Release, and lists
+  the version in the MCP Registry, with no manual step.
+- **Glama.** The repository has a `glama.json` that names its maintainer, and
+  the README shows the server's Glama score.
+
 ## 1.9.1 — 2026-10-26
 
 - **Names hold the visible text.** Tree rows, compare rows, playbook rows,
