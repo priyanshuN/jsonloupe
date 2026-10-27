@@ -9,6 +9,7 @@
   <a href="https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml"><img src="https://github.com/priyanshuN/jsonloupe/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/priyanshuN/jsonloupe"><img src="https://api.scorecard.dev/projects/github.com/priyanshuN/jsonloupe/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://www.npmjs.com/package/jsonloupe"><img src="https://img.shields.io/npm/v/jsonloupe.svg" alt="npm"></a>
+  <a href="https://glama.ai/mcp/servers/priyanshuN/jsonloupe"><img src="https://glama.ai/mcp/servers/priyanshuN/jsonloupe/badges/score.svg" alt="jsonloupe MCP server – quality and maintenance score on Glama"></a>
   <a href="https://www.bestpractices.dev/projects/13920"><img src="https://www.bestpractices.dev/projects/13920/badge" alt="OpenSSF Best Practices"></a>
   <a href="https://developer.mozilla.org/en-US/observatory/analyze?host=jsonloupe.dev"><img src="https://img.shields.io/mozilla-observatory/grade/jsonloupe.dev" alt="Mozilla Observatory grade"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
