@@ -117,7 +117,8 @@ export const TOOLS: ToolDefinition[] = [
       'Open a JSON document and return its size and top-level shape. Accepts a file path or inline text, ' +
       'and transparently decodes Zstd, Base64-Zstd and PostgreSQL bytea (\\x…) payloads. Malformed JSON is ' +
       'auto-repaired and flagged. Returns a docId (d1, d2, …) that every other tool takes. The document ' +
-      'itself is never returned — query it instead. Prefer path for an existing or large document.',
+      'itself is never returned — read it with get_schema, run_query, profile or sample instead. Prefer path ' +
+      'for an existing or large document. For a single question, skip this step: those tools also take filePath.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -131,7 +132,10 @@ export const TOOLS: ToolDefinition[] = [
     outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: readOnly('Find convertible tables in JSON'),
     description:
-      'Inspect a loaded document for repeatable arrays/maps that can become tables. Returns table anchors, row counts, fields, types, and deterministic format suggestions; document values are not returned.',
+      'First step toward a spreadsheet: find the repeatable arrays and object maps in a loaded document that can ' +
+      'become linked tables. Returns table anchors, row counts, fields, types, and deterministic format suggestions; ' +
+      'document values are not returned. Next, draft_spec writes a mapping and convert writes the file. For field ' +
+      'names and types use get_schema, for coverage and statistics profile, and for real values sample.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -145,7 +149,10 @@ export const TOOLS: ToolDefinition[] = [
     outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: fileWrite('Draft a reviewable converter spec'),
     description:
-      'Draft a reviewable converter spec for a loaded document. This does not convert anything. Save it to outPath for human editing, or omit outPath to return the JSON under the response cap.',
+      'Draft a reviewable converter spec for a loaded document, usually after inspect shows its tables. This does ' +
+      'not convert anything: pass the spec to convert, inline or as the file you saved. Save it to outPath for human ' +
+      'editing, or omit outPath to return the JSON under the response cap; an existing outPath is refused unless ' +
+      'overwrite=true. format picks one .xlsx workbook or a .zip of CSVs; baseDate gives time-only columns a date.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -163,7 +170,11 @@ export const TOOLS: ToolDefinition[] = [
     outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: fileWrite('Convert JSON to XLSX or CSV'),
     description:
-      'Run a frozen converter spec deterministically against a loaded document and write XLSX or zipped CSV output. Returns row/skipped/warning counts, never the output rows. Existing files are refused unless overwrite=true.',
+      'Write a loaded document out as linked tables — one .xlsx workbook, or a .zip of CSVs — by running a frozen ' +
+      'converter spec deterministically. The spec comes from draft_spec, reviewed or edited: pass it inline as spec ' +
+      'or as a file in specPath, exactly one of the two. format overrides the format the spec names. Returns ' +
+      'row/skipped/warning counts, never the output rows. An existing outPath is refused unless overwrite=true. ' +
+      "For one query's result as a single CSV or JSONL file, use export_result instead.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -186,7 +197,8 @@ export const TOOLS: ToolDefinition[] = [
       'with a path, describes just what it selects, merged across matches (so $.tasks[*] describes an ' +
       'element, not the first element). Array shapes are inferred from up to 30 elements; use profile for ' +
       'exact coverage/counts. Start here: it is how you learn which paths run_query can use. For one question, ' +
-      'pass filePath directly; it opens the file and returns a reusable docId in the same call.',
+      'pass filePath directly; it opens the file and returns a reusable docId in the same call. A path that ' +
+      'matches nothing returns an error naming that path.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -204,7 +216,8 @@ export const TOOLS: ToolDefinition[] = [
     description:
       `Use this instead of ad-hoc Python for JSON counts, filtered exact sums/averages/min/max, composite groups, ` +
       `distinct values, top/bottom ranking, and field projection. It scans server-side and returns only the bounded answer. Pass filePath ` +
-      `for a one-call answer, or docId to reuse an open document. Run a query and return matches or an aggregate, capped. ` +
+      `for a one-call answer, or docId to reuse an open document. For field names and types use get_schema; for ` +
+      `coverage and statistics of many fields at once, profile; to judge counts against expectations, run_checks. ` +
       `Grammar (a JSONPath subset with aggregation pipes):\n\n${QUERY_GRAMMAR}\n\nExamples:\n${QUERY_EXAMPLES}\n\n` +
       'Matches come back as path + preview; use `| pluck(@.a, @.b)` to project real fields into rows, or ' +
       'the sample tool for whole values. Only 10 detail rows return by default; set limit=0 for a count-only ' +
@@ -238,12 +251,12 @@ export const TOOLS: ToolDefinition[] = [
     outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: readOnly('Profile unfamiliar JSON without code'),
     description:
-      'Use this instead of writing Python loops to discover or summarize unfamiliar JSON fields. It profiles one or more fields ' +
-      'across every selected record in one server-side scan. Pass filePath for a one-call answer, or docId to reuse an open document. Returns ' +
+      'Profile one or more fields across every selected record in one server-side scan; this replaces ad-hoc Python loops ' +
+      'for discovering or summarizing unfamiliar JSON fields. Pass filePath for a one-call answer, or docId to reuse an open document. Returns ' +
       'present/missing/null counts, type counts, distinct count, exact numeric sum/min/max/average, lengths, and top values. ' +
       'Use fields like "status" or "capacity.used" relative to each selected record; omit fields to auto-discover ' +
-      'up to 20 fields on selected records or profile selected scalar values. This replaces ad-hoc Python loops ' +
-      'for unfamiliar JSON.',
+      'up to 20 fields on selected records or profile selected scalar values. For a filtered count or a group ' +
+      'breakdown use run_query; for whole records use sample.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -274,7 +287,8 @@ export const TOOLS: ToolDefinition[] = [
     description:
       'Read n real values at a path, exactly as they were parsed (int64 and decimal digits intact). A path ' +
       'that selects one container samples its children; a path that selects many nodes samples those nodes. ' +
-      'Pass filePath for a one-call sample, or docId to reuse an open document.',
+      'Pass filePath for a one-call sample, or docId to reuse an open document. Use it to see what records ' +
+      'really hold; to count or aggregate use run_query, for statistics profile, and for names and types get_schema.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -297,9 +311,10 @@ export const TOOLS: ToolDefinition[] = [
     outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: readOnly('Compare JSON documents'),
     description:
-      'Compare two loaded documents and return change counts plus the first changes. docIdA is the older ' +
-      'side: additions and removals read A → B. Give keySpec to align arrays by identity (e.g. "id,orderId") ' +
-      'so reordered elements are not reported as wholesale changes.',
+      'Compare two documents opened with load_doc and return change counts plus the first 25 changes. There is ' +
+      'no filePath shortcut: load both first. docIdA is the older side: additions and removals read A → B. Give ' +
+      'keySpec to align arrays by identity (e.g. "id,orderId") so reordered elements are not reported as ' +
+      'wholesale changes.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -318,11 +333,12 @@ export const TOOLS: ToolDefinition[] = [
     outputSchema: TOOL_OUTPUT_SCHEMA,
     annotations: fileWrite('Export query to CSV'),
     description:
-      'Run a query and write its complete table to a CSV file (RFC 4180, exact digits, formula-injection safe). ' +
-      'Returns only the path, row count and byte size — the rows themselves never enter the conversation. ' +
-      'The query must produce a table: use `| pluck(…)`, `| group(…)` or `| distinct`. The file is streamed ' +
-      'and published atomically; an existing path is refused unless overwrite=true. Pass filePath to open ' +
-      'and export an input file in one call, or docId to reuse an open document.',
+      'The CSV-only shortcut for export_result: run a query and write its complete table to a CSV file (RFC 4180, ' +
+      'exact digits, formula-injection safe). Returns only the path, row count and byte size — the rows themselves ' +
+      'never enter the conversation. The query must produce a table: use `| pluck(…)`, `| group(…)` or `| distinct`. ' +
+      'The file is streamed and published atomically, with the same 50 MB limit; an existing path is refused unless ' +
+      'overwrite=true. Pass filePath to open and export an input file in one call, or docId to reuse an open ' +
+      'document. For JSONL or nested values use export_result; for linked multi-table spreadsheets, convert.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -346,7 +362,9 @@ export const TOOLS: ToolDefinition[] = [
       'The response contains only format, path, exact row count, byte size and complete=true. Exports refuse rather ' +
       'than silently truncate when the 50 MB output safety limit would be exceeded. Output is streamed to a ' +
       'temporary file and published atomically; an existing path is refused unless overwrite=true. Pass filePath ' +
-      'to open and export an input file in one call, or docId to reuse an open document.',
+      'to open and export an input file in one call, or docId to reuse an open document. export_csv is this tool ' +
+      'fixed to CSV. Use convert for linked multi-table spreadsheets, and run_query when a bounded answer in the ' +
+      'conversation is enough.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -374,7 +392,8 @@ export const TOOLS: ToolDefinition[] = [
       '{"type":"between","min":M,"max":N}. A check counts matches (groups/distinct values for | group / | distinct); ' +
       'value pipes like | sum are refused. A document that is not valid JSON is refused unless allowRepair is true. ' +
       'Failed and inconclusive checks list their first matched paths. Pass filePath ' +
-      'for a one-call answer, or docId to reuse an open document.',
+      'for a one-call answer, or docId to reuse an open document. Use it to gate a document on counts you expect; ' +
+      'for an open-ended count or breakdown use run_query.',
     inputSchema: {
       type: 'object',
       properties: {

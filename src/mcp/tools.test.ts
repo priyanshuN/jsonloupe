@@ -93,6 +93,27 @@ describe('tool definitions', () => {
     expect(TOOLS.find((t) => t.name === 'profile')!.description).toContain('replaces ad-hoc Python loops');
   });
 
+  it('name the sibling to use instead, so an agent can choose between near neighbours', () => {
+    // Directory graders (Glama's TDQS) and agents both read overlapping tools as a
+    // choice; each description must say which neighbour covers the other case.
+    const routes: Record<string, string[]> = {
+      load_doc: ['get_schema', 'run_query', 'profile', 'sample'],
+      inspect: ['draft_spec', 'convert', 'get_schema', 'profile', 'sample'],
+      draft_spec: ['inspect', 'convert'],
+      convert: ['draft_spec', 'export_result'],
+      run_query: ['get_schema', 'profile', 'run_checks', 'sample'],
+      profile: ['run_query', 'sample'],
+      sample: ['run_query', 'profile', 'get_schema'],
+      export_csv: ['export_result', 'convert'],
+      export_result: ['export_csv', 'convert', 'run_query'],
+      run_checks: ['run_query'],
+    };
+    for (const [name, siblings] of Object.entries(routes)) {
+      const description = TOOLS.find((t) => t.name === name)!.description;
+      for (const sibling of siblings) expect(description, `${name} → ${sibling}`).toContain(sibling);
+    }
+  });
+
   it('tell MCP clients which calls are read-only and which write files', () => {
     // draft_spec writes only when given an outPath, but a client deciding whether
     // to ask first cannot know that from the annotation — so it counts as a writer.
