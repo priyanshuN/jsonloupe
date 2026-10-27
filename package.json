@@ -53,16 +53,16 @@
   "engines": {
     "node": ">=18"
   },
-  "packageManager": "npm@11.13.0",
+  "packageManager": "npm@11.19.1",
   "devEngines": {
     "runtime": {
       "name": "node",
-      "version": "24.16.0",
+      "version": "24.22.1",
       "onFail": "error"
     },
     "packageManager": {
       "name": "npm",
-      "version": "11.13.0",
+      "version": "11.19.1",
       "onFail": "error"
     }
   },
