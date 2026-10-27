@@ -2,7 +2,7 @@
 
 jsonloupe's browser, CLI, MCP, and npm-package outputs are reproducible from an
 exact source commit. The build uses the committed `package-lock.json`, Node
-24.16.0, npm 11.13.0, UTC, the C locale, and a fixed `SOURCE_DATE_EPOCH`.
+24.22.1, npm 11.19.1, UTC, the C locale, and a fixed `SOURCE_DATE_EPOCH`.
 
 ## Independent verification
 
@@ -11,7 +11,7 @@ On a clean machine, check out the exact commit to verify and run:
 ```sh
 nvm install
 nvm use
-npm install --global npm@11.13.0
+npm install --global npm@11.19.1
 npm ci --ignore-scripts
 npm run check:reproducible-build
 ```
