@@ -32,12 +32,15 @@ GitHub's automatic source archives are not the npm artifact users install.
    - rebuilds and retests the package, then publishes it with npm trusted
      publishing. GitHub supplies a short-lived OIDC identity; no npm token or
      project signing key is stored in the repository;
+   - waits until npm serves the new version. Both announcements below send
+     their readers to npm: the registry reads `mcpName` from the published
+     `package.json`, and Glama's Auto-Release builds `jsonloupe@latest` on
+     each GitHub Release;
    - creates the `vX.Y.Z` tag and its GitHub Release on the merged commit,
      with the version's `CHANGELOG.md` entry as the notes;
-   - waits until npm serves the new version, then lists it in the
+   - lists the version in the
      [MCP Registry](https://registry.modelcontextprotocol.io) through GitHub
-     OIDC. The registry reads `mcpName` from the published `package.json`,
-     so this must come after npm.
+     OIDC.
 
    No one needs to create the tag or the GitHub Release by hand. The workflow
    checks npm, the tag and the registry before each step, so a run that failed
