@@ -32,11 +32,17 @@ describe('the publish workflow', () => {
     expect(publishWorkflow).toContain("if: needs.plan.outputs.npm == 'yes' || github.event_name == 'workflow_dispatch'");
   });
 
-  it('tags and lists a version only after npm has it', () => {
-    for (const job of ['release', 'registry']) {
-      const block = publishWorkflow.match(new RegExp(`\\n  ${job}:\\n[\\s\\S]*?(?=\\n  \\w+:\\n|$)`))?.[0] ?? '';
-      expect(block).toContain('needs: [plan, npm]');
-      expect(block).toContain("(needs.npm.result == 'success' || needs.npm.result == 'skipped')");
+  it('tags and lists a version only after npm serves it', () => {
+    const job = (name: string) => publishWorkflow.match(new RegExp(`\\n  ${name}:\\n[\\s\\S]*?(?=\\n  \\w+:\\n|$)`))?.[0] ?? '';
+    // A GitHub Release starts Glama's Auto-Release, which installs jsonloupe@latest;
+    // announcing a version npm does not serve yet would build the previous one.
+    const served = job('served');
+    expect(served).toContain('needs: [plan, npm]');
+    expect(served).toContain("(needs.npm.result == 'success' || needs.npm.result == 'skipped')");
+    expect(served).toContain('npm view "jsonloupe@$VERSION" version --prefer-online');
+    for (const name of ['release', 'registry']) {
+      expect(job(name)).toContain('needs: [plan, served]');
+      expect(job(name)).toContain("needs.served.result == 'success'");
     }
   });
 
