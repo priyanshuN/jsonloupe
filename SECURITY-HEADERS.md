@@ -45,13 +45,11 @@ claim to have deployed.
    headers — and a verification run over IPv4 will not catch it. After the
    change, `dig AAAA jsonloupe.dev` must return Cloudflare space (`2606:4700::/32`),
    not GitHub's `2606:50c0::/32`.
-2. Confirm SSL/TLS mode is **Full (strict)** and that HTTPS works before adding
-   HSTS. GitHub Pages serves a publicly trusted Let's Encrypt certificate for
-   the custom domain, so strict origin validation succeeds; verify with
-   `openssl s_client -connect 185.199.108.153:443 -servername jsonloupe.dev`
-   before selecting the mode. A zone left on **Automatic SSL/TLS** reaches the
-   same place on its own next scan, but only pinning the mode makes the
-   guarantee explicit.
+2. Set SSL/TLS mode to **Full**, not **Full (strict)**, and confirm that HTTPS
+   works before adding HSTS. GitHub Pages does not keep its certificate renewed
+   while these records are proxied, so strict origin validation ends in an
+   outage (see below). Select **Full** explicitly: a zone left on **Automatic
+   SSL/TLS** can move to **Full (strict)** on its own next scan.
 3. Create a response-header transform rule for hostnames `jsonloupe.dev` and
    `www.jsonloupe.dev`, on all paths, setting the five non-CSP headers above.
 4. Create a second response-header transform rule for the HTML paths `/`,
@@ -85,13 +83,21 @@ are returned to DNS-only mode, the headers disappear and HSTS can make the site
 unreachable, so disable or expire HSTS before such a rollback.
 
 Under **Full (strict)** an expired origin certificate stops being a degraded
-connection and becomes a hard `526` outage, so GitHub's certificate renewal has
-to keep working from behind the proxy. It does: Cloudflare passes
-`/.well-known/acme-challenge/` through to GitHub unredirected, which is what the
-HTTP-01 validator needs. Confirm that path still reaches the origin — a GitHub
-404 body rather than a Cloudflare error page — if the certificate ever fails to
-renew. Reverting to **Full** restores service immediately while that is
-diagnosed.
+connection and becomes a hard `526` outage, and GitHub's certificate renewal
+does not keep working from behind the proxy. The Pages health API reports
+`is_proxied: true` and `is_https_eligible: false` for this domain. The first
+certificate, issued 2026-08-01 before the proxy went on, expired on 2026-10-30
+in the state `bad_authz`, although `/.well-known/acme-challenge/` still reached
+GitHub over plain HTTP. The site returned `526` until the mode moved to **Full**
+on 2026-10-31.
+
+**Full** keeps the Cloudflare-to-GitHub link encrypted but does not validate the
+origin certificate, so an attacker on that path could present a forged one. The
+GitHub certificate stays expired, which visitors do not see because they receive
+Cloudflare's edge certificate. If the records return to DNS-only mode, visitors
+receive the expired certificate until GitHub issues a new one. Moving back to
+**Full (strict)** needs a valid GitHub certificate first, and the same outage
+can return when that certificate expires.
 
 ## Verification
 
