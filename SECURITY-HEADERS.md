@@ -113,3 +113,9 @@ The automated check follows redirects, requires a one-year HSTS max age,
 rejects permissive script policies, and verifies all four Gold headers. Record
 the successful public URL in the Gold worksheet only after this command passes
 against the live site.
+
+`.github/workflows/site-check.yml` runs the same check every 30 minutes. If the
+check fails, the workflow opens one `site-down` issue that mentions the
+maintainer, which is the outage alert, and it closes that issue when the check
+passes again. GitHub pauses scheduled workflows after 60 days with no repository
+activity; re-enable it from the Actions tab if that happens.
