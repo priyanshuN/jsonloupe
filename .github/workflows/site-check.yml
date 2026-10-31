@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Priyanshu Nandan
+# SPDX-License-Identifier: MIT
+name: site check
+
+# Opens the live site the way a visitor does, so a failed run is the alert:
+# GitHub emails the maintainer. Nothing else watches production, and the 526
+# outage of 2026-10-31 was found only because someone happened to open the page.
+# See SECURITY-HEADERS.md.
+
+on:
+  schedule:
+    # Off the hour, because GitHub delays or drops runs when load peaks there.
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24.22.1
+      # The second try keeps one network fault from sending an email, and
+      # timeout turns a hung site into a failure, not a cancelled run.
+      - run: >-
+          timeout 60 node scripts/check-site-headers.mjs ||
+          { sleep 60; timeout 60 node scripts/check-site-headers.mjs; }
