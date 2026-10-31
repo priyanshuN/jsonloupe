@@ -2,16 +2,23 @@
 # SPDX-License-Identifier: MIT
 name: site check
 
-# Opens the live site the way a visitor does, so a failed run is the alert:
-# GitHub emails the maintainer. Nothing else watches production, and the 526
-# outage of 2026-10-31 was found only because someone happened to open the page.
+# Opens the live site the way a visitor does. Nothing else watches production:
+# the 526 outage of 2026-10-31 was found only because someone opened the page.
 # See SECURITY-HEADERS.md.
+#
+# The alert is an issue that mentions the maintainer, not the failed run,
+# because failed-run emails are an account setting and are off for this account.
+# One open issue also means one email per outage, not one every 30 minutes.
 
 on:
   schedule:
     # Off the hour, because GitHub delays or drops runs when load peaks there.
     - cron: "17,47 * * * *"
   workflow_dispatch:
+    inputs:
+      url:
+        description: Page to check. A page that does not exist tests the alert.
+        default: https://jsonloupe.dev/
 
 permissions:
   contents: read
@@ -19,6 +26,9 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # open and close the outage issue
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -28,6 +38,25 @@ jobs:
           node-version: 24.22.1
       # The second try keeps one network fault from sending an email, and
       # timeout turns a hung site into a failure, not a cancelled run.
-      - run: >-
-          timeout 60 node scripts/check-site-headers.mjs ||
-          { sleep 60; timeout 60 node scripts/check-site-headers.mjs; }
+      - id: site
+        env:
+          URL: ${{ inputs.url || 'https://jsonloupe.dev/' }}
+        run: >-
+          timeout 60 node scripts/check-site-headers.mjs "$URL" ||
+          { sleep 60; timeout 60 node scripts/check-site-headers.mjs "$URL"; }
+      - if: failure() && steps.site.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create site-down --color B60205 --force
+          if [ -z "$(gh issue list --label site-down --json number --jq '.[].number')" ]; then
+            gh issue create --label site-down --title 'jsonloupe.dev failed the site check' \
+              --body "@priyanshuN The live site check failed: $RUN_URL. If the error is 526, see SECURITY-HEADERS.md."
+          fi
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --label site-down --json number --jq '.[].number'); do
+            gh issue close "$n" --comment 'The site check passes again.'
+          done
