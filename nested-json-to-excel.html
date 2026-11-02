@@ -1,0 +1,218 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/nested-json-to-excel.html" />
+  <!-- A guide page: it answers a question people type into a search box, the
+       long way, and ends at the tool. The sheets below are the converter's real
+       output, the same rows json-to-excel.html draws. -->
+  <title>How to Convert Nested JSON to Excel with Multiple Sheets — jsonloupe</title>
+  <meta name="description" content="Convert nested JSON to Excel without items/0/sku columns. Put each list on its own sheet, joined by ID, with jsonloupe, Power Query or Python." />
+  <meta property="og:title" content="How to convert nested JSON to Excel with multiple sheets" />
+  <meta property="og:description" content="Put each list on its own sheet, joined by ID. Three ways to do it, and the Excel traps to avoid with long IDs." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://jsonloupe.dev/nested-json-to-excel.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <!-- A data block, not a script: browsers never run application/ld+json, so
+       script-src 'self' still holds. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "How to convert nested JSON to Excel with multiple sheets",
+    "description": "Convert nested JSON to Excel without items/0/sku columns. Put each list on its own sheet, joined by ID, with jsonloupe, Power Query or Python.",
+    "datePublished": "2026-11-02",
+    "dateModified": "2026-11-02",
+    "inLanguage": "en",
+    "image": "https://jsonloupe.dev/og-image.png",
+    "author": { "@type": "Organization", "name": "jsonloupe", "url": "https://jsonloupe.dev/" },
+    "publisher": { "@type": "Organization", "name": "jsonloupe", "url": "https://jsonloupe.dev/" },
+    "mainEntityOfPage": "https://jsonloupe.dev/nested-json-to-excel.html"
+  }
+  </script>
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<body class="spec-page">
+  <header class="sp-header">
+    <a class="sp-brand" href="./" title="jsonloupe">
+      <img src="/favicon.svg" alt="" width="24" height="24" />
+      <span>json<span class="brand-loupe">loupe</span></span>
+    </a>
+    <span class="sp-slash">/</span>
+    <span class="sp-here">guide</span>
+    <span class="sp-spacer"></span>
+    <a class="sp-back" href="./json-to-excel.html">open the converter →</a>
+  </header>
+
+  <main class="sp-main sp-guide">
+    <div class="sp-intro">
+      <h1>How to convert nested JSON to Excel with multiple sheets</h1>
+      <p>A JSON file with lists inside it does not fit on one sheet. This guide shows the shape that works, one sheet per list joined by ID, and three ways to get there.</p>
+      <time class="sp-date" datetime="2026-11-02">2 November 2026</time>
+    </div>
+
+    <div class="sp-prose">
+      <h2>Why nested JSON breaks a flat sheet</h2>
+      <p>Take two orders, each with a list of items:</p>
+      <pre class="lp-code">{
+  "orders": [
+    { "id": 1234567890123456789, "status": "shipped", "total": 27.50,
+      "items": [ { "sku": "MUG-RED",  "qty": 2, "price": 8.75 },
+                 { "sku": "TEA-500G", "qty": 1, "price": 10.00 } ] },
+    { "id": 1234567890123456790, "status": "packing", "total": 12.50,
+      "items": [ { "sku": "TEA-500G", "qty": 1, "price": 10.00 },
+                 { "sku": "SPOON",    "qty": 2, "price": 1.25 } ] }
+  ]
+}</pre>
+      <p>A sheet is flat, so a simple converter picks one of two bad shapes.</p>
+      <h3>Bad shape 1: a column for every item</h3>
+      <div class="sp-table-wrap">
+        <table class="sp-table sp-data">
+          <thead><tr><th>id</th><th>items/0/sku</th><th>items/0/qty</th><th>items/1/sku</th><th>items/1/qty</th></tr></thead>
+          <tbody>
+            <tr><td>…789</td><td>MUG-RED</td><td>2</td><td>TEA-500G</td><td>1</td></tr>
+            <tr><td>…790</td><td>TEA-500G</td><td>1</td><td>SPOON</td><td>2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>An order with 30 items adds 60 columns. You also cannot total <code>qty</code>, because it is spread over many columns.</p>
+      <h3>Bad shape 2: a row for every item</h3>
+      <div class="sp-table-wrap">
+        <table class="sp-table sp-data">
+          <thead><tr><th>id</th><th>status</th><th>total</th><th>sku</th><th>qty</th></tr></thead>
+          <tbody>
+            <tr><td>…789</td><td>shipped</td><td>27.50</td><td>MUG-RED</td><td>2</td></tr>
+            <tr><td>…789</td><td>shipped</td><td>27.50</td><td>TEA-500G</td><td>1</td></tr>
+            <tr><td>…790</td><td>packing</td><td>12.50</td><td>TEA-500G</td><td>1</td></tr>
+            <tr><td>…790</td><td>packing</td><td>12.50</td><td>SPOON</td><td>2</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Each order total now appears twice. A sum of the <code>total</code> column gives 80.00, but the real total is 40.00. With two lists on one order, such as items and payments, the rows multiply: 3 items and 2 payments make 6 rows.</p>
+
+      <h2>The shape that works: one sheet per list</h2>
+      <p>Give each list its own sheet. Put the parent's ID on every row of the child sheet. A database stores the same data this way, and Excel's lookups and pivot tables work on it.</p>
+      <p><strong>Sheet: orders</strong></p>
+      <div class="sp-table-wrap">
+        <table class="sp-table sp-data">
+          <thead><tr><th>id</th><th>status</th><th>total</th></tr></thead>
+          <tbody>
+            <tr><td>1234567890123456789</td><td>shipped</td><td>27.50</td></tr>
+            <tr><td>1234567890123456790</td><td>packing</td><td>12.50</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Sheet: items</strong></p>
+      <div class="sp-table-wrap">
+        <table class="sp-table sp-data">
+          <thead><tr><th>order_id</th><th>sku</th><th>qty</th><th>price</th></tr></thead>
+          <tbody>
+            <tr><td>1234567890123456789</td><td>MUG-RED</td><td>2</td><td>8.75</td></tr>
+            <tr><td>1234567890123456789</td><td>TEA-500G</td><td>1</td><td>10.00</td></tr>
+            <tr><td>1234567890123456790</td><td>TEA-500G</td><td>1</td><td>10.00</td></tr>
+            <tr><td>1234567890123456790</td><td>SPOON</td><td>2</td><td>1.25</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Three ways to do it</h2>
+      <div class="sp-table-wrap">
+        <table class="sp-table">
+          <thead><tr><th>Method</th><th>Best for</th><th>Long IDs</th></tr></thead>
+          <tbody>
+            <tr><td>jsonloupe</td><td>No code, a file you cannot upload</td><td>Exact</td></tr>
+            <tr><td>Power Query in Excel</td><td>A refreshable query inside Excel</td><td>Can lose digits</td></tr>
+            <tr><td>Python and pandas</td><td>A repeated job in a script</td><td>Exact if you make them text</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Method 1: jsonloupe, with no code</h3>
+      <ol>
+        <li>Open the <a href="./json-to-excel.html">JSON to Excel converter</a>.</li>
+        <li>Paste your JSON, or open the file.</li>
+        <li>Check the sheets it found. You see real rows from your file, and you can rename headings or drop columns.</li>
+        <li>Download one <code>.xlsx</code> file, or one CSV per sheet.</li>
+      </ol>
+      <p>The conversion runs in your browser, so the file is not uploaded. An ID past 15 digits goes into a text cell, so Excel cannot round it. You can save the setup, and next month's file gives you the same sheets.</p>
+
+      <h3>Method 2: Power Query in Excel</h3>
+      <ol>
+        <li>Select <strong>Data → Get Data → From File → From JSON</strong> and choose the file.</li>
+        <li>Select <strong>To Table</strong>, then use the expand arrow to show the fields.</li>
+        <li>Duplicate the query, so you have one for orders and one for items.</li>
+        <li>In the orders query, remove the <code>items</code> column.</li>
+        <li>In the items query, keep <code>id</code> and <code>items</code>, then expand <code>items</code> to new rows and expand the fields.</li>
+        <li>Select <strong>Close &amp; Load</strong> to put each query on its own sheet.</li>
+      </ol>
+      <p>Power Query reads JSON numbers as floats, so an ID past 15 digits can lose digits before it reaches a cell. If your IDs are that long, ask for them as strings or use another method.</p>
+
+      <h3>Method 3: Python and pandas</h3>
+      <pre class="lp-code">import json
+import pandas as pd
+
+with open('orders.json') as f:
+    orders = json.load(f)['orders']
+
+order_sheet = pd.json_normalize(orders).drop(columns='items')
+item_sheet = pd.json_normalize(
+    orders, record_path='items', meta=['id'], meta_prefix='order_'
+)
+
+# Text cells keep every digit. Number cells keep 15.
+order_sheet['id'] = order_sheet['id'].astype(str)
+item_sheet['order_id'] = item_sheet['order_id'].astype(str)
+
+with pd.ExcelWriter('orders.xlsx') as writer:
+    order_sheet.to_excel(writer, sheet_name='orders', index=False)
+    item_sheet.to_excel(writer, sheet_name='items', index=False)</pre>
+      <p>This needs the <code>pandas</code> and <code>openpyxl</code> packages. Add one <code>json_normalize</code> call for each extra list.</p>
+
+      <h2>Join the sheets back in Excel</h2>
+      <p>With <code>order_id</code> in column A of the items sheet, this finds the status of each item's order:</p>
+      <pre class="lp-code">=XLOOKUP(A2, orders!A:A, orders!B:B)</pre>
+      <p><strong>Do not use COUNTIF or SUMIF on long IDs.</strong> These functions turn text that looks like a number back into a number, so they compare only the first 15 digits. In the example above, they treat both orders as the same order. To count exact matches, compare the cells directly:</p>
+      <pre class="lp-code">=SUMPRODUCT(--(A2:A100=A2))</pre>
+
+      <h2>Common questions</h2>
+      <h3>Why does Excel show 1.23457E+18?</h3>
+      <p>The cell holds a number, and <a href="https://learn.microsoft.com/en-us/office/troubleshoot/excel/last-digits-changed-to-zeros" rel="noreferrer">Excel keeps only 15 significant digits</a>. The rest become zeros, and you cannot get them back from that cell. The ID must be text before it reaches Excel. <a href="./json-parse-long-ids.html">Long IDs have the same problem in code</a>.</p>
+      <h3>What happens to a plain list, such as "tags": ["a", "b"]?</h3>
+      <p>A list of plain values does not need a sheet. jsonloupe joins it into one cell: <code>a; b</code>.</p>
+      <h3>What if the parent has no ID?</h3>
+      <p>jsonloupe adds a <code>_parent_row</code> column that holds the row of the parent, so the sheets still join.</p>
+      <h3>How many rows fit on a sheet?</h3>
+      <p>An Excel sheet holds 1,048,576 rows, including the heading. jsonloupe tells you before it writes the file if a list is too long for one sheet.</p>
+
+      <p class="sp-try"><strong>Try it on your own file.</strong> The converter runs in your browser, with no account and no upload. <a href="./json-to-excel.html">Open the converter →</a></p>
+
+      <h2>More guides</h2>
+      <ul>
+        <li><a href="./json-parse-long-ids.html">Why JSON.parse rounds long IDs, and how to fix it</a></li>
+        <li><a href="./open-large-json-file.html">How to open a large JSON file</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="lp-footer">
+    <span>jsonloupe — MIT</span>
+    <span class="lp-spacer"></span>
+    <a href="./">app</a>
+    <a href="./json-to-excel.html">json to excel</a>
+    <a href="./json-to-csv.html">json to csv</a>
+    <a href="./large-json-viewer.html">large files</a>
+    <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+  </footer>
+</body>
+</html>

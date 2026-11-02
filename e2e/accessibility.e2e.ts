@@ -31,6 +31,31 @@ test('landing has no detectable WCAG A or AA violations', async ({ page }) => {
   await expectNoWcagViolations(page);
 });
 
+const guides = ['/json-parse-long-ids.html', '/nested-json-to-excel.html', '/open-large-json-file.html'];
+
+test('the guide pages have no detectable WCAG A or AA violations in light or dark', async ({ page }) => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const path of guides) {
+      await page.goto(path);
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      await expectNoWcagViolations(page);
+    }
+  }
+});
+
+test('a guide page keeps its long numbers and tables inside a phone-width page', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  for (const path of guides) {
+    await page.goto(path);
+    const [scrolled, shown] = await page.evaluate(() => [
+      document.documentElement.scrollWidth,
+      document.documentElement.clientWidth,
+    ]);
+    expect(scrolled, path).toBeLessThanOrEqual(shown);
+  }
+});
+
 test('tree and code workflows are named and keyboard operable', async ({ page }) => {
   await openSample(page);
   await expectNoWcagViolations(page);
