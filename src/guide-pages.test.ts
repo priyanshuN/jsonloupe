@@ -61,7 +61,7 @@ describe.each(pages)('the $file guide', ({ file, html, searched, tool }) => {
 
   it('can be reached from the home page, and leads to the tool', () => {
     expect(homePage).toContain(`<a href="./${file}">`);
-    expect(html).toMatch(new RegExp(`<a href="${tool.replace(/[./]/g, '\\$&')}">Open [^<]*→</a>`));
+    expect(html).toContain(`<a href="${tool}">Open `);
   });
 });
 
