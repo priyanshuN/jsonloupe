@@ -2377,6 +2377,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    overflows. A short token that must not split (`[0 … 9999]`, which read as two
    fragments of code with prose between them) takes .lp-nobr instead. */
 .lp-cell code { font: var(--fs-body) var(--mono); color: var(--text); }
+.lp-cell a { color: var(--accent); }
 /* Evidence on the flagship card: the same int64 twice, exact then as a float
    parser returns it — stacked so the last digit's drift is the whole story.
    Scoped under .lp-cell because it IS a cell paragraph: `.lp-cell p` outranked
@@ -2462,6 +2463,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
 /* footer — shared with the spec page */
 .lp-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 20px;
   padding: 22px 40px;
@@ -2523,7 +2525,7 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
   /* same min-content trap: the lens strip's nowrap document line must clip
      inside the hero column, not prop it open past the viewport */
   .lp-hero > * { min-width: 0; }
-  .lp-footer { padding: 20px 24px; flex-wrap: wrap; }
+  .lp-footer { padding: 20px 24px; }
 }
 
 /* ---------- spec page (spec.html) ---------- */
@@ -2580,6 +2582,46 @@ a.brand:hover .brand-loupe { text-decoration: underline; text-underline-offset: 
    leading for the same reasons as the landing's card titles (.lp-cell h3). */
 .sp-row h2 { margin: 0; font: 600 17px/1.3 var(--display); letter-spacing: -0.3px; text-wrap: balance; }
 .sp-row p { margin: 0; color: var(--text-dim); font-size: var(--fs-base); line-height: 1.65; text-wrap: pretty; }
+
+/* ---------- guide pages (json-parse-long-ids.html and its two neighbours) ---------- */
+
+/* The spec page's frame with a reading measure. A guide is read top to bottom,
+   not scanned, so its text is --text rather than the spec rows' dimmed tone. */
+.sp-guide { width: min(740px, 100%); }
+.sp-intro code { font: var(--fs-code) var(--mono); }
+.sp-date { display: block; margin-top: var(--gap-3); color: var(--text-faint); font: var(--fs-chip) var(--mono); }
+.sp-prose h2 { margin: 44px 0 var(--gap-3); font: 600 20px/1.3 var(--display); letter-spacing: -0.5px; text-wrap: balance; }
+.sp-prose h3 { margin: 28px 0 var(--gap-2); font: 600 17px/1.3 var(--display); letter-spacing: -0.3px; text-wrap: balance; }
+.sp-prose p, .sp-prose li {
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.65;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+.sp-prose p { margin: 0 0 var(--gap-3); }
+.sp-prose ul, .sp-prose ol { margin: 0 0 var(--gap-3); padding-left: 22px; }
+.sp-prose li { margin-bottom: var(--gap-2); }
+.sp-prose code { font: var(--fs-body) var(--mono); }
+.sp-prose strong { font-weight: 700; }
+.sp-prose a { color: var(--accent); }
+.sp-prose .lp-code { margin: var(--gap-3) 0 var(--gap-4); }
+/* The wrapper scrolls, the same phone-width contract as .lp-code: a wide table
+   moves inside its own box rather than widening the page. */
+.sp-table-wrap { margin: var(--gap-3) 0 var(--gap-4); overflow-x: auto; }
+.sp-table { width: 100%; border-collapse: collapse; font-size: var(--fs-body); line-height: 1.5; }
+.sp-table th, .sp-table td { padding: var(--gap-2) var(--gap-3); border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.sp-table th { color: var(--text-dim); font-weight: 700; }
+.sp-table td:first-child, .sp-table th:first-child { padding-left: 0; }
+/* A drawn sheet: cells are data, so they take the mono face the app shows data in. */
+.sp-data { font-family: var(--mono); }
+.sp-try {
+  margin: 44px 0 0;
+  padding: var(--gap-4) 18px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-lg);
+  background: var(--bg-elevated);
+}
 
 @media (max-width: 760px) {
   /* The mono nav earns its width on a desktop; on a phone it was three rows

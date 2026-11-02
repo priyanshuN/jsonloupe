@@ -10,5 +10,8 @@ SPDX-License-Identifier: MIT -->
   <url><loc>https://jsonloupe.dev/large-json-viewer.html</loc></url>
   <url><loc>https://jsonloupe.dev/jsonl-viewer.html</loc></url>
   <url><loc>https://jsonloupe.dev/json-to-csv.html</loc></url>
+  <url><loc>https://jsonloupe.dev/json-parse-long-ids.html</loc></url>
+  <url><loc>https://jsonloupe.dev/nested-json-to-excel.html</loc></url>
+  <url><loc>https://jsonloupe.dev/open-large-json-file.html</loc></url>
   <url><loc>https://jsonloupe.dev/spec.html</loc></url>
 </urlset>

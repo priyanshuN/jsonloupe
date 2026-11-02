@@ -1,0 +1,167 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/json-parse-long-ids.html" />
+  <!-- A guide page: it answers a question people type into a search box, the
+       long way, and ends at the tool. src/guide-pages.test.ts runs the numbers
+       this page quotes. -->
+  <title>Why JSON.parse Rounds Long IDs, and How to Fix It — jsonloupe</title>
+  <meta name="description" content="JSON.parse turns 9007199254740993 into 9007199254740992 with no error. Why long IDs change, which tools do it, and how to keep every digit." />
+  <meta property="og:title" content="Why JSON.parse rounds long IDs, and how to fix it" />
+  <meta property="og:description" content="A 64-bit ID goes in and a different number comes out, with no error. Why it happens, which tools do it, and how to keep every digit." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://jsonloupe.dev/json-parse-long-ids.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <!-- A data block, not a script: browsers never run application/ld+json, so
+       script-src 'self' still holds. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "Why JSON.parse rounds long IDs, and how to fix it",
+    "description": "JSON.parse turns 9007199254740993 into 9007199254740992 with no error. Why long IDs change, which tools do it, and how to keep every digit.",
+    "datePublished": "2026-11-02",
+    "dateModified": "2026-11-02",
+    "inLanguage": "en",
+    "image": "https://jsonloupe.dev/og-image.png",
+    "author": { "@type": "Organization", "name": "jsonloupe", "url": "https://jsonloupe.dev/" },
+    "publisher": { "@type": "Organization", "name": "jsonloupe", "url": "https://jsonloupe.dev/" },
+    "mainEntityOfPage": "https://jsonloupe.dev/json-parse-long-ids.html"
+  }
+  </script>
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<body class="spec-page">
+  <header class="sp-header">
+    <a class="sp-brand" href="./" title="jsonloupe">
+      <img src="/favicon.svg" alt="" width="24" height="24" />
+      <span>json<span class="brand-loupe">loupe</span></span>
+    </a>
+    <span class="sp-slash">/</span>
+    <span class="sp-here">guide</span>
+    <span class="sp-spacer"></span>
+    <a class="sp-back" href="./">open the app →</a>
+  </header>
+
+  <main class="sp-main sp-guide">
+    <div class="sp-intro">
+      <h1>Why JSON.parse rounds long IDs, and how to fix it</h1>
+      <p>A 64-bit ID goes into <code>JSON.parse</code> and a different number comes out. There is no error and no warning. This guide shows why it happens, which tools do it, and three ways to keep every digit.</p>
+      <time class="sp-date" datetime="2026-11-02">2 November 2026</time>
+    </div>
+
+    <div class="sp-prose">
+      <h2>The problem in two lines</h2>
+      <pre class="lp-code">JSON.parse('{"id":9007199254740993}').id
+// 9007199254740992</pre>
+      <p>The last digit changed from 3 to 2. A 19-digit ID loses more: <code>1234567890123456789</code> comes back as <code>1234567890123456800</code>.</p>
+      <p>It gets worse when you write the data back, because the wrong number is now saved:</p>
+      <pre class="lp-code">JSON.stringify(JSON.parse('{"id":9007199254740993}'))
+// {"id":9007199254740992}</pre>
+      <p>Nothing fails. The code keeps running with an ID that belongs to another record, or to no record at all.</p>
+
+      <h2>Why it happens</h2>
+      <p>JSON itself has no limit on the size of a number. The text <code>9007199254740993</code> is valid JSON. The limit comes from the program that reads it.</p>
+      <p><code>JSON.parse</code> stores every number as a 64-bit float (IEEE 754 double). A float has 53 bits for the digits, so it can hold every whole number only up to 9,007,199,254,740,991. JavaScript calls that value <code>Number.MAX_SAFE_INTEGER</code>.</p>
+      <p>Past that point the float can hold only every second whole number, then every fourth, and so on. <code>9007199254740993</code> falls between two values a float can hold, so it moves to the nearest one.</p>
+      <p>The JSON standard warns about this. <a href="https://www.rfc-editor.org/rfc/rfc8259#section-6" rel="noreferrer">RFC 8259</a> says that whole numbers outside the range of ±(2<sup>53</sup> − 1) may not read back the same in other software.</p>
+
+      <h2>Where you will meet it</h2>
+      <ul>
+        <li><strong>Database keys.</strong> A <code>bigint</code> primary key goes past the safe range once the values grow large.</li>
+        <li><strong>Snowflake IDs.</strong> Twitter and Discord use 64-bit IDs. Twitter's API added an <code>id_str</code> field beside <code>id</code> for this reason, and <a href="https://discord.com/developers/docs/reference#snowflakes" rel="noreferrer">Discord always sends its IDs as strings</a>.</li>
+        <li><strong>Order and payment numbers.</strong> A 19-digit reference from another system can look like a number but must stay exact.</li>
+        <li><strong>Precise decimals.</strong> <code>1.2345678901234567890</code> reads back as <code>1.2345678901234567</code>.</li>
+      </ul>
+
+      <h2>Which tools round the number</h2>
+      <div class="sp-table-wrap">
+        <table class="sp-table">
+          <thead><tr><th>Tool</th><th>What happens</th><th>How to keep the digits</th></tr></thead>
+          <tbody>
+            <tr><td>JavaScript <code>JSON.parse</code></td><td>Rounds</td><td>Use a reviver or a lossless parser (below)</td></tr>
+            <tr><td>Go <code>json.Unmarshal</code> into <code>any</code></td><td>Rounds, because it uses <code>float64</code></td><td>Call <code>Decoder.UseNumber()</code>, or use an <code>int64</code> field</td></tr>
+            <tr><td>Python <code>json.loads</code></td><td>Whole numbers stay exact, decimals round</td><td>Pass <code>parse_float=Decimal</code></td></tr>
+            <tr><td>jq 1.7 and later</td><td>Keeps the digits until you do maths on them</td><td>Do not calculate with the ID</td></tr>
+            <tr><td>Excel</td><td><a href="https://learn.microsoft.com/en-us/office/troubleshoot/excel/last-digits-changed-to-zeros" rel="noreferrer">Keeps 15 digits, the rest become zeros</a></td><td>Store the ID as text</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>We ran the code rows on 2 November 2026 with Node 24, Go 1.27, Python 3.13 and jq 1.8.2.</p>
+
+      <h2>Three ways to keep every digit in JavaScript</h2>
+      <h3>1. Send the ID as a string</h3>
+      <p>If you own the API, this is the best fix. A string cannot be rounded, and every JSON reader handles it the same way.</p>
+      <pre class="lp-code">{"id": "9007199254740993"}</pre>
+      <p>An ID is a label. You never add two order numbers together, so it loses nothing by being a string.</p>
+
+      <h3>2. Read the source text with a reviver</h3>
+      <p>If you do not own the API, you can read the original text of each number. The reviver of <code>JSON.parse</code> receives it as <code>context.source</code>:</p>
+      <pre class="lp-code">function keepLongIds(key, value, context) {
+  if (typeof value !== 'number' || Number.isSafeInteger(value)) return value;
+  return /^-?\d+$/.test(context.source) ? BigInt(context.source) : value;
+}
+
+const doc = JSON.parse(text, keepLongIds);
+doc.id // 9007199254740993n</pre>
+      <p><code>JSON.stringify</code> refuses a BigInt, so use <code>JSON.rawJSON</code> to write the digits back:</p>
+      <pre class="lp-code">JSON.stringify(doc, (key, value) =&gt;
+  typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value);
+// {"id":9007199254740993}</pre>
+      <p>This works in <a href="https://web-platform-dx.github.io/web-features-explorer/features/json-raw/" rel="noreferrer">Chrome 114, Firefox 135 and Safari 18.4</a> or later, and in Node 24.</p>
+
+      <h3>3. Use a lossless parser</h3>
+      <p>A lossless parser keeps each number as its original text until you ask for it. jsonloupe uses <a href="https://github.com/josdejong/lossless-json" rel="noreferrer">lossless-json</a> for this:</p>
+      <pre class="lp-code">import { parse, stringify } from 'lossless-json';
+
+const doc = parse('{"id":9007199254740993}');
+String(doc.id)  // '9007199254740993'
+stringify(doc)  // '{"id":9007199254740993}'</pre>
+
+      <h2>How to check if your viewer rounds numbers</h2>
+      <p>A JSON viewer built on <code>JSON.parse</code> shows you the rounded number. If you copy that ID into a query or a support ticket, you look up the wrong record. Paste this into your viewer or debug tool:</p>
+      <pre class="lp-code">{"id": 9007199254740993, "price": 1.2345678901234567890}</pre>
+      <p>If you see <code>9007199254740992</code>, the tool changed the value before you read it.</p>
+
+      <h2>Common questions</h2>
+      <h3>Is 9007199254740993 valid JSON?</h3>
+      <p>Yes. The JSON grammar has no limit on the size of a number. Only the program that reads it has one.</p>
+      <h3>Does TypeScript catch this?</h3>
+      <p>No. Types are removed before the code runs. Writing <code>id: bigint</code> on an interface does not change what <code>JSON.parse</code> returns.</p>
+      <h3>Does BigInt fix it?</h3>
+      <p>Only with the steps above. BigInt holds whole numbers of any size, but <code>JSON.parse</code> never creates one, and <code>JSON.stringify</code> throws “Do not know how to serialize a BigInt”.</p>
+
+      <p class="sp-try"><strong>Check your own file.</strong> jsonloupe shows every number exactly as the file has it, and nothing is uploaded. <a href="./">Open jsonloupe →</a></p>
+
+      <h2>More guides</h2>
+      <ul>
+        <li><a href="./nested-json-to-excel.html">How to convert nested JSON to Excel with multiple sheets</a></li>
+        <li><a href="./open-large-json-file.html">How to open a large JSON file</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="lp-footer">
+    <span>jsonloupe — MIT</span>
+    <span class="lp-spacer"></span>
+    <a href="./">app</a>
+    <a href="./json-editor.html">json editor</a>
+    <a href="./json-diff.html">json diff</a>
+    <a href="./large-json-viewer.html">large files</a>
+    <a href="./json-to-excel.html">json to excel</a>
+    <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+  </footer>
+</body>
+</html>

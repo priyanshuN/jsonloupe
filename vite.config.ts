@@ -98,6 +98,10 @@ export default defineConfig({
         jsonlViewer: join(root, 'jsonl-viewer.html'),
         // The converter's CSV twin of json-to-excel.html (public/converter-landing.js).
         jsonToCsv: join(root, 'json-to-csv.html'),
+        // Guides: the long answer to one question, ending at the tool.
+        jsonParseLongIds: join(root, 'json-parse-long-ids.html'),
+        nestedJsonToExcel: join(root, 'nested-json-to-excel.html'),
+        openLargeJsonFile: join(root, 'open-large-json-file.html'),
       },
       output: {
         // CodeMirror reaches the page only through the lazy ./code and

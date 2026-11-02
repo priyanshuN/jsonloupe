@@ -30,6 +30,16 @@ reusable document id. The MCP server makes no network calls.
 - [README](https://github.com/priyanshuN/jsonloupe#readme): overview, screenshots,
   and local usage
 
+## Guides
+
+- [Why JSON.parse rounds long IDs](https://jsonloupe.dev/json-parse-long-ids.html):
+  why 9007199254740993 reads back as 9007199254740992, which tools do it, and how
+  to keep every digit
+- [Nested JSON to Excel with multiple sheets](https://jsonloupe.dev/nested-json-to-excel.html):
+  one sheet per list joined by ID, with jsonloupe, Power Query or pandas
+- [How to open a large JSON file](https://jsonloupe.dev/open-large-json-file.html):
+  what to use at each size, from a browser viewer to jq, ijson and JSONL
+
 ## Code
 
 - [Source repository](https://github.com/priyanshuN/jsonloupe): MIT, 300+ tests
