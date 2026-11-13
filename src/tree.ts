@@ -10,6 +10,7 @@
 
 import type { Row } from './protocol';
 import { appendMarked, makeMatcher, type Matcher } from './highlight';
+import { isComposingKey } from './ime';
 
 // The optional members are CAPABILITIES the host grants this tree, not options:
 // a row offers `tbl` only where something can open a table, and a value is
@@ -199,10 +200,14 @@ export class VirtualTree {
     };
     input.addEventListener('keydown', (e) => {
       e.stopPropagation(); // keep tree j/k + global shortcuts out of the input
+      // While an IME composes, Enter confirms its word and Escape cancels its
+      // word. Neither commits or abandons the edit (see ime.ts).
       if (e.key === 'Enter') {
         e.preventDefault();
+        if (isComposingKey(e)) return;
         void finish(true);
       } else if (e.key === 'Escape') {
+        if (isComposingKey(e)) return;
         e.preventDefault();
         void finish(false);
       }

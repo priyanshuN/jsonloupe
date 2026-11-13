@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Priyanshu Nandan
 // SPDX-License-Identifier: MIT
 import { appendMarked, makeMatcher, type Matcher } from './highlight';
+import { isComposingKey } from './ime';
 
 // Command palette (⌘K / Ctrl K): one field that reaches every action the
 // workbench has and every document in recents, by typing a few letters of it.
@@ -105,6 +106,9 @@ export class CommandPalette {
   ) {
     input.addEventListener('input', () => this.filter());
     input.addEventListener('keydown', (e) => {
+      // While an IME composes, the arrows walk ITS candidate list and Enter
+      // confirms its word; the palette's own list stays still (see ime.ts).
+      if (isComposingKey(e)) return;
       if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
         e.preventDefault();
         this.move(1);
