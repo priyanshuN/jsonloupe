@@ -20,6 +20,7 @@ import type {
   SpecError,
   Warning,
 } from './convert/index';
+import { isComposingKey } from './ime';
 
 /** A field a column could read, with what detection saw in it. */
 interface SourceOption {
@@ -502,6 +503,7 @@ export class ConvertView {
     this.els.mappingName.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
       e.preventDefault();
+      if (isComposingKey(e)) return;
       void this.saveMapping();
     });
     this.els.forget.addEventListener('click', () => void this.forgetMapping());

@@ -135,6 +135,7 @@ import { parsePlaybook, serializePlaybook, looksLikePlaybook, playbookRoomError,
 import { unknownQueryFields } from './query-fields';
 import { createWorkerChannel, type WorkerChannel } from './worker-channel';
 import { CommandPalette, type PaletteCommand } from './palette';
+import { isComposingKey } from './ime';
 import { appendMarked, makeMatcher, type Matcher } from './highlight';
 
 // A redeploy replaces every hashed asset on Pages, so a tab loaded before it
@@ -4031,6 +4032,9 @@ async function findSameValue(id: number): Promise<void> {
 }
 
 searchBox.addEventListener('keydown', (e) => {
+  // While an IME composes, Enter confirms a word and Escape cancels it. Neither
+  // is a request to search or to close the panel (see ime.ts).
+  if (isComposingKey(e)) return;
   if (e.key === 'Enter') {
     clearTimeout(liveSearchTimer);
     void runSearch();
@@ -4327,10 +4331,10 @@ diffBody.addEventListener('click', async (e) => {
 $('#diff-rerun').addEventListener('click', rerunDiff);
 $('#diff-close').addEventListener('click', () => showTree());
 diffIgnore.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') rerunDiff();
+  if (e.key === 'Enter' && !isComposingKey(e)) rerunDiff();
 });
 diffKey.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') rerunDiff();
+  if (e.key === 'Enter' && !isComposingKey(e)) rerunDiff();
 });
 
 // ---------- semantic side-by-side compare ----------
@@ -5879,6 +5883,8 @@ askRunBtn.addEventListener('click', () => void runAsk());
 askBox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
+    // An IME's confirming Enter must not send a half-typed question to a model.
+    if (isComposingKey(e)) return;
     void runAsk();
   }
 });
@@ -5891,6 +5897,7 @@ askQueryEdit.addEventListener('input', () => {
 askQueryEdit.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
+    if (isComposingKey(e)) return;
     void commitEditedQuery();
   }
 });
@@ -7969,6 +7976,7 @@ pbCheckQuery.addEventListener('input', () => {
 pbCheckQuery.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
+  if (isComposingKey(e)) return;
   void measureDraft(true);
 });
 for (const field of [pbCheckExpectation, pbCheckCount, pbCheckCountMax]) {
