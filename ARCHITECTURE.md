@@ -25,8 +25,9 @@ flowchart LR
 
 Vite builds `index.html`, `json-to-excel.html`, `json-to-csv.html`, `spec.html`,
 and the search landing pages (`json-editor.html`, `json-diff.html`,
-`large-json-viewer.html`, `jsonl-viewer.html`)
-into a static site. `src/main.ts` owns application coordination and DOM composition.
+`large-json-viewer.html`, `jsonl-viewer.html`), and the guides
+(`json-parse-long-ids.html`, `nested-json-to-excel.html`,
+`open-large-json-file.html`) into a static site. `src/main.ts` owns application coordination and DOM composition.
 `src/worker.ts` owns the parsed document and performs expensive parsing,
 searching, querying, diffing, compression, profiling, and conversion away from
 the UI thread. Messages crossing that boundary are defined in

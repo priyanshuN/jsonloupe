@@ -105,6 +105,22 @@ describe('CommandPalette', () => {
     expect(palette.isOpen).toBe(false);
   });
 
+  it('leaves Enter and the arrows to an IME while it composes a word', () => {
+    palette.open();
+    // A Japanese, Chinese or Korean keyboard walks ITS candidates with the
+    // arrows and confirms one with Enter; none of that is for the palette.
+    key('ArrowDown', { isComposing: true });
+    expect(selected()).toBe('tree');
+    key('Enter', { isComposing: true });
+    key('Enter', { keyCode: 229 }); // Safari's late confirming Enter
+    expect(cmds[0].run).not.toHaveBeenCalled();
+    expect(palette.isOpen).toBe(true);
+    // Composition over: the same keys are the palette's again.
+    key('ArrowDown');
+    key('Enter');
+    expect(cmds[1].run).toHaveBeenCalledOnce();
+  });
+
   it('runs a clicked row, and hover moves the highlight', () => {
     palette.open();
     const opt = list.querySelectorAll<HTMLElement>('[role="option"]')[2];

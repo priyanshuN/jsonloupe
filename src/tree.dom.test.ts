@@ -240,6 +240,34 @@ describe('VirtualTree inline editing', () => {
     await vi.waitFor(() => expect(onEditCommit).toHaveBeenCalledTimes(2));
     expect(onEditCommit).toHaveBeenLastCalledWith(3, 2, '"after"');
   });
+
+  it('keeps the edit open while an IME composes a word', async () => {
+    const getEditText = vi.fn(async () => '"before"');
+    const onEditCommit = vi.fn<NonNullable<TreeCallbacks['onEditCommit']>>().mockResolvedValue({ ok: true });
+    const { layer, inner } = harness({ getEditText, onEditCommit });
+    inner.total = 3;
+    inner.lastRows = [leafRow];
+    const row = inner.rowEl(leafRow);
+    layer.appendChild(row);
+
+    await inner.startEdit(row, leafRow);
+    const input = row.querySelector<HTMLInputElement>('.val-edit')!;
+    const press = (init: KeyboardEventInit) =>
+      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+    input.value = '"日本"';
+    // Enter confirms the IME's word and Escape cancels the IME's word. Neither
+    // commits nor abandons the edit, in the standard form or in Safari's.
+    press({ key: 'Enter', isComposing: true });
+    press({ key: 'Enter', keyCode: 229 });
+    press({ key: 'Escape', isComposing: true });
+    await Promise.resolve();
+    expect(onEditCommit).not.toHaveBeenCalled();
+    expect(row.querySelector('.val-edit')).toBe(input);
+
+    press({ key: 'Enter' });
+    await vi.waitFor(() => expect(onEditCommit).toHaveBeenCalledOnce());
+    expect(onEditCommit).toHaveBeenLastCalledWith(3, 2, '"日本"');
+  });
 });
 
 describe('VirtualTree object summaries and truncation', () => {

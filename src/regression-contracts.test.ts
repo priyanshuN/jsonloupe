@@ -476,6 +476,20 @@ describe('interactive UI regression contracts', () => {
     }
   });
 
+  it('holds every Enter-to-commit field in main.ts while an IME composes', () => {
+    // main.ts cannot be loaded in happy-dom, so the six fields are pinned by
+    // name here; ime.test.ts and the palette, tree and convert DOM tests cover
+    // the behaviour itself. A field added to main.ts with its own Enter
+    // handler belongs in this list.
+    for (const field of ['searchBox', 'diffIgnore', 'diffKey', 'askBox', 'askQueryEdit', 'pbCheckQuery']) {
+      const start = mainSource.indexOf(`\n${field}.addEventListener('keydown'`);
+      expect(start, field).toBeGreaterThan(-1);
+      const handler = mainSource.slice(start, mainSource.indexOf('\n});', start));
+      expect(handler, field).toContain('Enter');
+      expect(handler, field).toContain('isComposingKey(e)');
+    }
+  });
+
   it('prevents Ask Enter submission and keeps dev-only key-file advice out of production', () => {
     const askEnter = mainSource.match(/askBox\.addEventListener\('keydown'[\s\S]*?\n\}\);/)?.[0] ?? '';
     expect(askEnter).toContain("e.key === 'Enter'");

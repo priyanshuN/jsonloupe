@@ -515,6 +515,11 @@ describe('converter view workflow', () => {
     expect(h.toasts).toHaveBeenCalledWith('name this mapping before saving it');
 
     h.els.mappingName.value = 'renamed mapping';
+    // The Enter that confirms an IME word names nothing yet.
+    h.els.mappingName.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true }));
+    h.els.mappingName.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, keyCode: 229 }));
+    await Promise.resolve();
+    expect(h.callbacks.saveMapping).not.toHaveBeenCalled();
     h.els.mappingName.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.waitFor(() => {
       expect(h.callbacks.saveMapping).toHaveBeenCalled();

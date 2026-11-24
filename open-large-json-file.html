@@ -1,0 +1,154 @@
+<!-- Copyright (c) 2026 Priyanshu Nandan
+SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'self' https://api.anthropic.com https://openrouter.ai; font-src 'self'; form-action 'self'; frame-src 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
+  <link rel="canonical" href="https://jsonloupe.dev/open-large-json-file.html" />
+  <!-- A guide page: it answers a question people type into a search box, the
+       long way, and ends at the tool. The 200 MB limit is MAX_DOC_BYTES in
+       src/intake.ts. -->
+  <title>How to Open a Large JSON File in Your Browser — jsonloupe</title>
+  <meta name="description" content="Why large JSON files freeze editors and viewers, and how to open them: a browser viewer up to 200 MB, then jq, Python and JSONL for bigger files." />
+  <meta property="og:title" content="How to open a large JSON file" />
+  <meta property="og:description" content="Why big JSON files freeze your tools, and what to use at each size: a browser viewer up to 200 MB, then jq, Python and JSONL." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://jsonloupe.dev/open-large-json-file.html" />
+  <meta property="og:site_name" content="jsonloupe" />
+  <meta property="og:image" content="https://jsonloupe.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="jsonloupe: huge JSON, exact numbers, nothing uploaded. JSON.parse rounds 1234567890123456789 to …800; jsonloupe keeps it exact." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <!-- A data block, not a script: browsers never run application/ld+json, so
+       script-src 'self' still holds. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "How to open a large JSON file",
+    "description": "Why large JSON files freeze editors and viewers, and how to open them: a browser viewer up to 200 MB, then jq, Python and JSONL for bigger files.",
+    "datePublished": "2026-11-02",
+    "dateModified": "2026-11-02",
+    "inLanguage": "en",
+    "image": "https://jsonloupe.dev/og-image.png",
+    "author": { "@type": "Organization", "name": "jsonloupe", "url": "https://jsonloupe.dev/" },
+    "publisher": { "@type": "Organization", "name": "jsonloupe", "url": "https://jsonloupe.dev/" },
+    "mainEntityOfPage": "https://jsonloupe.dev/open-large-json-file.html"
+  }
+  </script>
+  <link rel="stylesheet" href="/src/style.css" />
+  <script src="/prepaint.js"></script>
+</head>
+<body class="spec-page">
+  <header class="sp-header">
+    <a class="sp-brand" href="./" title="jsonloupe">
+      <img src="/favicon.svg" alt="" width="24" height="24" />
+      <span>json<span class="brand-loupe">loupe</span></span>
+    </a>
+    <span class="sp-slash">/</span>
+    <span class="sp-here">guide</span>
+    <span class="sp-spacer"></span>
+    <a class="sp-back" href="./large-json-viewer.html">open the viewer →</a>
+  </header>
+
+  <main class="sp-main sp-guide">
+    <div class="sp-intro">
+      <h1>How to open a large JSON file</h1>
+      <p>You open a big JSON file and the window freezes. This guide explains why that happens and what to use at each file size, from a browser viewer to the command line.</p>
+      <time class="sp-date" datetime="2026-11-02">2 November 2026</time>
+    </div>
+
+    <div class="sp-prose">
+      <h2>What to use at each size</h2>
+      <div class="sp-table-wrap">
+        <table class="sp-table">
+          <thead><tr><th>File size</th><th>To look around</th><th>To pull data out</th></tr></thead>
+          <tbody>
+            <tr><td>Up to 200 MB</td><td>A browser viewer that draws only the visible rows</td><td>Queries in the viewer, or jq</td></tr>
+            <tr><td>Over 200 MB</td><td>Take a sample first, then view that</td><td>jq with <code>--stream</code>, or Python with ijson</td></tr>
+            <tr><td>Many records</td><td>Convert to JSONL and open one part</td><td>Tools that work one line at a time</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Why large JSON files freeze your tools</h2>
+      <p>A size in megabytes does not explain the freeze. Three things do.</p>
+      <ul>
+        <li><strong>The whole file must be read first.</strong> JSON has no index. A program cannot know where a value ends until it reads what comes before it.</li>
+        <li><strong>Parsed data is bigger than the text.</strong> In a browser, the objects take about 4 to 6 times the size of the text. A 200 MB file can need about 1 GB of memory.</li>
+        <li><strong>Drawing every row is slow.</strong> A viewer that makes one page element for each value makes millions of them, and the browser must lay out every one.</li>
+      </ul>
+      <p>Chrome and Node also have a hard limit. One string can hold 536,870,888 characters, so <code>file.text()</code> fails on a file of about 512 MB, whatever memory you have.</p>
+      <p>Code editors have a similar problem. VS Code turns off features such as folding and highlighting on very large files, so you can open the file but you cannot explore it well.</p>
+
+      <h2>Files up to 200 MB: use a viewer that draws only what you see</h2>
+      <p>A virtual list draws the rows on your screen and nothing else, so the number of rows in the file stops mattering. A list of five million items opens as pages of 10,000, and the page stays responsive.</p>
+      <ol>
+        <li>Open the <a href="./large-json-viewer.html">large JSON viewer</a>.</li>
+        <li>Choose your <code>.json</code>, <code>.jsonl</code> or <code>.zst</code> file. The file is read in your browser and is not uploaded.</li>
+        <li>Look at the size on each closed branch to find the part that makes the file big.</li>
+        <li>Search by text, or run a short query to count and group records.</li>
+      </ol>
+      <p>In our test, a 108 MB file with 600,000 records opened in a few seconds on a laptop. jsonloupe refuses a document over about 200 MB and says so, because a browser tab cannot hold more as live objects.</p>
+
+      <h2>Files over 200 MB: stream with jq</h2>
+      <p>The plain form of <a href="https://jqlang.org/" rel="noreferrer">jq</a> reads the whole file into memory. The <code>--stream</code> option reads it piece by piece.</p>
+      <p>This prints the first 2 items of the <code>tasks</code> list, without loading the rest:</p>
+      <pre class="lp-code">jq -cn --stream '
+  limit(2; fromstream(2 | truncate_stream(
+    inputs | select(.[0][0] == "tasks"))))
+' big.json</pre>
+      <p>If the top of the file is one big list, this writes one record per line. That format is JSONL, which is the next section:</p>
+      <pre class="lp-code">jq -cn --stream 'fromstream(1 | truncate_stream(inputs))' big.json &gt; big.jsonl</pre>
+
+      <h2>Many records: convert to JSONL and split</h2>
+      <p>JSONL holds one JSON record on each line, so normal command-line tools can cut it. Take a sample, or split the file into parts:</p>
+      <pre class="lp-code">head -n 1000 big.jsonl &gt; sample.jsonl
+split -l 100000 big.jsonl part-</pre>
+      <p>Each part is small enough to open in the <a href="./jsonl-viewer.html">JSONL viewer</a>.</p>
+
+      <h2>Pull data out with Python</h2>
+      <p>The <a href="https://pypi.org/project/ijson/" rel="noreferrer">ijson</a> package reads a file as a stream, so memory use stays low. This prints the first 5 tasks:</p>
+      <pre class="lp-code">from itertools import islice
+import ijson
+
+with open('big.json', 'rb') as f:
+    for task in islice(ijson.items(f, 'tasks.item'), 5):
+        print(task)</pre>
+      <p>Python's own <code>json.load</code> reads the whole file into memory, so it can run out of memory on the same file.</p>
+
+      <h2>Common questions</h2>
+      <h3>How big can a JSON file be?</h3>
+      <p>The JSON format has no size limit. Each tool sets its own limit, usually from memory.</p>
+      <h3>Can I open a compressed JSON file?</h3>
+      <p>jsonloupe opens Zstandard <code>.zst</code> files directly and decodes them in your browser. The 200 MB limit applies to the decoded document.</p>
+      <h3>Why do the IDs in my large file look wrong?</h3>
+      <p>Many viewers round numbers past 15 or 16 digits. <a href="./json-parse-long-ids.html">This guide explains why, and how to keep every digit</a>.</p>
+      <h3>Is my file uploaded?</h3>
+      <p>No. jsonloupe has no server to send it to. It keeps working with your wifi off.</p>
+
+      <p class="sp-try"><strong>Open your file now.</strong> It stays on your computer, and there is no account to make. <a href="./large-json-viewer.html">Open the viewer →</a></p>
+
+      <h2>More guides</h2>
+      <ul>
+        <li><a href="./json-parse-long-ids.html">Why JSON.parse rounds long IDs, and how to fix it</a></li>
+        <li><a href="./nested-json-to-excel.html">How to convert nested JSON to Excel with multiple sheets</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="lp-footer">
+    <span>jsonloupe — MIT</span>
+    <span class="lp-spacer"></span>
+    <a href="./">app</a>
+    <a href="./large-json-viewer.html">large files</a>
+    <a href="./jsonl-viewer.html">jsonl viewer</a>
+    <a href="./json-editor.html">json editor</a>
+    <a href="https://github.com/priyanshuN/jsonloupe" rel="noreferrer">github</a>
+  </footer>
+</body>
+</html>
